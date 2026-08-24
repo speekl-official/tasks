@@ -19,7 +19,6 @@ import {
   siteUrl,
   standardName,
 } from "@/lib/shared";
-import { staticFunctionMiddleware } from "@tanstack/start-static-server-functions";
 import { useFumadocsLoader } from "fumadocs-core/source/client";
 import { Suspense, use } from "react";
 import { useMDXComponents } from "@/components/mdx";
@@ -56,11 +55,16 @@ export const Route = createFileRoute("/docs/$")({
   },
 });
 
+// No `staticFunctionMiddleware` here on purpose. It answers this loader from a
+// prebuilt `/__tsr/staticServerFnCache/*.json`, which only a static host can
+// serve: nitro's node server resolves public assets from a manifest baked
+// before prerendering writes those files, so it 404s them and the client parses
+// the HTML shell as JSON. The site is served by that node server, so the
+// function runs live instead.
 const loader = createServerFn({
   method: "GET",
 })
   .validator((slugs: string[]) => slugs)
-  .middleware([staticFunctionMiddleware])
   .handler(async ({ data: slugs }) => {
     const page = source.getPage(slugs);
     if (!page) throw notFound();
