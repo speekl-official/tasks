@@ -68,4 +68,26 @@ Never hand-edit `packages/tasks/CHANGELOG.md` or a `version` field — Changeset
 - **This repo dogfoods its own tracker.** Work is tracked in `.tasks/`. Use the CLI: `tasks ready`,
   `tasks claim <id>`, `tasks status <id> DONE`. Run `tasks reindex` afterward — `_index.md` is
   committed and only regenerates on demand.
-- **Don't commit or push.** Dan commits. Leave the working tree with the changes in it.
+- **Commit only when asked.** Otherwise leave the working tree with the changes in it, and never push.
+
+## Commit messages
+
+`<type>: <short message>` — one line, lower case after the colon, no trailing period.
+Never add a `Co-Authored-By` trailer.
+
+| type       | for                                           |
+| ---------- | --------------------------------------------- |
+| `feature`  | new user-facing behavior                      |
+| `fix`      | a bug fix                                     |
+| `docs`     | docs, README, or spec text only               |
+| `refactor` | restructuring with no behavior change         |
+| `test`     | tests only                                    |
+| `perf`     | a performance change                          |
+| `build`    | build setup, packaging, dependencies, Docker  |
+| `ci`       | GitHub Actions and release workflows          |
+| `chore`    | anything else — tooling, config, housekeeping |
+| `revert`   | reverting an earlier commit                   |
+
+```
+fix: prerender empty in the docs Docker build
+```
