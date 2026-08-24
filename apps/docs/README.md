@@ -14,6 +14,20 @@ pnpm lint           # oxlint
 
 From the repo root, `turbo` fans these out with everything else.
 
+## Docker
+
+`Dockerfile` builds the site and runs its Nitro server. The build context is the repo
+root — pnpm installs from the lockfile, which lives there:
+
+```sh
+docker build -f apps/docs/Dockerfile -t agenttasks-docs .
+docker run --rm -p 3000:3000 agenttasks-docs
+```
+
+Unlike `pnpm start`, which serves only the prerendered `.output/public`, the image runs
+`.output/server/index.mjs`, so `/og/*.png` — rendered per request rather than written to
+the build output — works too. `PORT` (default 3000) and `HOST` are read at startup.
+
 ## Layout
 
 ```

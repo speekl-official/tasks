@@ -1,0 +1,19 @@
+# Scoped to `-f apps/docs/Dockerfile`; the build context is the repo root.
+**/node_modules
+**/.output
+**/.nitro
+**/.turbo
+**/.tanstack
+**/.source
+**/.cache
+**/.vercel
+**/dist
+**/coverage
+**/.DS_Store
+.git
+.github
+.changeset
+.claude
+.tasks
+packages/tasks/src
+packages/tasks/test
