@@ -15,7 +15,7 @@
 # Matches the version CI builds on. The floor is the root `engines.node`.
 ARG NODE_VERSION=24
 
-FROM node:${NODE_VERSION}-slim AS base
+FROM node:${NODE_VERSION} AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -42,19 +42,27 @@ ENV NODE_OPTIONS=--dns-result-order=ipv4first
 COPY apps/docs apps/docs
 RUN pnpm --filter docs build
 
-# The server bundle leaves `satori` and `@resvg/resvg-js` external (see the
-# `rollupConfig` note in vite.config.ts), so the runtime needs a real
-# node_modules — production deps of `docs` alone, resolved from the lockfile.
-FROM manifests AS prod-deps
-RUN pnpm install --frozen-lockfile --filter docs --prod
+# Reduce node_modules to production deps in place, rather than installing them
+# again in a stage of their own: a second install downloads the whole tree a
+# second time — in parallel with the first, which is enough to OOM a build
+# container. Everything is already in the store here, so this is offline and
+# takes about a second. `CI=true` because pnpm rebuilds the modules directory
+# and refuses to without a TTY.
+RUN CI=true pnpm install --frozen-lockfile --filter docs --prod
 
-# Built from `prod-deps` on purpose: pnpm's node_modules is a tree of relative
-# symlinks into the virtual store at /repo/node_modules/.pnpm, and keeping the
-# layout in place is what makes those resolve.
-FROM prod-deps AS runner
+# A clean base: the runtime needs node_modules and `.output`, not pnpm, the
+# package store, or the sources. The `/repo` layout has to be preserved, since
+# pnpm's node_modules is a tree of relative symlinks into the virtual store at
+# `/repo/node_modules/.pnpm` — the server bundle leaves `satori` and
+# `@resvg/resvg-js` external (see the `rollupConfig` note in vite.config.ts),
+# and that is how they resolve.
+FROM node:${NODE_VERSION} AS runner
+WORKDIR /repo
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
+COPY --from=build /repo/node_modules node_modules
+COPY --from=build /repo/apps/docs/node_modules apps/docs/node_modules
 COPY --from=build /repo/apps/docs/.output apps/docs/.output
 WORKDIR /repo/apps/docs
 USER node
