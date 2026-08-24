@@ -1,0 +1,302 @@
+---
+title: Commands
+description: Every command, flag, exit code, and failure mode.
+icon: Terminal
+---
+
+<Callout type="info" title="This page describes the reference implementation">
+  It documents the `@speekl/tasks` CLI specifically. The parts that are
+  *contract* — exit codes and `--json` shapes — are defined normatively in [CLI
+  contract](/docs/spec/cli); command names and flags are this tool's own
+  surface.
+</Callout>
+
+Every command accepts `--json`. Under `--json`, successful output goes to **stdout** and
+errors go to **stderr** as `{"error": {"code", "message", "details"}}`. See the
+[JSON contract](/docs/reference/json-contract) for shapes and exit codes.
+
+Global flags:
+
+| Flag              | Effect                                                   |
+| ----------------- | -------------------------------------------------------- |
+| `-v`, `--version` | Print the CLI version and exit `0`.                      |
+| `-h`, `--help`    | Print help for the program or a subcommand and exit `0`. |
+| `--json`          | Emit machine-readable JSON, including for errors.        |
+
+## `tasks init`
+
+Scaffold a `.tasks/` directory in the current project.
+
+```sh
+tasks init [--force] [--no-skill] [--json]
+```
+
+| Flag         | Effect                                                                               |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `--force`    | Reinitialize even if `.tasks/` already exists. Existing files are **not** clobbered. |
+| `--no-skill` | Skip installing the agent skill into `.claude/skills/tasks/`.                        |
+
+Creates `config.yml`, `README.md`, `.gitignore`, and the `.locks/` directory, then
+installs the [agent skill](/docs/guides/agent-workflow).
+
+**Fails with exit `4`** if `.tasks/` already exists and `--force` was not passed.
+
+<Callout title="Ask before running this">
+  Creating `.tasks/` is a project-level decision. An agent should ask rather
+  than run `init` as a side effect of a question about work.
+</Callout>
+
+## `tasks new`
+
+Create a task from the template, in a given phase.
+
+```sh
+tasks new <phase> <name...> [--id <id>] [--json]
+```
+
+| Argument / flag | Meaning                                                 |
+| --------------- | ------------------------------------------------------- |
+| `<phase>`       | Phase directory. Created if it does not exist.          |
+| `<name...>`     | Human-readable title. Unquoted words are joined.        |
+| `--id <id>`     | Explicit id. Defaults to a kebab-case slug of the name. |
+
+```sh
+tasks new auth-rework "Design token schema"
+tasks new auth-rework Design token schema --id token-schema
+```
+
+The body is scaffolded with `## Description`, `## Acceptance criteria`, and `## Notes`.
+Fill it in with a normal file edit at the `path` returned under `--json`.
+
+**Fails with exit `2`** if the id is not lowercase kebab-case, or the phase is not a
+valid slug. **Fails with exit `4`** if the id is already taken by a live _or archived_
+task — archived ids stay reserved so a new task can never silently inherit an archived
+one's inbound dependencies.
+
+## `tasks list`
+
+List tasks, filterable.
+
+```sh
+tasks list [-p <phase>] [-a] [-s <status>] [--json]
+```
+
+| Flag                      | Effect                                       |
+| ------------------------- | -------------------------------------------- |
+| `-p`, `--phase <phase>`   | Restrict to one phase.                       |
+| `-a`, `--all`             | Search every phase, ignoring `active_phase`. |
+| `-s`, `--status <status>` | Restrict to one status.                      |
+
+Without `-p` or `-a`, output is scoped to `active_phase` from `config.yml` when it is
+set. If a task you expect is missing, retry with `--all` before concluding it does not
+exist.
+
+**Fails with exit `2`** if `--status` names a status that is not in the configured list.
+
+## `tasks show`
+
+Print one task's metadata, resolved dependencies, and body.
+
+```sh
+tasks show <id> [--json]
+```
+
+Under `--json` this is the richest single-task shape: it adds `title`, `ready`,
+`dependencies[]` (each with `satisfied`, `status`, `reason`), and `body`.
+
+**Fails with exit `3`** if no such task exists.
+
+## `tasks ready`
+
+List unblocked tasks — what can be worked on right now.
+
+```sh
+tasks ready [-p <phase>] [-a] [--json]
+```
+
+A task appears when its status is the `ready` role **and** every dependency is
+satisfied. An empty result is success: exit `0` with `{"count": 0, "tasks": []}`.
+
+```sh
+tasks ready --json | jq -r '.tasks[0].id // empty'
+```
+
+## `tasks claim`
+
+Take ownership of a task and mark it in progress.
+
+```sh
+tasks claim <id> [--as <who>] [--force] [--json]
+```
+
+| Flag         | Effect                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| `--as <who>` | Identity to record. Defaults to `$TASKS_ACTOR`, then `$USER` / `$USERNAME`, then `unknown`. |
+| `--force`    | Claim even if dependencies are unsatisfied.                                                 |
+
+Claim is legal from **any** status that can reach the `claimed` role — not just the
+ready one. That is what makes reopening a completed task work (`DONE → IN_PROGRESS`)
+while still recording who took it on.
+
+**Fails with exit `4`** when the task is already claimed, when the transition to the
+claimed role is illegal from its current status, or when a dependency is unsatisfied and
+`--force` was not passed.
+
+<Callout type="warn" title="What --force does and does not override">
+  `--force` overrides **dependencies**, not somebody else's claim. A `CONFLICT`
+  saying a task is already claimed means someone else has it — pick a different
+  task, do not reach for `--force`.
+</Callout>
+
+## `tasks release`
+
+Give up a claimed task and return it to the ready pool. Clears `claimed_by` and
+`claimed_at`.
+
+```sh
+tasks release <id> [--json]
+```
+
+**Fails with exit `4`** if the task is not currently in the claimed status, or if
+`claimed → ready` is not a legal transition under this project's rules.
+
+## `tasks status`
+
+Move a task through its lifecycle, validating the transition.
+
+```sh
+tasks status <id> <STATUS> [--json]
+```
+
+```sh
+tasks status token-schema DONE
+```
+
+Leaving the claimed status releases the claim automatically.
+
+**Fails with exit `2`** if the status is unknown, or if the target is the `claimed`
+role — that case redirects to `tasks claim` so claim metadata can never be bypassed.
+**Fails with exit `4`** if the task already has that status, or the transition is
+illegal; the error's `details.allowed` lists what _is_ legal from here.
+
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
+    "details": {
+      "id": "token-schema",
+      "from": "PENDING",
+      "to": "DONE",
+      "allowed": ["IN_PROGRESS"]
+    }
+  }
+}
+```
+
+## `tasks dep`
+
+Manage dependencies. See [dependencies](/docs/reference/dependencies) for reference
+syntax.
+
+```sh
+tasks dep add <id> <ref>... [--json]
+tasks dep rm  <id> <ref>... [--json]
+tasks dep list <id> [--json]
+```
+
+`add` validates before writing: it refuses a self-reference and a local ref to a task
+that does not exist (exit `2` / `3`), and refuses to introduce a cycle (exit `4`).
+Duplicates are silently ignored rather than appended twice.
+
+`rm` **fails with exit `3`** if the task does not currently depend on one of the given
+refs — removing something that was never there is treated as a mistake, not a no-op.
+
+`list` resolves each dependency and reports whether it is satisfied, plus a `reason`
+when it is not.
+
+## `tasks move`
+
+Reassign a task's phase, relocating the file.
+
+```sh
+tasks move <id> <phase> [--json]
+```
+
+Always use this rather than `mv`: the directory determines the phase, and the move is
+ordered write-then-unlink so a crash leaves a duplicate that `validate` reports rather
+than losing the task. An emptied phase directory is cleaned up.
+
+**Fails with exit `4`** if the task is already in that phase.
+
+## `tasks delete`
+
+Archive a task, or permanently remove it.
+
+```sh
+tasks delete <id> [--force] [--purge] [--json]
+```
+
+| Flag      | Effect                                               |
+| --------- | ---------------------------------------------------- |
+| `--force` | Delete even if other tasks depend on it.             |
+| `--purge` | Permanently remove the file instead of archiving it. |
+
+The default moves the task to `.tasks/.archive/<id>.md`, preserving the originating
+phase in frontmatter — the archive is flat, so the directory can no longer carry it.
+Archived tasks are excluded from every default query, never satisfy a dependency, and
+keep their id reserved.
+
+**Fails with exit `4`** if live tasks depend on it and `--force` was not passed. With
+`--force`, those dependents are reported as `orphaned_dependents` and are now
+permanently blocked — run `tasks validate`.
+
+## `tasks reindex`
+
+Regenerate `_index.md` from task frontmatter.
+
+```sh
+tasks reindex [--json]
+```
+
+`_index.md` is a generated overview. No command reads it, so drift is cosmetic — but it
+is committed, so a stale one misleads reviewers in a diff. Regenerate before committing.
+
+## `tasks validate`
+
+Check tree integrity and report anything that has drifted.
+
+```sh
+tasks validate [--fix] [--json]
+```
+
+| Finding                                                                        | Severity | Fixable by `--fix`                                  |
+| ------------------------------------------------------------------------------ | -------- | --------------------------------------------------- |
+| `filename-mismatch`                                                            | error    | yes — file renamed to match `id`                    |
+| `phase-drift`                                                                  | error    | yes — `phase` rewritten to the containing directory |
+| `stale-index`                                                                  | warning  | yes — `_index.md` regenerated                       |
+| `malformed`                                                                    | error    | no                                                  |
+| `duplicate-id`                                                                 | error    | no                                                  |
+| `unknown-status`                                                               | error    | no                                                  |
+| `malformed-ref`                                                                | error    | no                                                  |
+| `cycle`                                                                        | error    | no                                                  |
+| `dependency-missing` / `dependency-archived` / `dependency-unresolved-project` | warning  | no                                                  |
+
+Errors exit `4`, so CI can gate on them. Warnings do not — a stale `_index.md` is
+deliberately never a build failure, because the index is not a source of truth.
+
+```sh
+tasks validate --json | jq -e '.ok'
+```
+
+## `tasks skill install`
+
+Install the bundled agent skill into `.claude/skills/tasks/`.
+
+```sh
+tasks skill install [--force] [--json]
+```
+
+An existing install is left alone unless `--force`, so local edits survive. Use
+`--force` to refresh after upgrading the CLI. See
+[working with agents](/docs/guides/agent-workflow).

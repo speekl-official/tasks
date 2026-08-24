@@ -1,0 +1,155 @@
+---
+title: Directory layout
+description: Where .tasks/ lives, how an implementation finds it, and what it may contain.
+icon: FolderTree
+---
+
+## Discovery
+
+An implementation MUST locate the project by walking from a starting directory toward
+the filesystem root, testing each ancestor for a directory named `.tasks`. The **first**
+match is the project; the search MUST stop there.
+
+- The directory containing `.tasks/` is the **project root**.
+- An implementation MUST NOT merge a discovered tree with any tree found further up.
+- If no ancestor contains `.tasks/`, the operation MUST fail as _not found_.
+
+<Callout type="info" title="Non-normative">
+  Nearest-wins with no merging is what makes a monorepo package with its own
+  `.tasks/` an independent scope. It matches how git finds `.git/`, so the
+  behavior is already familiar and needs no explanation to users.
+</Callout>
+
+## Contents
+
+```txt
+.tasks/
+  config.yml        OPTIONAL project configuration
+  README.md         OPTIONAL human-facing description
+  .gitignore        OPTIONAL
+  _index.md         OPTIONAL generated overview
+  <phase>/          zero or more phase directories
+    <id>.md         one task
+  .archive/         OPTIONAL archived tasks, flat
+  .locks/           OPTIONAL transient lock files
+```
+
+A `.tasks/` directory containing nothing but phase directories is valid. Every file
+above is OPTIONAL.
+
+### Phase directories
+
+A phase directory name MUST match:
+
+```txt
+^[a-z0-9][a-z0-9._-]*$
+```
+
+Every entry in `.tasks/` that is a directory, is not `.archive` or `.locks`, and whose
+name matches that pattern is a phase. Its name is the **phase** of every task inside it.
+
+An implementation MUST create a phase directory on demand when a task is placed in it,
+and SHOULD remove a phase directory that it empties.
+
+Nested phase directories are not defined by v1. An implementation MUST NOT descend into
+subdirectories of a phase when enumerating tasks.
+
+### Tasks
+
+Each task is one file, directly inside a phase directory, named `<id>.md` where `<id>`
+is that task's `id`. See [task file](/docs/spec/task-file).
+
+A file inside a phase directory that does not end in `.md` MUST be ignored. A `.md` file
+that cannot be parsed as a task MUST be reported as malformed rather than silently
+skipped.
+
+### `.archive/`
+
+Archived tasks live directly in `.tasks/.archive/`, named `<id>.md`. The archive is
+**flat** — it has no phase subdirectories — so an archived task's originating phase is
+carried only by its frontmatter `phase` field.
+
+An implementation:
+
+- MUST exclude archived tasks from every default query.
+- MUST treat an archived task as **not satisfying** a dependency.
+- MUST treat an archived id as **reserved**: creating a new task with that id MUST fail.
+
+<Callout type="info" title="Non-normative">
+  Reserving archived ids is what stops a new task from silently inheriting a
+  deleted task's inbound dependencies. Without it, `depends_on: [old-id]`
+  elsewhere in the tree would quietly re-point at unrelated work.
+</Callout>
+
+### `.locks/`
+
+`.tasks/.locks/` holds transient lock files used to serialize concurrent mutation. See
+[concurrency](#concurrency).
+
+It MUST NOT be committed to version control. An implementation that scaffolds a project
+SHOULD write a `.tasks/.gitignore` containing `.locks/`.
+
+### `_index.md`
+
+`_index.md` is a **derived** view of the tree, regenerated on demand.
+
+- An implementation MUST NOT treat it as a source of truth, and MUST NOT read it to
+  answer any query.
+- An implementation MAY generate it. Its content and formatting are not specified.
+- An implementation that detects it is out of date MUST report that as a **warning**,
+  never an error.
+
+<Callout type="info" title="Non-normative">
+  It exists because `.tasks/` is committed and browsed on the web, where a
+  directory of markdown files is hard to skim. Since it is committed, a stale
+  one misleads reviewers in a diff — hence the warning. Since it holds no truth,
+  failing a build over it would be absurd — hence never an error.
+</Callout>
+
+## Writes
+
+Every write of a task file, `config.yml`, or `_index.md` MUST be **atomic**: the
+implementation writes to a temporary file in the same directory and renames it into
+place. A reader MUST never be able to observe a partially written file.
+
+Serialization MUST be canonical — see [task file](/docs/spec/task-file#serialization) —
+so that repeated writes of unchanged state produce identical bytes and a file's diff
+shows only what actually changed. An implementation MAY additionally skip a write whose
+result would be byte-identical, but is not required to.
+
+### Relocation
+
+Moving a task between phases MUST be performed as **write destination, then remove
+source** — never the reverse, and never a bare rename that could leave neither.
+
+Interrupted between the two steps, this leaves the same task present in two phases. That
+is a detectable, repairable state; losing the task is not.
+
+## Concurrency
+
+An implementation that mutates a task in a way that depends on that task's current state
+MUST do so under an exclusive lock, and MUST re-read the task's state from disk **inside**
+the lock before deciding.
+
+- The lock MUST be acquired by an operation that atomically fails if the lock already
+  exists (`O_EXCL` or equivalent).
+- A lock MUST be scoped to a single task id, not to the tree.
+- A lock older than a defined staleness threshold MUST be reclaimable. The reference
+  implementation uses **10 seconds**; an implementation MAY choose another value and
+  SHOULD document it.
+
+<Callout type="warn" title="Scope of the guarantee">
+  This serializes processes sharing one filesystem. It does **not** coordinate
+  across separate clones of a repository. Two agents working in two checkouts
+  can both claim the same task and will discover the conflict only at merge. An
+  implementation MUST NOT present claims as a distributed lock.
+</Callout>
+
+## Version control
+
+`.tasks/` is intended to be committed. An implementation MUST NOT require any state
+outside the project directory — no database, no cache directory, no user-level
+configuration — to interpret a tree correctly.
+
+A fresh clone of a repository MUST yield identical query results to the checkout it was
+cloned from, given the same implementation.

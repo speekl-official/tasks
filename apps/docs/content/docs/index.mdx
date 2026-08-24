@@ -1,0 +1,178 @@
+---
+title: Introduction
+description: An open format for persistent agent task state, with a reference CLI.
+icon: BookOpen
+---
+
+**`.tasks` is a convention**, not a product. Task state lives in your repository as
+markdown files with YAML frontmatter under a `.tasks/` directory — readable by a human,
+parseable by an agent, versioned by git. No server, no account, no network.
+
+The format is [specified normatively](/docs/spec), so it does not belong to any one
+tool. [`@speekl/tasks`](/docs/reference/commands) is the reference implementation: a CLI
+that enforces the invariants which keep agents from corrupting state. It is the easiest
+way to work with a tree, and it is deliberately not the only way.
+
+It sits between "ad-hoc markdown files" and "a full external tracker": the file
+convention stays simple enough to edit by hand, while an implementation enforces the
+rules that make the tree trustworthy.
+
+```sh
+npm install -g @speekl/tasks
+```
+
+<Cards>
+  <Card
+    title="Quick start"
+    href="/docs/quickstart"
+    description="From an empty repo to a working queue in five commands."
+  />
+  <Card
+    title="Core concepts"
+    href="/docs/concepts"
+    description="Phases, statuses, roles, dependencies, and what each one buys you."
+  />
+  <Card
+    title="The specification"
+    href="/docs/spec"
+    description="Normative definition of the format, and what conformance requires."
+  />
+  <Card
+    title="Command reference"
+    href="/docs/reference/commands"
+    description="Every command, flag, and failure mode."
+  />
+</Cards>
+
+## Format, implementation, docs
+
+Three layers, deliberately separable:
+
+| Layer                            | What it is                                                                                 | Where                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| **The convention**               | The normative format: layout, frontmatter, resolution semantics. Versioned as `.tasks` v1. | [Specification](/docs/spec)           |
+| **The reference implementation** | `@speekl/tasks`, a CLI conforming as a Manager. Versioned independently.                   | [Reference](/docs/reference/commands) |
+| **Everything else**              | Guides, concepts, worked examples. Explanatory, never normative.                           | [Guides](/docs/guides/agent-workflow) |
+
+If you are **using** tasks day to day, start at the quick start and never open the spec.
+If you are **building** something that reads or writes a tree, the spec is the contract
+and this page is a summary of it.
+
+## The problem it solves
+
+An agent that works across sessions needs somewhere to put state that outlives its
+context window. Left alone, it invents something: a `TODO.md`, a checklist buried in a
+PR description, a plan it rewrites from scratch each session. None of that survives a
+second agent working in parallel, and none of it tells you what is actually unblocked.
+
+The three failure modes this exists to prevent:
+
+<Cards>
+  <Card
+    title="Two agents, one task"
+    description="Both read the queue, both pick the top item, both do the work. Claims take an exclusive lock, so only one wins."
+  />
+  <Card
+    title="Work started too early"
+    description="A dependency typo silently reads as satisfied. Here every unresolvable state counts as blocking instead."
+  />
+  <Card
+    title="Done without being done"
+    description="A status jumped straight to DONE. Transitions step one at a time, so nothing reaches done unworked."
+  />
+</Cards>
+
+## What it looks like on disk
+
+<Files>
+  <Folder name=".tasks" defaultOpen>
+    <File name="config.yml" />
+    <File name="README.md" />
+    <File name="_index.md" />
+    <Folder name="auth-rework" defaultOpen>
+      <File name="token-schema.md" />
+      <File name="wire-refresh.md" />
+    </Folder>
+    <Folder name=".archive" />
+  </Folder>
+</Files>
+
+A phase is a directory, not a tag, so one body of work can be browsed and queries can
+scope to it. Each task is one file whose name always mirrors its `id`:
+
+```markdown title=".tasks/auth-rework/token-schema.md"
+---
+id: token-schema
+phase: auth-rework
+status: PENDING
+depends_on: [audit-current-claims]
+created: "2026-08-21T09:14:00Z"
+updated: "2026-08-21T09:14:00Z"
+claimed_by: null
+claimed_at: null
+---
+
+# Design the token schema
+
+## Description
+
+## Acceptance criteria
+
+- [ ]
+
+## Notes
+```
+
+The frontmatter is machine-owned — the CLI rewrites it in canonical form. The body
+below it is yours, and normal file edits are the expected way to write it.
+
+## What an implementation guarantees
+
+These are properties of the **format**, enforced by any conforming implementation — not
+features of one tool.
+
+- **No status skipping.** By default a task moves forward or back exactly one status,
+  so nothing reaches "done" without having been worked. The last status is _not_
+  terminal — reopening is supported via `tasks claim`.
+- **Claims are race-safe.** `claim` takes an exclusive `O_EXCL` lock and re-reads state
+  inside it, so two concurrent agents cannot both take the same task. A lock from a
+  crashed process goes stale after 10s and is reclaimed.
+- **Dependencies fail safe.** Missing, archived, unresolvable, and cyclic dependencies
+  all count as _blocking_, never as satisfied. A typo can delay work, but it can never
+  make an agent start something prematurely.
+- **Ids are globally unique**, including archived ones, so a new task can never
+  silently inherit a deleted task's inbound dependencies.
+- **The filesystem is authoritative.** A task's phase comes from its directory and its
+  identity from frontmatter `id`; `tasks validate --fix` repairs drift.
+- **Writes are atomic** (temp file + rename) and frontmatter is rewritten in canonical
+  form, so files never churn and diffs stay reviewable.
+
+## Building on the format
+
+The format is the interface, so you are not obliged to shell out to a CLI. A tool that
+reads a tree and answers "what is ready" is a
+[Reader](/docs/spec/conformance#reader) — a couple of hundred lines in any language.
+Writing tasks back means meeting the
+[Writer](/docs/spec/conformance#writer) requirements, which is where the invariants
+above start costing real care.
+
+<Cards>
+  <Card
+    title="Conformance roles"
+    href="/docs/spec/conformance"
+    description="Reader, Writer, Manager — what each one has to do, and what is deliberately left free."
+  />
+  <Card
+    title="CLI contract"
+    href="/docs/spec/cli"
+    description="Exit codes and JSON shapes, if what you are building has a command line."
+  />
+</Cards>
+
+## When not to use it
+
+For a checklist that lives and dies inside one session, use whatever your agent's
+built-in todo mechanism is. Persistent tasks are for work that spans sessions, work
+with real dependencies between pieces, or work several agents and people coordinate on
+through git. A `.tasks/` tree with three items that were created and completed in the
+same hour is overhead with no payoff.

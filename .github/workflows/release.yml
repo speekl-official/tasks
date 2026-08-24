@@ -1,0 +1,78 @@
+name: Release
+
+# Publishing is driven by a version tag, so a release is always a commit that
+# exists on main: `pnpm version-packages`, commit, `git tag v<version>`, push.
+# workflow_dispatch runs the same job in dry-run mode, without touching npm.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, pack and validate without publishing
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same gate CI runs. prepublishOnly repeats it, but --ignore-scripts
+      # would skip that, so the release must not depend on it.
+      - run: pnpm lint
+      - run: pnpm check-types
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Check the tag matches the package version
+        if: github.event_name == 'push'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./packages/tasks/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $pkg." >&2
+            exit 1
+          fi
+          echo "Releasing @speekl/tasks v$pkg"
+
+      - name: Check the version is not already published
+        if: github.event_name == 'push'
+        run: |
+          pkg="$(node -p "require('./packages/tasks/package.json').version")"
+          if npm view "@speekl/tasks@$pkg" version >/dev/null 2>&1; then
+            echo "@speekl/tasks@$pkg is already on the registry." >&2
+            exit 1
+          fi
+
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: packages/tasks
+        run: npm publish --dry-run --provenance --access public
+
+      - name: Publish
+        if: github.event_name == 'push'
+        working-directory: packages/tasks
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

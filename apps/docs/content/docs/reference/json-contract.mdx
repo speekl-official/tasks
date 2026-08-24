@@ -1,0 +1,225 @@
+---
+title: JSON contract
+description: Output shapes, exit codes, and the error envelope agents branch on.
+icon: Braces
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definition is [specification › CLI
+  contract](/docs/spec/cli). This page is the same contract with worked
+  examples.
+</Callout>
+
+Three things are **contract**, not implementation. They change only in a major version:
+
+1. **Exit codes**
+2. **`--json` output shapes**
+3. **The `.tasks/` on-disk conventions**
+
+The human-readable tables are _not_ contract. Their layout, colors, and column widths
+can change at any time — never parse them.
+
+## Streams
+
+Every command accepts `--json`.
+
+| Stream     | Carries                                                                            |
+| ---------- | ---------------------------------------------------------------------------------- |
+| **stdout** | Successful output, pretty-printed JSON under `--json`.                             |
+| **stderr** | Errors. Under `--json`, a structured error envelope; otherwise a `✗ message` line. |
+
+The split is absolute, so `tasks ready --json | jq` never chokes on a diagnostic that
+got mixed into the stream.
+
+## Exit codes
+
+```ts
+0  success
+1  internal    an unexpected failure
+2  usage       bad flags, unknown status, malformed dependency ref
+3  not found   no .tasks/ discovered, unknown task id
+4  conflict    illegal transition, already claimed, blocked, delete refused
+```
+
+**Branch on the code, never on message text.** Messages are written for humans and may
+be reworded in a patch release; codes may not.
+
+`--help` and `--version` exit `0`.
+
+<Callout type="warn" title="An empty result is success">
+  `tasks ready` with nothing available exits `0` with `{"count": 0, "tasks": []}`. "There
+  is nothing to do" is an answer, not a failure — an agent that treats it as an error
+  will loop or bail out for no reason.
+</Callout>
+
+## The error envelope
+
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
+    "details": {
+      "id": "wire-refresh",
+      "from": "PENDING",
+      "to": "DONE",
+      "allowed": ["IN_PROGRESS"]
+    }
+  }
+}
+```
+
+| Field     | Notes                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------- |
+| `code`    | `USAGE` (2), `NOT_FOUND` (3), `CONFLICT` (4), `INTERNAL` (1).                                                       |
+| `message` | Human-readable. Do not parse.                                                                                       |
+| `details` | Structured facts about this specific failure. Present on most errors, absent on some. Prefer this over the message. |
+
+`details` is where the useful recovery information lives — `allowed` transitions,
+`blocked_by` refs, `claimed_by`, `statuses`. Read it.
+
+## Task object
+
+`new`, `show`, `claim`, `release`, `status`, `move`, `dep add`, and `dep rm` all emit a
+single task object:
+
+```json
+{
+  "id": "wire-refresh",
+  "phase": "auth-rework",
+  "status": "IN_PROGRESS",
+  "depends_on": ["token-schema"],
+  "created": "2026-08-21T09:14:00Z",
+  "updated": "2026-08-22T11:02:41Z",
+  "claimed_by": "agent-7",
+  "claimed_at": "2026-08-22T11:02:41Z",
+  "path": "/Users/you/acme-api/.tasks/auth-rework/wire-refresh.md"
+}
+```
+
+Some commands add context-specific fields on top:
+
+| Command  | Adds                                       |
+| -------- | ------------------------------------------ |
+| `status` | `previous_status`                          |
+| `move`   | `previous_phase`                           |
+| `show`   | `title`, `ready`, `dependencies[]`, `body` |
+
+`path` is absolute — it is what you open to write the task body after `tasks new`.
+
+## Collection shape
+
+`list` and `ready` share one shape:
+
+```json
+{
+  "phase": "auth-rework",
+  "count": 1,
+  "tasks": [
+    {
+      "id": "wire-refresh",
+      "phase": "auth-rework",
+      "status": "PENDING",
+      "…": "…"
+    }
+  ]
+}
+```
+
+`phase` is the resolved scope, and is `null` when the query spanned the whole tree
+(`--all`, or no `active_phase` configured).
+
+## `show`
+
+The richest read. On top of the task object:
+
+```json
+{
+  "id": "wire-refresh",
+  "title": "Wire the refresh endpoint",
+  "ready": false,
+  "status": "PENDING",
+  "dependencies": [
+    {
+      "ref": "token-schema",
+      "satisfied": false,
+      "status": "PENDING",
+      "reason": "not-done"
+    }
+  ],
+  "body": "# Wire the refresh endpoint\n\n## Description\n…"
+}
+```
+
+`ready` is the same predicate `tasks ready` uses: status is the `ready` role **and**
+every dependency is satisfied. `status` and `reason` on a dependency are `null` when
+they do not apply — see [dependencies](/docs/reference/dependencies) for every `reason`.
+
+## Other shapes
+
+`dep list`:
+
+```json
+{
+  "id": "wire-refresh",
+  "count": 1,
+  "blocked": true,
+  "dependencies": [
+    {
+      "ref": "token-schema",
+      "satisfied": false,
+      "status": "PENDING",
+      "reason": "not-done"
+    }
+  ]
+}
+```
+
+`validate`:
+
+```json
+{
+  "ok": true,
+  "checked": 17,
+  "fixed": [],
+  "findings": []
+}
+```
+
+`ok` is `false` when there is at least one **error**-severity finding; warnings alone
+keep it `true`. Each finding carries `severity`, `kind`, `message`, `task`, and `file`.
+
+`init`, `delete`, `reindex`, and `skill install` emit small command-specific objects —
+`{tasksDir, created[], skill}`, `{id, purged, archived_to?, orphaned_dependents[]}`,
+`{path, tasks}`, and `{installed, dir, files[], skipped?}` respectively.
+
+## Chaining
+
+Ids are stable and globally unique, so they are safe to carry between commands:
+
+```sh
+id=$(tasks ready --json | jq -r '.tasks[0].id // empty')
+[ -n "$id" ] && tasks claim "$id" --json
+```
+
+The `// empty` matters: without it, `jq` yields the string `"null"` on an empty queue and
+the next command fails with a confusing `NOT_FOUND`.
+
+Branching on the exit code:
+
+```sh
+if ! tasks claim "$id" --json 2>/tmp/err; then
+  case $? in
+    3) echo "no such task" ;;
+    4) echo "someone else has it, or it is blocked"
+       jq -r '.error.details.blocked_by // empty' /tmp/err ;;
+    *) cat /tmp/err ;;
+  esac
+fi
+```
+
+## Stability
+
+Fields are added, never repurposed. A new key can appear in a minor release, so parse
+defensively — do not assume an exhaustive set. Removing a field, renaming one, changing
+an exit code, or changing the on-disk conventions is a **major** version bump.

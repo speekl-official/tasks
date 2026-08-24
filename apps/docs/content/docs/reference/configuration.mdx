@@ -1,0 +1,171 @@
+---
+title: Configuration
+description: The .tasks/config.yml schema — statuses, roles, transitions, and the default phase scope.
+icon: Settings
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definition is [specification ›
+  configuration](/docs/spec/configuration). This page is the practical
+  walkthrough.
+</Callout>
+
+`.tasks/config.yml` is **optional**. With no file at all, the CLI behaves as though you
+had written:
+
+```yaml
+version: 1
+statuses: [PENDING, IN_PROGRESS, DONE]
+roles:
+  ready: PENDING
+  claimed: IN_PROGRESS
+  done: DONE
+```
+
+`tasks init` scaffolds a commented version of this so the options are discoverable
+without leaving the repo.
+
+## Schema
+
+```yaml title=".tasks/config.yml"
+version: 1 # config schema version
+
+active_phase: auth-rework # optional; default scope for `list` and `ready`
+
+statuses: [TODO, DOING, REVIEW, SHIPPED] # optional; minimum 2 entries
+
+roles: # optional; defaults to first / second / last
+  ready: TODO
+  claimed: DOING
+  done: SHIPPED
+
+transitions: # optional; REPLACES the default step rule
+  - [TODO, DOING]
+  - [DOING, REVIEW]
+  - [REVIEW, SHIPPED]
+  - [SHIPPED, DOING]
+```
+
+<TypeTable
+  type={{
+    version: {
+      description: "Config schema version. Only 1 exists.",
+      type: "1",
+      default: "1",
+    },
+    active_phase: {
+      description:
+        "Default phase scope for `list` and `ready` when neither --phase nor --all is passed.",
+      type: "string",
+    },
+    statuses: {
+      description:
+        "Ordered status list. Order defines the default transition rule and the role defaults.",
+      type: "string[]",
+      default: "[PENDING, IN_PROGRESS, DONE]",
+    },
+    roles: {
+      description:
+        "Maps the three behavioural roles onto status names. Each key is optional.",
+      type: "{ ready?, claimed?, done? }",
+      default: "first / second / last of statuses",
+    },
+    transitions: {
+      description:
+        "Explicit [from, to] pairs. Providing this replaces the default step rule entirely.",
+      type: "[string, string][]",
+    },
+  }}
+/>
+
+**Unknown keys are rejected.** A typo like `status:` fails the load with exit `2` rather
+than being silently ignored.
+
+## `active_phase`
+
+Sets the default scope for `tasks list` and `tasks ready`:
+
+```yaml
+active_phase: auth-rework
+```
+
+`--phase` overrides it; `--all` ignores it entirely. Resolution order is
+`--phase` → `--all` → `active_phase` → the whole tree.
+
+<Callout title="A missing task is usually a scope">
+  If a task you expect is absent from `list` or `ready`, retry with `--all`
+  before concluding it does not exist.
+</Callout>
+
+## `statuses` and `roles`
+
+Statuses are fully renameable because commands bind to **roles**, not literals:
+
+| Role      | Used by                                                                | Default       |
+| --------- | ---------------------------------------------------------------------- | ------------- |
+| `ready`   | What `tasks ready` looks for, and where `tasks release` returns a task | first status  |
+| `claimed` | What `tasks claim` moves to                                            | second status |
+| `done`    | What satisfies another task's `depends_on`                             | last status   |
+
+A minimum of two statuses is required. Beyond that the list is free — see
+[custom statuses](/docs/guides/custom-statuses) for worked examples.
+
+## `transitions`
+
+Omit it, and the default rule applies: **step forward or back by exactly one** position
+in `statuses`, uniformly.
+
+Provide it, and that rule is **replaced entirely** — not layered onto. Every legal move,
+including every backward one, must be listed:
+
+```yaml
+transitions:
+  - [TODO, DOING] # claim
+  - [DOING, TODO] # release
+  - [DOING, REVIEW]
+  - [REVIEW, DOING] # changes requested
+  - [REVIEW, SHIPPED]
+  - [SHIPPED, DOING] # reopen
+```
+
+Forgetting `[DOING, TODO]` here would leave `tasks release` permanently failing with
+exit `4`. If you write `transitions`, walk the whole graph.
+
+## Validation
+
+The config is validated on load, and a bad one fails the _command you ran_ with exit `2`
+rather than surfacing later as a mysterious conflict:
+
+- Every name in `roles` must be a real status.
+- Every name in `transitions` must be a real status.
+- `roles.ready → roles.claimed` must be a legal transition. A config where it is not
+  would make `tasks claim` unusable by construction, so it is refused outright.
+
+```txt
+config.yml: the transition TODO -> REVIEW (roles.ready -> roles.claimed) is not legal,
+so `tasks claim` could never succeed. Add it to `transitions` or adjust `roles`.
+```
+
+## Changing config on a live tree
+
+Renaming a status does **not** rewrite existing task files. Tasks still carrying the old
+name become `unknown-status` findings in `tasks validate`, which `--fix` cannot repair —
+it is not mechanically safe to guess what the old name should map to.
+
+The safe order is:
+
+<Steps>
+
+<Step>Add the new status names alongside the old ones and ship that.</Step>
+
+<Step>Move each task onto a new status with `tasks status`.</Step>
+
+<Step>
+  Remove the old names from `statuses` once `tasks validate` is clean.
+</Step>
+
+</Steps>
+
+For a small tree, a search-and-replace across `.tasks/**/*.md` followed by
+`tasks validate` is faster and perfectly legitimate — the frontmatter is only
+machine-_owned_, not machine-_only_.

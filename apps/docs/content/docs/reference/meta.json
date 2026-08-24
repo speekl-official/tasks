@@ -1,0 +1,4 @@
+{
+  "title": "CLI reference",
+  "pages": ["commands", "file-format", "configuration", "dependencies", "json-contract"]
+}

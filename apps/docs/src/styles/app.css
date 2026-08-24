@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/*
+ * Amber on a warm neutral base. The greys carry a little hue (~30deg) so the
+ * accent sits in the same family instead of floating on top of pure grey.
+ */
+@theme {
+  --color-fd-background: hsl(30, 20%, 98%);
+  --color-fd-foreground: hsl(24, 10%, 10%);
+  --color-fd-muted: hsl(30, 12%, 95.5%);
+  --color-fd-muted-foreground: hsl(24, 6%, 42%);
+  --color-fd-popover: hsl(30, 20%, 99%);
+  --color-fd-card: hsl(30, 20%, 99.5%);
+  --color-fd-border: hsl(28, 12%, 88%);
+  --color-fd-primary: hsl(32, 95%, 38%);
+  --color-fd-primary-foreground: hsl(40, 60%, 98%);
+  --color-fd-secondary: hsl(30, 14%, 95%);
+  --color-fd-accent: hsl(30, 14%, 93%);
+  --color-fd-accent-foreground: hsl(24, 10%, 12%);
+  --color-fd-ring: hsl(32, 95%, 44%);
+
+  /* Terminal surface, used by the home page demo and any prompt sample. */
+  --color-term-bg: hsl(24, 12%, 11%);
+  --color-term-chrome: hsl(24, 10%, 16%);
+  --color-term-fg: hsl(30, 12%, 88%);
+  --color-term-dim: hsl(28, 8%, 55%);
+  --color-term-accent: hsl(38, 92%, 60%);
+  --color-term-success: hsl(150, 62%, 52%);
+  --color-term-cyan: hsl(190, 70%, 60%);
+
+  /* Status semantics, shared by the terminal demo and the docs tables. */
+  --color-status-pending: hsl(28, 8%, 55%);
+  --color-status-progress: hsl(38, 92%, 50%);
+  --color-status-done: hsl(150, 62%, 40%);
+}
+
+.dark {
+  --color-fd-background: hsl(24, 12%, 6%);
+  --color-fd-foreground: hsl(30, 12%, 92%);
+  --color-fd-muted: hsl(24, 10%, 12%);
+  --color-fd-muted-foreground: hsl(28, 8%, 62%);
+  --color-fd-popover: hsl(24, 10%, 10%);
+  --color-fd-card: hsl(24, 10%, 9%);
+  --color-fd-border: hsl(24, 8%, 18%);
+  --color-fd-primary: hsl(38, 92%, 58%);
+  --color-fd-primary-foreground: hsl(24, 20%, 8%);
+  --color-fd-secondary: hsl(24, 10%, 12%);
+  --color-fd-accent: hsl(24, 8%, 16%);
+  --color-fd-accent-foreground: hsl(30, 12%, 92%);
+  --color-fd-ring: hsl(38, 92%, 58%);
+
+  --color-term-bg: hsl(24, 10%, 9%);
+  --color-term-chrome: hsl(24, 8%, 14%);
+  --color-status-pending: hsl(28, 8%, 58%);
+  --color-status-progress: hsl(38, 92%, 58%);
+  --color-status-done: hsl(150, 55%, 55%);
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Faint grid behind the hero, fading out before it reaches the content below. */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, var(--color-fd-border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-fd-border) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+}
+
+/* Status pills reuse the same three colors everywhere they appear. */
+.status-pending {
+  color: var(--color-status-pending);
+}
+.status-progress {
+  color: var(--color-status-progress);
+}
+.status-done {
+  color: var(--color-status-done);
+}

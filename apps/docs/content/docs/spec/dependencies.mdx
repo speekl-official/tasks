@@ -1,0 +1,161 @@
+---
+title: Dependency resolution
+description: Reference grammar, the resolution algorithm, readiness, and cycle detection.
+icon: Network
+---
+
+`depends_on` holds an ordered list of **references**. Resolution decides, for each one,
+whether it is satisfied — and a task is workable only when all of them are.
+
+## Reference grammar
+
+```txt
+reference   = local | external
+local       = id
+external    = project-path ":" id
+id          = ^[a-z0-9][a-z0-9-]*$
+```
+
+A reference MUST be parsed by splitting on the **last** `:` in the string. Absent a
+colon, the whole string is a local `id`.
+
+- `project-path` MUST NOT be empty.
+- `project-path` MUST NOT be absolute, and MUST NOT match a drive-letter prefix such as
+  `C:\` or `C:/`. Both MUST fail as usage errors.
+- `id` MUST match the id pattern in both forms.
+
+<Callout type="info" title="Non-normative">
+  Splitting on the last colon, plus banning absolute paths, is what makes the
+  grammar unambiguous on Windows. `C:\repo:task` has two colons; without the
+  ban, "which one separates the path from the id" has no good answer.
+</Callout>
+
+Duplicate references within one task's `depends_on` are redundant. An implementation
+SHOULD NOT append a reference already present, and MUST NOT treat a duplicate as an
+error on read.
+
+## Path resolution
+
+An external `project-path` MUST be resolved relative to the **project root** — the
+directory containing `.tasks/` — and never relative to the process's working directory.
+
+The resolved path is then subject to the same [discovery](/docs/spec/layout#discovery)
+procedure as any other starting point: walk toward the filesystem root until a `.tasks/`
+directory is found.
+
+<Callout type="warn" title="Discovery walks upward here too">
+  A reference to a directory that has no `.tasks/` of its own does not fail — discovery
+  continues upward and may resolve to an ancestor's tree. In a monorepo this can silently
+  match the root tree instead of the intended package.
+
+An implementation SHOULD surface which project a reference resolved to. Authors SHOULD
+point external references only at directories that own a `.tasks/`.
+
+</Callout>
+
+Anchoring at the project root is what makes a committed `depends_on` mean the same thing
+regardless of which subdirectory a command was invoked from. An implementation MUST NOT
+make resolution depend on the working directory.
+
+## Resolution
+
+For each reference, an implementation MUST determine exactly one outcome.
+
+A reference is **satisfied** if and only if all of the following hold:
+
+1. The target tree was located.
+2. A **live** task with that `id` exists in it.
+3. That task's `status` equals the target tree's **own** `done` role.
+
+Otherwise it is **unsatisfied**, with one of these reasons:
+
+| Reason               | Condition                                                           |
+| -------------------- | ------------------------------------------------------------------- |
+| `not-done`           | The task exists and is live, but its status is not the `done` role. |
+| `missing`            | No task with that id exists in the target tree, live or archived.   |
+| `archived`           | A task with that id exists only in the target tree's `.archive/`.   |
+| `unresolved-project` | An external reference whose path did not resolve to a tree.         |
+
+A reference that **fails to parse** MUST resolve as unsatisfied. It MUST NOT abort the
+query. Reporting it under `missing` is RECOMMENDED; the parse error itself is surfaced
+by validation, not by resolution.
+
+<Callout type="error" title="The central invariant">
+  Every outcome an implementation is not certain about MUST count as **blocking**. There
+  is no state in which an unresolvable, absent, malformed, or archived reference counts
+  as satisfied.
+
+A reference that wrongly blocks costs a delay a human will notice. A reference that
+wrongly reads as satisfied sends an agent to build on work that does not exist.
+
+</Callout>
+
+### Cross-tree role resolution
+
+Condition 3 above compares against the **target** tree's `done` role, not the referring
+tree's. Two projects may use entirely different status vocabularies; an implementation
+MUST load the target project's configuration to judge the dependency.
+
+An implementation MUST treat an external tree as **read-only**. It MUST NOT create,
+modify, lock, or delete anything within it.
+
+An implementation SHOULD cache an external tree for the duration of a single operation,
+so that many references into one project cost one read.
+
+## Readiness
+
+A task is **ready** if and only if:
+
+1. Its `status` equals the project's `ready` role, **and**
+2. Every entry in its `depends_on` is satisfied.
+
+A task with an empty `depends_on` satisfies condition 2 trivially.
+
+Readiness is derived, never stored. An implementation MUST NOT persist it to a field, and
+MUST recompute it from current state on every query.
+
+An empty set of ready tasks is a **successful result**. An implementation MUST NOT
+represent it as an error condition.
+
+## Cycles
+
+A cycle among local references means every task in it can never become ready. An
+implementation MUST detect cycles during validation and report them as errors.
+
+Only **local** references form edges. External references MUST NOT participate in cycle
+detection: the other tree is read-only, may be absent, and cannot be traversed reliably.
+
+An implementation that offers a way to add a dependency MUST refuse one that would
+introduce a cycle among local references, and MUST refuse a reference from a task to
+itself.
+
+<Callout type="warn" title="Cross-tree cycles are undetectable">
+  Two projects that reference each other will be accepted, and both tasks will
+  simply never become ready. This is a known limitation of v1, not an oversight
+  — detecting it would require an implementation to traverse arbitrary
+  repositories that may not be checked out.
+</Callout>
+
+## Mutation constraints
+
+An implementation that offers dependency editing:
+
+- MUST refuse to add a local reference to a task that does not exist.
+- MUST refuse to add a self-reference.
+- MUST refuse to add a reference that would create a local cycle.
+- SHOULD fail when asked to remove a reference the task does not hold, rather than
+  succeeding silently.
+- MAY accept an external reference whose project is not currently resolvable, since
+  absence is a legitimate transient state.
+
+## Deletion interaction
+
+Archiving or deleting a task that other live tasks reference leaves those tasks
+permanently blocked — the reference resolves as `archived` or `missing`, both blocking.
+
+An implementation MUST refuse such a deletion by default, MUST name the dependent tasks,
+and MAY offer an explicit override. When overridden, it MUST report which tasks were left
+blocked.
+
+Because ids remain reserved after archival, recreating a task under the same id MUST fail
+rather than silently reconnecting those dangling references.

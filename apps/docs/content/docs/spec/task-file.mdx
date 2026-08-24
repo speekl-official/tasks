@@ -1,0 +1,234 @@
+---
+title: Task file
+description: Frontmatter fields, their types and constraints, canonical serialization, and the body.
+icon: FileCode
+---
+
+A task is a single UTF-8 markdown file containing a YAML frontmatter block followed by a
+freeform body.
+
+```markdown title=".tasks/auth-rework/token-schema.md"
+---
+id: token-schema
+phase: auth-rework
+status: PENDING
+depends_on: [audit-current-claims]
+created: "2026-08-21T09:14:00Z"
+updated: "2026-08-21T09:14:00Z"
+claimed_by: null
+claimed_at: null
+---
+
+# Design the token schema
+
+## Description
+
+## Acceptance criteria
+
+- [ ]
+
+## Notes
+```
+
+## Structure
+
+The file MUST begin with a line containing exactly `---`, followed by a YAML mapping,
+followed by a line containing exactly `---`. Everything after that is the **body**.
+
+A file with no frontmatter block, or whose frontmatter is not a YAML mapping, or whose
+mapping fails the constraints below, MUST be reported as **malformed**. An implementation
+MUST NOT silently skip it.
+
+YAML MUST be parsed with a schema that does **not** coerce timestamp-shaped scalars into
+date objects. Implementations that cannot disable that coercion MUST treat `created`,
+`updated`, and `claimed_at` as opaque strings by other means.
+
+## Fields
+
+<TypeTable
+  type={{
+    id: {
+      description:
+        "Stable identity. Globally unique across the tree, including .archive/.",
+      type: "string",
+      required: true,
+    },
+    phase: {
+      description:
+        "Mirrors the containing directory for a live task. For an archived task, this is the only record of its originating phase.",
+      type: "string",
+      required: true,
+    },
+    status: {
+      description:
+        "Current lifecycle state. MUST be a member of the project's configured statuses.",
+      type: "string",
+      required: true,
+    },
+    depends_on: {
+      description: "Dependency references. Empty list when there are none.",
+      type: "string[]",
+      default: "[]",
+    },
+    created: {
+      description: "When the task was created. Never modified after creation.",
+      type: "timestamp",
+      required: true,
+    },
+    updated: {
+      description: "When the task was last mutated by an implementation.",
+      type: "timestamp",
+      required: true,
+    },
+    claimed_by: {
+      description: "Identity holding the claim, or null.",
+      type: "string | null",
+      default: "null",
+    },
+    claimed_at: {
+      description: "When the claim was taken, or null.",
+      type: "timestamp | null",
+      default: "null",
+    },
+  }}
+/>
+
+`id`, `phase`, `status`, `created`, and `updated` are REQUIRED. `depends_on`,
+`claimed_by`, and `claimed_at` are OPTIONAL on read and MUST default to `[]`, `null`, and
+`null` respectively; all three MUST be written explicitly.
+
+An implementation MUST tolerate frontmatter keys it does not recognize on read. Such keys
+are **not** preserved across a rewrite — see [serialization](#serialization).
+
+### `id`
+
+```txt
+^[a-z0-9][a-z0-9-]*$
+```
+
+Lowercase kebab-case. An id MUST be unique across the entire tree, counting live and
+archived tasks together.
+
+The file's name MUST be `<id>.md`. Where the filename stem and the `id` field disagree,
+**`id` is authoritative** and the file SHOULD be renamed to match.
+
+An implementation that derives an id from a human-readable title SHOULD do so by
+Unicode-normalizing, folding to ASCII where possible, lowercasing, and replacing runs of
+non-alphanumeric characters with a single hyphen. If that yields an empty string, it MUST
+fail rather than invent an id.
+
+### `phase`
+
+```txt
+^[a-z0-9][a-z0-9._-]*$
+```
+
+For a **live** task, the containing directory is authoritative and this field mirrors it.
+An implementation MUST derive phase from the directory, MUST report a disagreement, and
+MAY repair the field to match.
+
+For an **archived** task the directory carries no phase — `.archive/` is flat — so this
+field is the sole record and MUST be read as authoritative there.
+
+### `status`
+
+MUST be a member of the project's configured `statuses`. A status outside that list MUST
+be reported as an error, and an implementation MUST NOT guess a mapping for it.
+
+Transitions are constrained; see [configuration](/docs/spec/configuration#transitions).
+
+### `created`, `updated`, `claimed_at`
+
+ISO 8601 UTC timestamps, second precision, `Z`-suffixed:
+
+```txt
+YYYY-MM-DDTHH:MM:SSZ
+```
+
+They MUST be serialized as **quoted** YAML scalars, so that a parser cannot re-read them
+as native dates.
+
+- `created` MUST be set on creation and MUST NOT be modified afterwards.
+- `updated` MUST be set to the current time on every mutation an implementation makes to
+  the frontmatter. It carries no meaning beyond "something changed then".
+- Sub-second precision is not used. Ordering by `updated` is therefore not a reliable
+  tiebreak between two mutations in the same second.
+
+### `claimed_by`, `claimed_at`
+
+Both `null`, or both non-`null`. An implementation MUST set them together and MUST clear
+them together.
+
+They MUST be cleared automatically whenever a task leaves the `claimed` role, by any
+route. An implementation MUST NOT leave a claim recorded on a task that is no longer in
+the claimed status.
+
+`claimed_by` is an opaque identity string with no defined format — a username, an agent
+id, a hostname. Implementations MUST NOT parse it.
+
+## Body
+
+Everything after the closing `---` is the body. It is **freeform markdown**, owned by the
+user, and an implementation MUST NOT rewrite, reformat, or reorder it, except to
+normalize leading and trailing whitespace around it when writing the file.
+
+The task's **title** is the text of the first level-one ATX heading (`# `) in the body.
+If there is none, the title is the `id`.
+
+An implementation that scaffolds a body SHOULD provide structure for a description,
+acceptance criteria, and notes. The exact headings are not specified.
+
+<Callout type="info" title="Non-normative">
+  Splitting ownership at the `---` is the whole ergonomic bet of the format. The
+  frontmatter is small, closed, and machine-managed, so it can be validated and
+  rewritten confidently. The body is unbounded and human, so it is never
+  touched. That is what makes "let the agent edit the file directly" safe
+  advice.
+</Callout>
+
+## Serialization
+
+When an implementation writes a task file, the frontmatter MUST be emitted in **canonical
+form**:
+
+1. Exactly the eight defined fields, in the order listed under [fields](#fields).
+2. No other keys. Keys present on read but not defined here are dropped.
+3. `depends_on` as a flow sequence: `[a, b]`, or `[]` when empty.
+4. `created`, `updated`, and `claimed_at` always double-quoted.
+5. `null` for an absent `claimed_by` or `claimed_at`.
+6. Other scalars unquoted when they are unambiguous plain YAML, quoted otherwise.
+7. Comments are not preserved. The frontmatter block is machine-owned; comments belong in
+   the body.
+
+The file is then `---`, newline, the frontmatter, newline, `---`, blank line, the body,
+and a single trailing newline.
+
+<Callout type="warn" title="Consequence">
+  Canonical form means the first write by any conforming implementation may
+  reformat a hand-authored frontmatter block — reordering keys, adding omitted
+  optional fields, normalizing quoting. This is expected. It also means two
+  different implementations produce identical bytes for identical state, so a
+  tree stays diff-stable no matter what wrote to it.
+</Callout>
+
+## Validation
+
+An implementation offering validation MUST detect at least:
+
+| Condition                                                                     | Severity |
+| ----------------------------------------------------------------------------- | -------- |
+| File cannot be parsed as a task                                               | error    |
+| Two live tasks share an `id`                                                  | error    |
+| Filename stem does not match `id`                                             | error    |
+| `phase` disagrees with the containing directory                               | error    |
+| `status` is not a configured status                                           | error    |
+| A `depends_on` entry does not parse                                           | error    |
+| A dependency cycle exists among local references                              | error    |
+| A dependency can never be satisfied (missing, archived, unresolvable project) | warning  |
+| `_index.md` is out of date                                                    | warning  |
+
+Repair MUST be opt-in. An implementation MAY repair a filename mismatch by renaming the
+file to match `id`, MAY repair phase disagreement by rewriting the field to the
+directory, and MAY regenerate `_index.md`. It MUST NOT attempt to repair anything else
+automatically — resolving a duplicate id, an unknown status, or a cycle requires
+knowing intent.

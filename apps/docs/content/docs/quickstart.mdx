@@ -1,0 +1,203 @@
+---
+title: Quick start
+description: From an empty repository to a working queue, in five commands.
+icon: Rocket
+---
+
+## Install
+
+<Tabs items={['npm', 'pnpm', 'yarn', 'npx']}>
+
+<Tab value="npm">
+
+```sh
+npm install -g @speekl/tasks
+```
+
+</Tab>
+
+<Tab value="pnpm">
+
+```sh
+pnpm add -g @speekl/tasks
+```
+
+</Tab>
+
+<Tab value="yarn">
+
+```sh
+yarn global add @speekl/tasks
+```
+
+</Tab>
+
+<Tab value="npx">
+
+```sh
+npx @speekl/tasks --help
+```
+
+</Tab>
+
+</Tabs>
+
+Either way, the command it installs is `tasks`. Node 20 or newer is required.
+
+<Callout title="Not installing globally?">
+  Everywhere the docs say `tasks`, `npx @speekl/tasks` works identically. Agents
+  should fall back to it automatically when `tasks` is not on `PATH`.
+</Callout>
+
+## Set up a project
+
+<Steps>
+
+<Step>
+
+### Scaffold `.tasks/`
+
+Run this at the root of the repository whose work you want to track.
+
+```sh
+tasks init
+```
+
+That creates `.tasks/` with a config, a README describing the convention, and a
+`.gitignore` for the transient lock directory. It also installs an [agent
+skill](/docs/guides/agent-workflow) into `.claude/skills/tasks/` so agents in this repo
+reach for the CLI instead of inventing their own markdown convention.
+
+```txt
+✓ Initialized .tasks/ at /Users/you/acme-api/.tasks
+  .tasks/config.yml
+  .tasks/README.md
+  .tasks/.gitignore
+  .claude/skills/tasks/SKILL.md
+  .claude/skills/tasks/reference/convention.md
+```
+
+Skip the skill with `tasks init --no-skill`. Re-running `init` on an existing tree is
+refused with exit `4` unless you pass `--force`, and even then an edited `config.yml`
+is left alone.
+
+</Step>
+
+<Step>
+
+### Create some tasks
+
+The first argument is the **phase** — a directory grouping one body of work. It is
+created on first use; there is no separate step.
+
+```sh
+tasks new auth-rework "Design token schema"
+tasks new auth-rework "Implement refresh endpoint"
+```
+
+The id defaults to a kebab-case slug of the name (`design-token-schema`), and must be
+unique across the whole tree. Override it with `--id`.
+
+</Step>
+
+<Step>
+
+### Declare what waits on what
+
+```sh
+tasks dep add implement-refresh design-token-schema
+```
+
+`dep add` refuses a reference to a task that does not exist, and refuses to introduce a
+cycle — so a dependency you can add is one that can eventually resolve.
+
+</Step>
+
+<Step>
+
+### Fill in the body
+
+`tasks new` scaffolds `## Description`, `## Acceptance criteria`, and `## Notes`. Open
+the file and write them, with any editor.
+
+```sh
+$EDITOR .tasks/auth-rework/design-token-schema.md
+```
+
+A task whose body is empty is not a task, it is a reminder. Put enough in it that a
+different agent arriving cold in a later session can do the work without asking.
+
+</Step>
+
+<Step>
+
+### Work the loop
+
+```sh
+tasks ready
+```
+
+```txt
+ ID                    STATUS    PHASE         DEPENDS ON   UPDATED
+ design-token-schema   PENDING   auth-rework   —            2026-08-22 10:02
+
+ 1 ready
+```
+
+`implement-refresh` is absent — it is blocked on the schema task. Claim what is ready,
+do the work, then close it out:
+
+```sh
+tasks claim design-token-schema
+# ...do the actual work...
+tasks status design-token-schema DONE
+```
+
+Run `tasks ready` again and `implement-refresh` has appeared.
+
+</Step>
+
+</Steps>
+
+## Commit it
+
+`.tasks/` is meant to be committed. Task state branches, merges, and reviews like the
+rest of the repo.
+
+```sh
+git add .tasks .claude/skills/tasks
+git commit -m "Track the auth rework in .tasks/"
+```
+
+The one thing not to commit is `.tasks/.locks/`, and the scaffolded `.gitignore`
+already handles that.
+
+<Callout type="info" title="Keep the index fresh">
+  `_index.md` is a generated overview that only regenerates on demand. Run
+  `tasks reindex` before committing, or let `tasks validate --fix` catch it.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card
+    title="Core concepts"
+    href="/docs/concepts"
+    description="What phases, statuses, roles, and dependencies actually buy you."
+  />
+  <Card
+    title="Working with agents"
+    href="/docs/guides/agent-workflow"
+    description="The loop an agent should follow, and the rules that bite."
+  />
+  <Card
+    title="Configuration"
+    href="/docs/reference/configuration"
+    description="Rename statuses, define your own transition graph, set a default phase."
+  />
+  <Card
+    title="Command reference"
+    href="/docs/reference/commands"
+    description="Every command, flag, and failure mode."
+  />
+</Cards>

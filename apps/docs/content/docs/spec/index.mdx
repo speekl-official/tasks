@@ -1,0 +1,123 @@
+---
+title: Overview
+description: What the .tasks convention is, how it is versioned, and how to read these pages.
+icon: ScrollText
+---
+
+**The `.tasks` convention** is an open format for persistent task state in a source
+repository. Tasks are markdown files with YAML frontmatter under a `.tasks/` directory,
+versioned by git. Nothing about the format requires a particular tool, language, or
+runtime — it is files on disk, and any program that can read a directory can implement
+it.
+
+This section is **normative**. It defines what an implementation has to do. The rest of
+the documentation explains and demonstrates; where the two disagree, this section wins.
+
+<Callout title="Why a format and not just a tool">
+  Agents already read and write files. A task tracker that is only reachable
+  through one binary becomes a dependency every agent, editor, and CI job has to
+  acquire. A format makes the state itself the interface: a shell script with
+  `grep` can answer "what is ready", and a richer tool can enforce the rules on
+  top of the same bytes.
+</Callout>
+
+## Reading these pages
+
+The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **SHOULD**,
+**SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** are to be interpreted as
+described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
+[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when and only when they appear in
+capitals.
+
+Text in a `Non-normative` callout is explanation, not requirement.
+
+| Page                                             | Defines                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| [Directory layout](/docs/spec/layout)            | Where `.tasks/` lives, how it is discovered, what it contains.           |
+| [Task file](/docs/spec/task-file)                | Frontmatter fields, types, filename rules, the body.                     |
+| [Configuration](/docs/spec/configuration)        | `config.yml`, statuses, roles, transitions.                              |
+| [Dependency resolution](/docs/spec/dependencies) | Reference grammar and the resolution algorithm.                          |
+| [CLI contract](/docs/spec/cli)                   | Exit codes and JSON shapes, for implementations exposing a command line. |
+| [Conformance](/docs/spec/conformance)            | The roles an implementation can claim, and what each requires.           |
+
+## Version
+
+This document defines **`.tasks` convention v1**.
+
+The version is carried in each project's `config.yml`:
+
+```yaml
+version: 1
+```
+
+A project that omits `config.yml` entirely, or omits `version`, is a v1 project — v1 is
+the default precisely so that the minimal tree (a directory of markdown files) is valid
+without ceremony.
+
+### Compatibility policy
+
+Within v1:
+
+- Fields and configuration keys MAY be **added**. An implementation MUST tolerate
+  frontmatter keys and `--json` fields it does not recognize, and MUST NOT fail on them.
+- Field meanings MUST NOT change, and fields MUST NOT be removed or repurposed.
+- Constraints MAY be **relaxed** but MUST NOT be tightened.
+
+<Callout type="warn" title="Unknown frontmatter keys are not durable">
+  Tolerating an unknown key on read is required; *preserving* it on write is
+  not. Canonical serialization emits exactly the fields defined in [task
+  file](/docs/spec/task-file), so any other key is dropped the next time an
+  implementation rewrites that file. Do not store metadata in task frontmatter
+  that you need to survive. Put it in the body, which is never rewritten.
+</Callout>
+
+Anything else — removing a field, narrowing a pattern, changing an exit code, altering
+resolution semantics — requires **v2**, and a v2 project MUST declare `version: 2`.
+
+An implementation that encounters a `version` it does not support MUST refuse to operate
+on the tree rather than guessing. Reading it as though it were v1 risks writing state
+back in a form the newer tool will misread.
+
+## Relationship to `@speekl/tasks`
+
+[`@speekl/tasks`](/docs/reference/commands) is the **reference implementation**: a CLI
+that implements every part of this specification, including the optional
+[CLI contract](/docs/spec/cli). Where this document is ambiguous, the reference
+implementation's behavior is the tie-breaker, and the ambiguity is a bug in this
+document.
+
+The reference implementation is versioned separately from the convention. `@speekl/tasks`
+1.4.0 and 2.0.0 can both implement `.tasks` v1; the CLI's major version tracks _its own_
+interface, not the format's.
+
+<Callout type="info" title="Non-normative">
+  Nothing here obliges you to use the CLI, and nothing obliges the CLI to be the
+  only writer. A repository can be edited by hand, by an agent using plain file
+  tools, and by the CLI, in any order. That is the point of specifying the files
+  rather than the commands.
+</Callout>
+
+## Design constraints
+
+These are the properties the rest of the specification exists to preserve. An
+implementation choice that satisfies the letter of a rule while breaking one of these is
+non-conforming in spirit, and the rule is probably underspecified.
+
+<Cards>
+  <Card
+    title="Fail safe, never fail useful"
+    description="Any state an implementation cannot resolve confidently counts as blocking. A dependency is satisfied only on positive evidence."
+  />
+  <Card
+    title="The filesystem is authoritative"
+    description="No cache, no index, no daemon holds truth. Every answer is derivable from the files, so an outside edit is never stale."
+  />
+  <Card
+    title="Diffs stay reviewable"
+    description="Canonical serialization and atomic writes, so a file changes only when its meaning changes."
+  />
+  <Card
+    title="Human-editable"
+    description="A person with a text editor can do anything the tooling can, and the tooling can repair what they got wrong."
+  />
+</Cards>

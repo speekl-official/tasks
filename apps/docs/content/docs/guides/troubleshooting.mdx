@@ -1,0 +1,194 @@
+---
+title: Troubleshooting
+description: Reading validate findings, and what each common failure actually means.
+icon: Wrench
+---
+
+<Callout title="Start here, always">
+  Run `tasks validate` before hand-repairing anything. It reports id/filename
+  mismatches, phase drift, unknown statuses, broken or cyclic dependencies, and
+  a stale `_index.md` — and `--fix` repairs the mechanically safe subset.
+</Callout>
+
+```sh
+tasks validate --fix
+```
+
+Errors exit `4`, so CI can gate on them. Warnings do not.
+
+## Common failures
+
+<Accordions>
+
+<Accordion title="No .tasks/ directory found (exit 3)">
+
+Nothing in this directory or any parent has a `.tasks/`. Either you are in the wrong
+repository, or the project is not set up.
+
+```sh
+tasks init
+```
+
+Creating `.tasks/` is a project-level decision — an agent should ask before running this
+rather than doing it as a side effect of a question about work.
+
+</Accordion>
+
+<Accordion title="Illegal transition PENDING -> DONE (exit 4)">
+
+Status skipping. By default a task steps forward or back exactly one status, so nothing
+reaches done unworked.
+
+The error's `details.allowed` lists what _is_ legal from here:
+
+```json
+{ "from": "PENDING", "to": "DONE", "allowed": ["IN_PROGRESS"] }
+```
+
+Claim it first, then complete it:
+
+```sh
+tasks claim token-schema
+tasks status token-schema DONE
+```
+
+</Accordion>
+
+<Accordion title="Use `tasks claim <id>` to move a task to IN_PROGRESS (exit 2)">
+
+`tasks status <id> <claimed-role>` is deliberately refused. Routing claims through
+`tasks claim` is what guarantees `claimed_by` and `claimed_at` are always recorded.
+
+</Accordion>
+
+<Accordion title="Task is already claimed (exit 4)">
+
+Someone — or something — else has it. The error carries `claimed_by` and `claimed_at`.
+
+Pick a different task from `tasks ready`. Do **not** reach for `--force`; it overrides
+_dependencies_, not other people's claims.
+
+If the claim is genuinely stale — an agent that died, a colleague who moved on — release
+it explicitly:
+
+```sh
+tasks release token-schema
+```
+
+</Accordion>
+
+<Accordion title="Task is blocked by: … (exit 4)">
+
+A dependency is unsatisfied. `details.blocked_by` lists the refs; `tasks dep list <id>`
+explains each one.
+
+```sh
+tasks dep list wire-refresh
+```
+
+Finish the dependency, remove it if it no longer applies (`tasks dep rm`), or — only when
+a human has said the dependency does not apply — `tasks claim <id> --force`.
+
+</Accordion>
+
+<Accordion title="Task id is reserved by an archived task (exit 4)">
+
+Ids stay unique across the whole tree including `.archive/`, so a new task can never
+silently inherit a deleted task's inbound dependencies.
+
+Choose another id with `--id`, or purge the archived one first if you really mean to
+reuse it:
+
+```sh
+tasks delete old-id --purge
+```
+
+</Accordion>
+
+<Accordion title="A task I expect is missing from `list` or `ready`">
+
+Almost always **scope**. Without `-p` or `-a`, both commands scope to `active_phase` from
+`.tasks/config.yml` when it is set.
+
+```sh
+tasks list --all
+```
+
+If it appears under `--all`, set or clear `active_phase` to match how you actually work.
+If it still does not appear, it may be claimed (not ready), blocked (not ready), or
+archived (excluded from every default query).
+
+</Accordion>
+
+<Accordion title="config.yml: … is not in `statuses` (exit 2)">
+
+The config is validated on load, so a bad one fails the command you ran rather than
+surfacing later as a mysterious conflict. Roles and transitions must name real statuses,
+and `roles.ready → roles.claimed` must be legal — otherwise `tasks claim` could never
+succeed.
+
+See [configuration](/docs/reference/configuration).
+
+</Accordion>
+
+</Accordions>
+
+## Reading validate findings
+
+| Kind                                                                           | Severity | `--fix` | What happened                                                                                                  |
+| ------------------------------------------------------------------------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `filename-mismatch`                                                            | error    | yes     | The file is named `x.md` but declares `id: y`. Fix renames the file to match the id.                           |
+| `phase-drift`                                                                  | error    | yes     | Frontmatter's `phase` disagrees with the containing directory. The **directory wins**; fix rewrites the field. |
+| `stale-index`                                                                  | warning  | yes     | `_index.md` no longer matches the tasks on disk. Fix regenerates it.                                           |
+| `malformed`                                                                    | error    | no      | The file could not be parsed as a task at all.                                                                 |
+| `duplicate-id`                                                                 | error    | no      | Two live files declare the same `id`.                                                                          |
+| `unknown-status`                                                               | error    | no      | A status not in the configured list.                                                                           |
+| `malformed-ref`                                                                | error    | no      | A `depends_on` entry that will not parse.                                                                      |
+| `cycle`                                                                        | error    | no      | A dependency cycle.                                                                                            |
+| `dependency-missing` / `dependency-archived` / `dependency-unresolved-project` | warning  | no      | A dependency that will never be satisfied, so the task can never become ready.                                 |
+
+`--fix` applies only the mechanically safe repairs and reports the rest for a human. Exit
+`0` with `{"ok": true, "findings": []}` means the tree is clean.
+
+### Fixing the ones `--fix` cannot
+
+**`duplicate-id`** — usually a bad merge, or a `mv` that should have been `tasks move`.
+Decide which file is real, delete or re-id the other, then re-run `validate`.
+
+**`malformed`** — open the file. It is almost always a YAML error in the frontmatter: an
+unquoted timestamp, a stray tab, an unclosed `---`. Compare against the
+[file format](/docs/reference/file-format).
+
+**`unknown-status`** — a status was renamed in `config.yml` without migrating the tasks.
+See [migrating an existing tree](/docs/guides/custom-statuses#migrating-an-existing-tree).
+
+**`cycle`** — break it with `tasks dep rm`. This is worth fixing promptly: a cycle
+silently drops every task in it out of `tasks ready` forever, which is the worst failure
+mode for an agent that trusts the query.
+
+**`dependency-*`** — the reference points at something that will never be done. Either
+recreate the missing task, or drop the edge:
+
+```sh
+tasks dep rm wire-refresh token-schema
+```
+
+## Recovering from a bad state
+
+**A crashed `tasks move`.** The move writes the destination before unlinking the source,
+so a crash leaves a duplicate rather than losing the task. `tasks validate` reports it as
+`duplicate-id`; delete whichever copy is in the wrong place.
+
+**A stale lock.** Locks live in `.tasks/.locks/` and go stale after 10 seconds, so a
+crashed process does not block claims for long. If one somehow persists, deleting the
+file is safe — `.locks/` is git-ignored and holds no state.
+
+**Anything else.** `.tasks/` is committed, so the ordinary answer applies:
+
+```sh
+git diff .tasks
+git checkout -- .tasks
+```
+
+That is the real reason task state lives in the repo: recovery is the same recovery you
+already know.

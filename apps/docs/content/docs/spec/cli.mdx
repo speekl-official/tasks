@@ -1,0 +1,191 @@
+---
+title: CLI contract
+description: Exit codes, stream discipline, and JSON shapes for implementations that expose a command line.
+icon: Terminal
+---
+
+This page is **conditional**: it applies to an implementation that exposes a command-line
+interface. An implementation that is a library, an editor plugin, or an MCP server MUST
+still satisfy every other page, and MAY ignore this one.
+
+An implementation that exposes a command line and claims conformance MUST satisfy this
+page in full. Half-implementing it is worse than not claiming it: the entire value is
+that a caller can branch on the contract without knowing which tool it is talking to.
+
+## Streams
+
+| Stream | Content                      |
+| ------ | ---------------------------- |
+| stdout | Successful output only.      |
+| stderr | Errors and diagnostics only. |
+
+The separation MUST be absolute. An implementation MUST NOT write a diagnostic,
+progress indicator, or warning to stdout when structured output was requested, because a
+caller is piping that stream into a parser.
+
+## Structured output
+
+Every command that produces output MUST accept a `--json` flag.
+
+Under `--json`:
+
+- Successful output MUST be a single JSON document on stdout.
+- Errors MUST be a single JSON document on stderr, in the [error envelope](#errors).
+- Nothing else may appear on either stream.
+
+Without `--json`, output is unspecified and intended for humans. Callers MUST NOT parse
+it, and implementations are free to change it at any time.
+
+## Exit codes
+
+| Code | Name      | Meaning                                                                         |
+| ---- | --------- | ------------------------------------------------------------------------------- |
+| `0`  | success   | The operation completed.                                                        |
+| `1`  | internal  | An unexpected failure in the implementation.                                    |
+| `2`  | usage     | Invalid invocation, unknown status, malformed reference, invalid configuration. |
+| `3`  | not found | No `.tasks/` discovered, or no task with the given id.                          |
+| `4`  | conflict  | The tree's state forbids the operation.                                         |
+
+An implementation MUST exit with these codes, and callers MUST branch on them rather than
+on message text.
+
+Requests for help or version information MUST exit `0`.
+
+### Which code applies
+
+**`2` usage** covers anything wrong with the request or with configuration, before the
+tree's state is consulted: an unknown flag, a status name not in `statuses`, a reference
+that does not parse, an absolute path in a reference, an invalid `config.yml`.
+
+**`3` not found** covers a referent that does not exist: no project, no such task id. An
+id that exists only in `.archive/` MUST be reported as not found, and the error SHOULD
+say that it is archived.
+
+**`4` conflict** covers a well-formed request the current state forbids: an illegal
+status transition, a task already claimed, a claim blocked by an unsatisfied dependency,
+a deletion refused because of dependents, initializing over an existing tree, adding a
+dependency that would cycle.
+
+An empty result set is **`0`**. "Nothing is ready" is an answer, not a failure.
+
+## Errors
+
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
+    "details": {
+      "id": "wire-refresh",
+      "from": "PENDING",
+      "to": "DONE",
+      "allowed": ["IN_PROGRESS"]
+    }
+  }
+}
+```
+
+`error.code` MUST be one of `USAGE`, `NOT_FOUND`, `CONFLICT`, `INTERNAL`, corresponding
+to exit codes `2`, `3`, `4`, `1`.
+
+`error.message` is human-readable and MUST NOT be parsed by callers.
+
+`error.details` is OPTIONAL and carries structured facts about the specific failure.
+When an implementation has a machine-usable fact about a failure, it SHOULD put it here
+rather than only in the message. In particular:
+
+| Failure                  | SHOULD include             |
+| ------------------------ | -------------------------- |
+| Illegal transition       | `from`, `to`, `allowed`    |
+| Unknown status           | `status`, `statuses`       |
+| Already claimed          | `claimed_by`, `claimed_at` |
+| Blocked claim            | `blocked_by`               |
+| Deletion with dependents | `dependents`               |
+
+## Task object
+
+An operation returning a single task MUST emit at least:
+
+```json
+{
+  "id": "wire-refresh",
+  "phase": "auth-rework",
+  "status": "IN_PROGRESS",
+  "depends_on": ["token-schema"],
+  "created": "2026-08-21T09:14:00Z",
+  "updated": "2026-08-22T11:02:41Z",
+  "claimed_by": "agent-7",
+  "claimed_at": "2026-08-22T11:02:41Z",
+  "path": "/abs/path/.tasks/auth-rework/wire-refresh.md"
+}
+```
+
+`path` MUST be absolute. It is what a caller opens to edit the body, so a relative path
+would be ambiguous against the caller's working directory.
+
+An operation MAY add fields describing what it did — for example the prior status of a
+transition, or the prior phase of a move.
+
+## Collection object
+
+An operation returning multiple tasks MUST emit:
+
+```json
+{
+  "phase": "auth-rework",
+  "count": 1,
+  "tasks": [{ "id": "wire-refresh", "…": "…" }]
+}
+```
+
+`phase` MUST be the resolved query scope, or `null` when the query spanned the whole
+tree. `count` MUST equal `tasks.length`.
+
+## Dependency reporting
+
+Where an operation reports dependency state, each entry MUST carry the reference, whether
+it is satisfied, and — when it is not — the reason:
+
+```json
+{
+  "ref": "token-schema",
+  "satisfied": false,
+  "status": "PENDING",
+  "reason": "not-done"
+}
+```
+
+`reason` MUST be one of the values defined in
+[dependency resolution](/docs/spec/dependencies#resolution), and MUST be absent or `null`
+when `satisfied` is true. `status` MAY be `null` when the target could not be read.
+
+## Validation output
+
+An operation reporting validation MUST emit:
+
+```json
+{
+  "ok": true,
+  "checked": 17,
+  "fixed": [],
+  "findings": []
+}
+```
+
+`ok` MUST be `false` if and only if at least one finding has error severity. Warnings
+alone MUST leave it `true`.
+
+Each finding MUST carry `severity` (`error` or `warning`), a stable `kind` identifier,
+and a `message`, and SHOULD carry the `task` and `file` it concerns.
+
+An implementation MUST exit `4` when validation produced errors, and MUST exit `0` when
+it produced only warnings — so that a build can gate on integrity without failing over a
+stale generated index.
+
+## Forward compatibility
+
+An implementation MAY add fields to any object defined here. A caller MUST tolerate
+fields it does not recognize.
+
+An implementation MUST NOT remove a defined field, repurpose one, or change an exit code
+within a major version of the convention.

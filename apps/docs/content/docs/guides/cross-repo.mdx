@@ -1,0 +1,109 @@
+---
+title: Cross-repo dependencies
+description: Waiting on work tracked in another repository, and how monorepo packages scope their own trees.
+icon: GitFork
+---
+
+A task can depend on work tracked in a **different** `.tasks/` tree — a sibling
+repository, or another package in the same monorepo.
+
+```yaml
+depends_on: [token-schema, ../upstream-repo:publish-endpoint]
+```
+
+## How scoping works
+
+`.tasks/` is discovered by walking up from the current directory, git-style: **nearest
+wins, no merging.** A monorepo package with its own `.tasks/` is its own independent
+scope, and a command run inside it sees only that tree.
+
+<Files>
+  <Folder name="monorepo" defaultOpen>
+    <Folder name="packages" defaultOpen>
+      <Folder name="api" defaultOpen>
+        <Folder name=".tasks" />
+      </Folder>
+      <Folder name="web" defaultOpen>
+        <Folder name=".tasks" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+Running `tasks ready` inside `packages/web` shows only web's tasks. To let a web task
+wait on an API task:
+
+```sh
+cd packages/web
+tasks dep add render-session ../api:session-endpoint
+```
+
+## Anchoring
+
+The path resolves relative to the **project root** — the directory containing `.tasks/` —
+never the current working directory. That is what makes frontmatter mean the same thing
+whether you run the CLI from the repo root or three directories down.
+
+**Absolute paths are rejected** with exit `2`:
+
+```txt
+Invalid dependency reference "/Users/you/upstream:publish-endpoint": absolute paths
+are not allowed, because frontmatter is committed and must resolve on any machine.
+Use a path relative to the project root.
+```
+
+Two reasons: an absolute path does not survive a clone onto another machine, and banning
+it removes the Windows drive-letter ambiguity (`C:\repo:task-id`) from the "split on the
+last colon" rule.
+
+## What the other tree contributes
+
+| Aspect       | Behaviour                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| Access       | **Read-only.** Nothing in the other project is ever mutated.                                           |
+| Satisfaction | Judged against _that_ project's `done` role — which may be a different literal status name than yours. |
+| Cost         | The tree is loaded once per command and cached, so many refs into the same repo cost a single read.    |
+| Absence      | Not an error. The dependency resolves as `unresolved-project`, which **blocks**.                       |
+
+That last row is the important one. A sibling repository that is not checked out does not
+break your commands — it makes the dependent task stay out of `tasks ready` until the
+checkout exists. Fail safe, always.
+
+```sh
+tasks dep list render-session
+```
+
+```txt
+ DEPENDENCY               SATISFIED   DETAIL
+ ../api:session-endpoint  no          ../api:session-endpoint (project not found)
+```
+
+<Callout type="warn" title="Resolution walks up, too">
+  The path is resolved and then searched *upward* for a `.tasks/` directory,
+  exactly like normal discovery. If `../api` has no `.tasks/` of its own,
+  resolution can land on a parent tree — in a monorepo, possibly the root tree —
+  and quietly match against that instead. Point cross-repo refs at directories
+  that really do own a `.tasks/`, and confirm with `tasks dep list` after adding
+  one.
+</Callout>
+
+## Cycles across repos
+
+`tasks dep add` refuses to create a cycle, but only among **local** refs. A cross-repo
+reference cannot participate in a cycle the CLI can see: the other tree is read-only and
+may not even be checked out, so there is no reliable way to walk the whole graph.
+
+Two repos that depend on each other will therefore be accepted, and both tasks will
+simply never become ready. Nothing corrupts, but nothing progresses either — check with
+`tasks dep list` on both sides when work stalls with no visible cause.
+
+## When to reach for this
+
+Cross-repo dependencies are worth it when a real handoff exists — the API must ship an
+endpoint before the client can call it — and the two repos are usually checked out
+together.
+
+They are a poor fit when the other repo is rarely present locally, since every dependent
+task then sits blocked with a `unresolved-project` reason that says nothing about the
+actual state of the work. In that case, track the handoff as a local task in each repo
+and coordinate the way you already coordinate releases.

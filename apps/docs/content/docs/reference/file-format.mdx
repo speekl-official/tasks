@@ -1,0 +1,129 @@
+---
+title: File format
+description: The .tasks/ directory layout, task frontmatter, and what owns which part of a file.
+icon: FileCode
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definitions live in [directory layout](/docs/spec/layout)
+  and [task file](/docs/spec/task-file). Read this page to understand the
+  format; read those to implement it.
+</Callout>
+
+Read this when you need to hand-author or repair a task file, or interpret a
+`tasks validate` finding. For day-to-day work, the [commands](/docs/reference/commands)
+page is enough.
+
+## Directory layout
+
+```txt
+.tasks/
+  config.yml        project config — statuses, roles, transitions, active_phase
+  README.md         the convention, scaffolded by `tasks init`
+  .gitignore        self-contained; ignores .locks/
+  _index.md         generated view; regenerate with `tasks reindex`
+  <phase>/          a phase: free-form slug, e.g. auth-rework/ or 2026-q1/
+    <id>.md         one task, filename always matches its `id`
+  .archive/         soft-deleted tasks, excluded from every default query
+  .locks/           transient claim locks, git-ignored
+```
+
+`.tasks/` is discovered by walking up from the current directory, git-style: **nearest
+wins, no merging** with a parent tree. Each package in a monorepo with its own `.tasks/`
+is its own independent scope.
+
+Commit everything except `.locks/`.
+
+## Task file
+
+```markdown title=".tasks/auth-rework/token-schema.md"
+---
+id: token-schema
+phase: auth-rework
+status: PENDING
+depends_on: [audit-current-claims]
+created: "2026-08-21T09:14:00Z"
+updated: "2026-08-21T09:14:00Z"
+claimed_by: null
+claimed_at: null
+---
+
+# Design the token schema
+
+## Description
+
+## Acceptance criteria
+
+- [ ]
+
+## Notes
+```
+
+The frontmatter is **machine-owned**: the CLI rewrites it in canonical form and does not
+preserve comments or key order there. The markdown body is **yours** — edit it freely
+with normal file tools.
+
+| Field                       | Notes                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                        | Stable slug, globally unique across the whole tree including `.archive/`. Lowercase kebab-case. The filename is always `<id>.md`. |
+| `phase`                     | Mirrors the containing directory. **The directory is authoritative** — `validate --fix` rewrites this field to match.             |
+| `status`                    | Must be one of `config.yml`'s `statuses`.                                                                                         |
+| `depends_on`                | List of refs; see [dependencies](/docs/reference/dependencies).                                                                   |
+| `created` / `updated`       | Quoted ISO 8601 UTC strings. Quoted so YAML parses them as strings, not dates.                                                    |
+| `claimed_by` / `claimed_at` | Set by `claim`, cleared automatically when the task leaves the claimed status.                                                    |
+
+The task's **title** is the first `# ` heading in the body, not a frontmatter field.
+
+<Callout type="warn" title="Never hand-edit frontmatter">
+  Every field has a command: `status`, `claim`, `release`, `dep add` / `dep rm`,
+  `move`. Editing the YAML directly bypasses the transition and dependency
+  checks that make the tree trustworthy.
+</Callout>
+
+## Ids
+
+Ids match `^[a-z0-9][a-z0-9-]*$` — lowercase kebab-case. `tasks new` derives one by
+NFKD-normalizing the title, folding accents, and replacing runs of non-alphanumerics
+with a hyphen. Pass `--id` when the derived slug is wrong or already taken.
+
+An id is unique across the **whole tree, including `.archive/`**. Archived ids stay
+reserved so a new task can never silently inherit a deleted task's inbound dependencies.
+
+## Phases
+
+Phases match `^[a-z0-9][a-z0-9._-]*$` — lowercase slugs, dots and underscores allowed.
+They are created implicitly by `tasks new` and `tasks move`, and an emptied phase
+directory is removed after a move.
+
+Because the directory is authoritative, **never `mv` a task file**. Use
+`tasks move <id> <phase>`.
+
+## Writes
+
+Every write is atomic — temp file plus rename — so a task file is never observed
+half-written, even if the process dies mid-command. Frontmatter is re-serialized in
+canonical field order on every write, so files do not churn and diffs stay reviewable.
+
+`tasks move` deliberately writes the destination _before_ unlinking the source: a crash
+between the two leaves a duplicate that `tasks validate` reports, rather than losing the
+task.
+
+## `_index.md`
+
+A generated overview of the tree, written by `tasks reindex`. **No command reads it** —
+it exists for humans skimming the repo on GitHub.
+
+It is committed, so a stale one misleads reviewers in a diff. `tasks validate` reports
+`stale-index` as a _warning_ (never an error, so CI does not fail on it) and
+`--fix` regenerates it.
+
+## The archive
+
+`tasks delete` moves a task to `.tasks/.archive/<id>.md` by default. The archive is flat,
+so the originating phase is preserved in frontmatter rather than in the path.
+
+Archived tasks are excluded from every default query, and **never satisfy a dependency** —
+a dependency on an archived task resolves with reason `archived`, which blocks.
+
+`tasks delete --purge` removes the file outright instead. There is no restore command;
+recovery is `git checkout` or moving the file back and running `tasks validate --fix`.

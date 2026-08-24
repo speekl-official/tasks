@@ -1,0 +1,12 @@
+{
+  "title": "Specification",
+  "pages": [
+    "index",
+    "layout",
+    "task-file",
+    "configuration",
+    "dependencies",
+    "cli",
+    "conformance"
+  ]
+}

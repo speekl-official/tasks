@@ -1,0 +1,189 @@
+---
+title: Custom statuses
+description: Rename the lifecycle, add a review stage, and define your own transition graph.
+icon: SlidersHorizontal
+---
+
+The default lifecycle is `PENDING → IN_PROGRESS → DONE`. Most teams want at least one
+more stage, and different words. Both are supported, because **no command hardcodes a
+literal status** — each binds to a [role](/docs/concepts#statuses-and-roles).
+
+## Renaming, with no other change
+
+```yaml title=".tasks/config.yml"
+version: 1
+statuses: [TODO, DOING, SHIPPED]
+```
+
+That is the whole change. Roles default to the **first / second / last** entries, so
+`ready` is `TODO`, `claimed` is `DOING`, `done` is `SHIPPED`, and every command keeps
+working:
+
+```sh
+tasks ready              # looks for TODO
+tasks claim wire-auth    # moves it to DOING
+tasks status wire-auth SHIPPED
+```
+
+## Adding a review stage
+
+```yaml title=".tasks/config.yml"
+version: 1
+statuses: [TODO, DOING, REVIEW, SHIPPED]
+```
+
+With four statuses the role defaults still land correctly — `ready: TODO`,
+`claimed: DOING`, `done: SHIPPED` — and the default transition rule gives you exactly the
+chain you would draw:
+
+```txt
+TODO ⇄ DOING ⇄ REVIEW ⇄ SHIPPED
+```
+
+Only `SHIPPED` satisfies a dependency. A task sitting in `REVIEW` does **not** unblock
+its dependents, which is usually what you want: review is not done.
+
+## Roles that are not first / second / last
+
+Sometimes the natural word order does not match the role order. Say you want a triage
+stage before the ready pool:
+
+```yaml title=".tasks/config.yml"
+version: 1
+statuses: [TRIAGE, TODO, DOING, SHIPPED]
+
+roles:
+  ready: TODO
+  claimed: DOING
+  done: SHIPPED
+```
+
+Now `tasks ready` ignores `TRIAGE` entirely — items sit there until someone moves them
+to `TODO` with `tasks status`, and only then enter the pool.
+
+<Callout type="warn" title="ready → claimed must be legal">
+  The config is refused at load time if `roles.ready → roles.claimed` is not a
+  legal transition, because `tasks claim` could never succeed. Here `TODO →
+  DOING` is adjacent, so the default rule covers it. If it were not, you would
+  need an explicit `transitions` entry.
+</Callout>
+
+## A custom transition graph
+
+The default rule — step forward or back by exactly one — is uniform and unopinionated.
+When you need something else, list every legal pair:
+
+```yaml title=".tasks/config.yml"
+version: 1
+statuses: [TODO, DOING, REVIEW, SHIPPED]
+
+roles:
+  ready: TODO
+  claimed: DOING
+  done: SHIPPED
+
+transitions:
+  - [TODO, DOING] # claim
+  - [DOING, TODO] # release
+  - [DOING, REVIEW] # hand off for review
+  - [REVIEW, DOING] # changes requested
+  - [REVIEW, SHIPPED] # approved
+  - [SHIPPED, DOING] # reopen
+```
+
+<Callout type="error" title="transitions REPLACES the default rule">
+  It does not layer onto it. Anything you leave out becomes illegal, including
+  backward moves you never thought about. Omit `[DOING, TODO]` above and `tasks
+  release` fails with exit `4` forever.
+</Callout>
+
+Walk the whole graph when you write one. A quick checklist:
+
+- Can you claim? (`ready → claimed`) — enforced at load time.
+- Can you release? (`claimed → ready`) — nothing enforces this; you will find out at
+  the first `tasks release`.
+- Can you reopen? (`done → claimed`) — otherwise a mistakenly-completed task is stuck.
+- Can you get back out of every intermediate stage?
+
+### What a graph buys you
+
+Explicit transitions let you express things the step rule cannot. Skipping review for a
+trivial change, for instance:
+
+```yaml
+transitions:
+  - [TODO, DOING]
+  - [DOING, TODO]
+  - [DOING, REVIEW]
+  - [DOING, SHIPPED] # fast path, no review
+  - [REVIEW, DOING]
+  - [REVIEW, SHIPPED]
+  - [SHIPPED, DOING]
+```
+
+Or a strictly one-way lifecycle with no reopen at all — though think twice, since agents
+do mark things done in error and reopening is the cheapest recovery.
+
+## What not to add
+
+`BLOCKED` and `CANCELLED` are not special-cased, and usually should not be statuses:
+
+- **Blocking is already expressed** by `depends_on`, and unlike a status it says _what_
+  the block is. A `BLOCKED` status is a note to a human that no query can act on.
+- **Cancellation is `tasks delete`.** The task is archived, keeps its id reserved, and
+  stops satisfying dependencies — which is the behaviour you actually want.
+
+If you want them anyway, nothing stops you: add them to `statuses` and give them
+transitions.
+
+## Migrating an existing tree
+
+Renaming a status does **not** rewrite existing task files. Tasks still carrying the old
+name become `unknown-status` errors in `tasks validate`, and `--fix` will not repair them —
+guessing the mapping is not mechanically safe.
+
+<Steps>
+
+<Step>
+
+### Add the new names alongside the old
+
+```yaml
+statuses: [PENDING, TODO, IN_PROGRESS, DOING, DONE, SHIPPED]
+```
+
+Ugly, but every existing task stays valid while you migrate.
+
+</Step>
+
+<Step>
+
+### Move each task across
+
+```sh
+tasks list --all --status PENDING --json | jq -r '.tasks[].id' |
+  while read -r id; do tasks status "$id" TODO; done
+```
+
+Mind the transition rule while both sets are in the list — you may need explicit
+`transitions` entries to make the sideways moves legal.
+
+</Step>
+
+<Step>
+
+### Drop the old names
+
+Trim `statuses` back to the new list, set `roles` explicitly, and confirm:
+
+```sh
+tasks validate
+```
+
+</Step>
+
+</Steps>
+
+For a small tree, a search-and-replace across `.tasks/**/*.md` followed by
+`tasks validate` is faster and perfectly legitimate — frontmatter is machine-_owned_,
+not machine-_only_.

@@ -1,0 +1,127 @@
+---
+title: Dependencies
+description: Reference syntax, resolution rules, cycle detection, and every blocking reason.
+icon: Network
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definition is [specification › dependency
+  resolution](/docs/spec/dependencies), including the exact resolution algorithm
+  and every reason code.
+</Callout>
+
+`depends_on` is what makes `tasks ready` mean anything. Without it, "ready" degrades to
+"not started", and an agent picking the top of the list learns nothing about order.
+
+## Reference syntax
+
+A reference is either a **bare id** in this project, or `<relative-path>:<id>` pointing
+into another project's `.tasks/` tree:
+
+```yaml
+depends_on: [token-schema, ../upstream-repo:publish-endpoint]
+```
+
+The string is split on the **last** colon, so a path containing colons still parses.
+
+| Rule                                                          | Why                                                                                                                                 |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Ids match `^[a-z0-9][a-z0-9-]*$`                              | Filesystem- and URL-safe.                                                                                                           |
+| Paths resolve relative to the **project root**, never the cwd | Frontmatter means the same thing from any subdirectory.                                                                             |
+| Absolute paths are **rejected**                               | They do not survive a clone on another machine. Rejecting them also removes the Windows drive-letter ambiguity from the split rule. |
+
+Manage them with the CLI rather than by hand:
+
+```sh
+tasks dep add wire-refresh token-schema ../upstream-repo:publish-endpoint
+tasks dep rm  wire-refresh token-schema
+tasks dep list wire-refresh
+```
+
+## Resolution
+
+A dependency is **satisfied** when the referenced task exists, is live (not archived),
+and its status equals the `done` role — of _its own_ project, which matters when that
+project renames its statuses.
+
+**Everything else blocks.** `tasks dep list --json` reports a `reason` per unsatisfied
+dependency:
+
+| `reason`             | Meaning                                                      | Typical cause                                 |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------- |
+| `not-done`           | Exists, simply is not finished yet                           | Normal operation                              |
+| `missing`            | No such task id in the target tree                           | Typo, or the task was purged                  |
+| `archived`           | Soft-deleted; archived tasks never satisfy a dependency      | `tasks delete` on something still depended on |
+| `unresolved-project` | A cross-repo path that does not resolve, or has no `.tasks/` | Sibling repo not checked out                  |
+
+A **malformed** reference — one that will not even parse — also resolves as blocking,
+reported as `missing`. `tasks validate` reports the parse error itself separately, as
+`malformed-ref`.
+
+<Callout type="info" title="Fail safe, not fail useful">
+  The asymmetry is deliberate. A typo that blocks costs a delay and a puzzled
+  look at `tasks dep list`. A typo that read as *satisfied* would send an agent
+  off to build on something that does not exist. Never as satisfied, always as
+  blocking.
+</Callout>
+
+## Cycles
+
+`tasks dep add` refuses a reference that would introduce a cycle:
+
+```txt
+Adding token-schema to design-api would create a dependency cycle.
+```
+
+Only **local** refs participate: a cross-repo reference cannot form a cycle the CLI can
+see, since the other tree is read-only and may not even be checked out.
+
+A cycle that reaches the tree anyway — through a hand-edited file, or a merge — is
+caught by `tasks validate` as a `cycle` error, which `--fix` will not repair. It matters
+because a cycle silently drops every task in it out of `tasks ready` forever, which is
+the worst failure mode for an agent that trusts the query.
+
+## Deleting something that is depended on
+
+`tasks delete` refuses by default when live tasks depend on the target:
+
+```txt
+Task "token-schema" is depended on by: wire-refresh, audit-claims.
+Use --force to delete anyway.
+```
+
+With `--force`, the delete proceeds and the dependents are reported as
+`orphaned_dependents`. They are now permanently blocked — their dependency resolves as
+`archived` (or `missing` under `--purge`) forever. Run `tasks validate` afterwards and
+clean up with `tasks dep rm`.
+
+Because ids stay reserved after deletion, recreating a task with the same id does **not**
+silently reconnect it to those dangling references — `tasks new` refuses the id outright.
+
+## Cross-repo dependencies
+
+Cross-repo refs let one repository wait on work tracked in another:
+
+```yaml
+depends_on: [../upstream-repo:publish-endpoint]
+```
+
+The other project is **read-only** — nothing in it is mutated, and its tree is loaded
+once per command and cached, so a fan-out of refs into the same repo costs a single read.
+An unreachable path is not an error; it is a blocking `unresolved-project`.
+
+See the [cross-repo guide](/docs/guides/cross-repo) for how this plays out in a monorepo
+and in sibling checkouts.
+
+## Modelling advice
+
+Prefer several small dependent tasks over one large one. A single task with a ten-item
+checklist in its body tells the next agent nothing about what is unblocked; the same work
+split into four tasks with two edges tells it exactly where to start.
+
+Two edges to keep in mind:
+
+- A dependency expresses **order**, not ownership. If two tasks can genuinely proceed in
+  parallel, leave them independent even when the same person will do both.
+- `BLOCKED` is not a status here, and does not need to be. `depends_on` already expresses
+  blocking, and unlike a status it says _what_ the block is.

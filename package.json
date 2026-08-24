@@ -1,0 +1,36 @@
+{
+  "name": "tasks",
+  "private": true,
+  "description": "Monorepo for @speekl/tasks, a local git-versioned task manager for AI coding agents.",
+  "license": "MIT",
+  "author": "Dan Zabrotski",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/speekl-official/tasks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/speekl-official/tasks/issues"
+  },
+  "homepage": "https://agenttasks.dev",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "check-types": "turbo run check-types",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release:check": "pnpm run lint && pnpm run check-types && pnpm run test && pnpm run build && pnpm --filter @speekl/tasks pack --pack-destination /tmp"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.1",
+    "prettier": "^3.7.4",
+    "turbo": "^2.10.11",
+    "typescript": "5.9.2"
+  },
+  "packageManager": "pnpm@11.23.0",
+  "engines": {
+    "node": ">=22.13"
+  }
+}
