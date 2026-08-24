@@ -30,8 +30,7 @@ COPY apps/docs/package.json apps/docs/
 COPY packages/tasks/package.json packages/tasks/
 
 FROM manifests AS deps
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter docs...
+RUN pnpm install --frozen-lockfile --filter docs...
 
 FROM deps AS build
 # Prerendering drives a Vite preview server over `http://localhost:3000`. In a
@@ -47,8 +46,7 @@ RUN pnpm --filter docs build
 # `rollupConfig` note in vite.config.ts), so the runtime needs a real
 # node_modules — production deps of `docs` alone, resolved from the lockfile.
 FROM manifests AS prod-deps
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter docs --prod
+RUN pnpm install --frozen-lockfile --filter docs --prod
 
 # Built from `prod-deps` on purpose: pnpm's node_modules is a tree of relative
 # symlinks into the virtual store at /repo/node_modules/.pnpm, and keeping the
