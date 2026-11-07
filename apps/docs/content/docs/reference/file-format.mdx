@@ -1,16 +1,16 @@
 ---
 title: File format
-description: The .tasks/ directory layout, task frontmatter, and what owns which part of a file.
+description: The .tasks/ layout, the task.md fields and their canonical form, the workspace files, the log grammar, and index.md.
 icon: FileCode
 ---
 
 <Callout type="info" title="Explanatory, not normative">
-  The authoritative definitions live in [directory layout](/docs/spec/layout)
-  and [task file](/docs/spec/task-file). Read this page to understand the
-  format; read those to implement it.
+  The authoritative definitions live in [directory layout](/docs/spec/layout),
+  [task file](/docs/spec/task-file) and [workspace files](/docs/spec/workspace).
+  Read this page to understand the format; read those to implement it.
 </Callout>
 
-Read this when you need to hand-author or repair a task file, or interpret a
+Read this when you need to hand-author or repair a file, or interpret a
 `tasks validate` finding. For day-to-day work, the [commands](/docs/reference/commands)
 page is enough.
 
@@ -18,34 +18,44 @@ page is enough.
 
 ```txt
 .tasks/
-  config.yml        project config — statuses, roles, transitions, active_phase
-  README.md         the convention, scaffolded by `tasks init`
-  .gitignore        self-contained; ignores .locks/
-  _index.md         generated view; regenerate with `tasks reindex`
-  <phase>/          a phase: free-form slug, e.g. auth-rework/ or 2026-q1/
-    <id>.md         one task, filename always matches its `id`
-  .archive/         soft-deleted tasks, excluded from every default query
-  .locks/           transient claim locks, git-ignored
+  config.yml          version: 2, plus optional scope, session timeout, projects
+  README.md           describes the convention to a cold reader; scaffolded by init
+  .gitignore          ignores .locks/
+  index.md            optional generated overview; never read by any command
+  <segment>/          a group (no task.md) or a task (task.md), at any depth
+    task.md           present ⇒ this directory is a task; its id is its path
+    state.md          the resume point
+    design.md         decisions and why
+    plan.md           steps, files, verification
+    log.md            the history, appended by the CLI
+    <anything else>   workspace content, never parsed
+    <segment>/        a child task, a group, or workspace content
+  .archive/           archived tasks, at their former paths
+  .locks/             the tree lock and the session registry; never committed
 ```
 
-`.tasks/` is discovered by walking up from the current directory, git-style: **nearest
-wins, no merging** with a parent tree. Each package in a monorepo with its own `.tasks/`
-is its own independent scope.
+A directory that takes part in the tree — a group or a task — has a name matching
+`^[a-z0-9][a-z0-9-]*$`. The scanner descends into every such directory and into no
+other, skipping `.archive/`, `.locks/` and anything else that starts with a dot. A file
+named `task.md` anywhere under `.tasks/` is parsed as a manifest; one that does not
+parse is reported as malformed, never skipped.
 
 Commit everything except `.locks/`.
 
-## Task file
+## `task.md`
 
-```markdown title=".tasks/auth-rework/token-schema.md"
+```markdown title=".tasks/auth-rework/token-schema/task.md"
 ---
-id: token-schema
-phase: auth-rework
-status: PENDING
-depends_on: [audit-current-claims]
-created: "2026-08-21T09:14:00Z"
-updated: "2026-08-21T09:14:00Z"
+status: PAUSED
+priority: normal
+depends_on: [auth-rework/audit-claims]
+finishes_after: []
+assignee: alice
 claimed_by: null
 claimed_at: null
+claimed_session: null
+created: "2026-09-21T09:14:00Z"
+updated: "2026-09-21T16:40:12Z"
 ---
 
 # Design the token schema
@@ -59,71 +69,222 @@ claimed_at: null
 ## Notes
 ```
 
-The frontmatter is **machine-owned**: the CLI rewrites it in canonical form and does not
-preserve comments or key order there. The markdown body is **yours** — edit it freely
-with normal file tools.
+The frontmatter is **machine-owned**: every field has a command, and the CLI rewrites
+the block in canonical form. The markdown body is **yours** — edit it freely.
 
-| Field                       | Notes                                                                                                                             |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                        | Stable slug, globally unique across the whole tree including `.archive/`. Lowercase kebab-case. The filename is always `<id>.md`. |
-| `phase`                     | Mirrors the containing directory. **The directory is authoritative** — `validate --fix` rewrites this field to match.             |
-| `status`                    | Must be one of `config.yml`'s `statuses`.                                                                                         |
-| `depends_on`                | List of refs; see [dependencies](/docs/reference/dependencies).                                                                   |
-| `created` / `updated`       | Quoted ISO 8601 UTC strings. Quoted so YAML parses them as strings, not dates.                                                    |
-| `claimed_by` / `claimed_at` | Set by `claim`, cleared automatically when the task leaves the claimed status.                                                    |
+| Field             | Type                                 | Default  | Meaning                                                                                       |
+| ----------------- | ------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
+| `status`          | one of the six statuses              | required | `BACKLOG`, `TODO`, `IN_PROGRESS`, `PAUSED`, `DONE` or `CANCELLED`. Changed by the transitions. |
+| `priority`        | `urgent`, `high`, `normal`, `low`    | `normal` | How the task ranks in `ready`. Set by `new --priority` and `priority`.                        |
+| `depends_on`      | reference list                       | `[]`     | The start gate. Edited by `dep add` / `dep rm`.                                               |
+| `finishes_after`  | reference list                       | `[]`     | Finish-gate references beyond the task's own children. Edited by `after add` / `after rm`.    |
+| `assignee`        | actor or `null`                      | `null`   | Who must act next, and alone may transition the task while it is unclaimed. `assign`, `unassign`, `handoff`. |
+| `claimed_by`      | actor or `null`                      | `null`   | Who is working on it right now. Set by `claim`, cleared when the task leaves `IN_PROGRESS`.   |
+| `claimed_at`      | timestamp or `null`                  | `null`   | When that claim was taken.                                                                    |
+| `claimed_session` | session token or `null`              | `null`   | The claimant's session; `null` for a claim taken without one.                                 |
+| `created`         | timestamp                            | required | Creation time; never modified.                                                                |
+| `updated`         | timestamp                            | required | The last change to the frontmatter by the CLI.                                                |
 
-The task's **title** is the first `# ` heading in the body, not a frontmatter field.
+The three claim fields are set and cleared together: all non-null while the task is
+`IN_PROGRESS` (except `claimed_session`, which may stay `null`), all `null` otherwise.
+Actors and session tokens match `^[A-Za-z0-9][A-Za-z0-9._@+-]*$`.
 
-<Callout type="warn" title="Never hand-edit frontmatter">
-  Every field has a command: `status`, `claim`, `release`, `dep add` / `dep rm`,
-  `move`. Editing the YAML directly bypasses the transition and dependency
-  checks that make the tree trustworthy.
-</Callout>
+The task's **title** is the first `# ` heading of the body, its **name** the last
+segment of its path. There is no `id` and no `phase` field: identity is the path.
 
-## Ids
+### Canonical form
 
-Ids match `^[a-z0-9][a-z0-9-]*$` — lowercase kebab-case. `tasks new` derives one by
-NFKD-normalizing the title, folding accents, and replacing runs of non-alphanumerics
-with a hyphen. Pass `--id` when the derived slug is wrong or already taken.
+Every write emits the frontmatter the same way, so repeated writes of unchanged state
+produce identical bytes and a diff shows only a change of meaning:
 
-An id is unique across the **whole tree, including `.archive/`**. Archived ids stay
-reserved so a new task can never silently inherit a deleted task's inbound dependencies.
+1. The ten fields in the order of the table, then any key the file carried that the
+   convention does not define, in the order read, its value unchanged (a key that looks
+   like an integer comes first among them, in JavaScript object order).
+2. Lists as flow sequences: `[a, b]`, or `[]`.
+3. Timestamps double-quoted, ISO 8601 UTC at second precision with `Z`; `null` for an
+   absent value.
+4. Other scalars unquoted when they are plain YAML, quoted otherwise — a reference into
+   another project contains a colon, so it is quoted:
 
-## Phases
+```yaml
+finishes_after: ["../acme-api:auth-rework/wire-refresh"]
+```
 
-Phases match `^[a-z0-9][a-z0-9._-]*$` — lowercase slugs, dots and underscores allowed.
-They are created implicitly by `tasks new` and `tasks move`, and an emptied phase
-directory is removed after a move.
+Comments in the frontmatter are not kept. A key the convention does not define survives
+every write and is reported by `validate` as a warning (`unknown-key`).
 
-Because the directory is authoritative, **never `mv` a task file**. Use
-`tasks move <id> <phase>`.
+### The body
+
+`tasks new` scaffolds three sections. The split is a recommendation, and the agent skill
+follows it:
+
+- **Description** and **Acceptance criteria** are the definition of the task. A
+  clarification received later changes them in place; it is not filed beside them as a
+  contradicting note.
+- **Notes** collects inputs received after the start: findings, links, external facts,
+  the provenance of decisions ("2026-09-21, alice: keep the legacy route"). Progress
+  never goes here; it goes into `state.md` and the log.
+
+The CLI never rewrites or reorders the body, except to normalize leading and trailing
+whitespace when it writes the file.
+
+## The workspace files
+
+| File        | Concern                                         | Mode                                                        |
+| ----------- | ----------------------------------------------- | ----------------------------------------------------------- |
+| `task.md`   | Definition and acceptance; later inputs in Notes | Body edited in place; frontmatter machine-owned             |
+| `state.md`  | Where the work is now: done, verified, open, next | Replaced in full through `tasks state` — never appended     |
+| `design.md` | Decisions and why; rejected alternatives        | Edited in place                                             |
+| `plan.md`   | How: steps, files, verification                 | Edited in place; may be superseded                          |
+| `log.md`    | What happened, who, when                        | Append-only, written by the CLI                             |
+
+They are a vocabulary, not a requirement: only `task.md` must exist. No command rewrites
+`state.md`, `design.md` or `plan.md` as a side effect, and no transition deletes
+`state.md`.
+
+### `state.md`
+
+The resume point, and the evidence that work started. Its content is free; the
+recommended structure is four sections:
+
+```markdown title="state.md"
+## Done
+
+- Claims table drafted in design.md; the refresh claim is new.
+
+## Verified
+
+- Token fixtures parse under the new schema (12/12).
+
+## Open
+
+- design.md and src/auth/claims.ts are uncommitted, on branch auth-schema.
+
+## Next
+
+- Decide the refresh-token lifetime with alice.
+```
+
+_Open_ names every uncommitted file and branch the work leaves behind — anything a
+reader would otherwise find unexplained in the working tree. Its presence drives three
+rules: `pause` and `handoff` need it, `release` refuses it, and `schedule` and `reopen`
+return a task to `PAUSED` rather than `TODO` when it exists. A `BACKLOG` task with a
+`state.md` at or beneath it is **parked**: started, then set aside.
+
+### `log.md`
+
+The task's journal: history only, never the current state. An entry is a level-two
+heading followed by free text:
+
+```markdown title="log.md"
+## 2026-09-21T16:40:12Z agent s:7f3a
+pause: IN_PROGRESS → PAUSED
+Kernel tests green (623/0); docs updated; awaiting review of the CLI rendering.
+
+## 2026-09-22T08:02:41Z alice via agent
+done: PAUSED → DONE
+APPLY. Committed as abc123.
+```
+
+The heading grammar is normative, because tools parse it for activity queries:
+
+```txt
+heading   = "## " timestamp " " actor [" via " actor] [" s:" session]
+timestamp = ISO 8601 UTC, second precision, Z-suffixed
+```
+
+`<principal> via <operator>` marks an entry made on someone's behalf with `--as`;
+`s:<token>` is the session that wrote it. The first line of the text names what
+happened:
+
+| Entry                    | First line                                                       |
+| ------------------------ | ---------------------------------------------------------------- |
+| creation                 | `new: TODO` or `new: BACKLOG`                                    |
+| a status transition      | `claim: TODO → IN_PROGRESS`, `pause: IN_PROGRESS → PAUSED`, …    |
+| a handoff                | `handoff alice: IN_PROGRESS → PAUSED`                            |
+| a field change           | `assign: alice`, `unassign`, `priority: high`                    |
+| a task a cascade reached | `defer with auth-rework: TODO → BACKLOG`                         |
+| the task a cascade was ordered on | its transition line, then `reached: <ids>`              |
+| a gate edit              | `dep add: auth-rework/token-schema`, `after rm: …`               |
+| a move                   | `move: <old-id> → <new-id>`                                      |
+| archive, restore         | `archive` (with `left blocked: …` when forced), `restore`        |
+| a narrative entry        | the text given to `tasks log`                                    |
+
+The message given with `-m` follows the first line. A forced transition is marked
+`(forced)` on its first line, and a transition that passed over an orphaned claim adds
+`supersedes agent s:7f3a, last seen 2026-09-21T16:40:12Z`. A gate edit or a move that went
+past a claim leaves the claim in place and adds
+`over the claim of agent s:7f3a (orphaned, last seen 2026-09-21T16:40:12Z)` — `(live, …)`
+when `--force` went past live work.
+
+Entries are never edited. Two branches that both appended merge mechanically — keep
+both entries, in time order — and a `log.md` left with conflict markers is a validation
+error. Nobody reads the log on entry: the CLI surfaces only the most recent entry, as
+`last_entry` in `show`, `resume` and `mine`, because a handoff's closing note is written
+for the next reader.
+
+## `index.md`
+
+A derived overview of the tree, nested by containment, one line per task with its
+situation:
+
+```markdown title=".tasks/index.md"
+<!-- Generated by `tasks reindex` from the task directories. Do not edit by hand. -->
+
+# Task index
+
+- [auth-rework](auth-rework/) — Rework authentication · open 1/2
+  - [auth-rework/token-schema](auth-rework/token-schema/) — Design the token schema · done
+  - [auth-rework/wire-refresh](auth-rework/wire-refresh/) — Wire the refresh endpoint · working by agent
+- billing/
+  - [billing/reminders](billing/reminders/) — Send payment reminders · blocked by billing/invoices (cancelled)
+```
+
+It is optional. `tasks reindex` creates it; once it exists, every command that changes
+the tree regenerates it, so the committed copy follows the tasks; a write made inside a
+listed tree from its own folder regenerates that tree's index only, and this one goes stale
+until the next local write or `tasks reindex`. **No command reads it.** A stale one is a validation warning (`index-stale`), never an error, and
+`tasks validate --fix` regenerates it.
+
+## `.archive/`
+
+An archived task lives at `.tasks/.archive/<its former path>/`, its whole directory —
+manifest, workspace, archived descendants — moved as a subtree. An archive into a path
+that already exists, because a descendant was archived earlier, merges into it; the same
+`task.md` on both sides is reported rather than silently chosen.
+
+Archived tasks are excluded from every query and never satisfy a gate. An archived
+task's path stays **reserved**: `tasks new` at that path is refused until the entry is
+purged, so a new task can never silently inherit the old one's references.
+`tasks restore` brings an entry back; `tasks purge` deletes it for good.
+
+## `.locks/`
+
+Transient, private to one working copy, and never committed:
+
+| Path                         | What it is                                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| `.locks/tree.lock`           | The tree lock, created exclusively for each write and removed after it. The holder touches it every 2.5 seconds; one older than 10 seconds belongs to a dead process and is reclaimed. |
+| `.locks/sessions/<token>`    | A session's heartbeat: its modification time is the session's last activity. Empty while the session runs; the single line `ended` after `session-end`. Tokens are file names: two that differ only in case share one file on a case-insensitive filesystem, and a name Windows reserves (`CON`, `NUL`) cannot be a token there. |
+
+A heartbeat file that no claim names is removed by later commands once it is older than
+the session timeout or marked `ended`; one a claim names stays at any age, because it is
+what tells an orphaned claim from an unknown one. Deleting the registry by hand turns
+every claim's liveness to `unknown`, which protects the claims rather than releasing
+them.
 
 ## Writes
 
-Every write is atomic — temp file plus rename — so a task file is never observed
-half-written, even if the process dies mid-command. Frontmatter is re-serialized in
-canonical field order on every write, so files do not churn and diffs stay reviewable.
+Every write of a manifest, `state.md`, `config.yml` or `index.md` is atomic: a temporary
+file in the same directory, then a rename. Moving a task or a group is one directory
+rename. So a file is never observed half-written, even when a process dies mid-command,
+and a diff of a write is a diff of its meaning.
 
-`tasks move` deliberately writes the destination _before_ unlinking the source: a crash
-between the two leaves a duplicate that `tasks validate` reports, rather than losing the
-task.
+Across filesystems a rename is impossible, so `tasks move` copies the subtree, marks the
+copy with a `.moving` file naming its source, removes the source, and removes the marker
+last. Interrupted, it leaves the task present twice — which `validate` reports as
+`duplicate-id` rather than silently choosing one.
 
-## `_index.md`
-
-A generated overview of the tree, written by `tasks reindex`. **No command reads it** —
-it exists for humans skimming the repo on GitHub.
-
-It is committed, so a stale one misleads reviewers in a diff. `tasks validate` reports
-`stale-index` as a _warning_ (never an error, so CI does not fail on it) and
-`--fix` regenerates it.
-
-## The archive
-
-`tasks delete` moves a task to `.tasks/.archive/<id>.md` by default. The archive is flat,
-so the originating phase is preserved in frontmatter rather than in the path.
-
-Archived tasks are excluded from every default query, and **never satisfy a dependency** —
-a dependency on an archived task resolves with reason `archived`, which blocks.
-
-`tasks delete --purge` removes the file outright instead. There is no restore command;
-recovery is `git checkout` or moving the file back and running `tasks validate --fix`.
+**Never `mv` a task directory by hand.** Its id is its path, so the move changes the id
+of everything beneath it and leaves every reference to them dangling. Use
+`tasks move`, which rewrites them.

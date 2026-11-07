@@ -32,7 +32,7 @@ the build output — works too. `PORT` (default 3000) and `HOST` are read at sta
 
 ```
 content/docs/         MDX pages; meta.json controls sidebar order
-  spec/               NORMATIVE — the .tasks convention v1
+  spec/               NORMATIVE — the .tasks convention v2
   guides/             explanatory
   reference/          the @speekl/tasks CLI
 src/routes/index.tsx  the landing page

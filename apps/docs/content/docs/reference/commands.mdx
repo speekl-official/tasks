@@ -1,302 +1,821 @@
 ---
 title: Commands
-description: Every command, flag, exit code, and failure mode.
+description: Every command and option of the tasks CLI, its exit codes, and what it writes.
 icon: Terminal
 ---
 
 <Callout type="info" title="This page describes the reference implementation">
   It documents the `@speekl/tasks` CLI specifically. The parts that are
   *contract* — exit codes and `--json` shapes — are defined normatively in [CLI
-  contract](/docs/spec/cli); command names and flags are this tool's own
-  surface.
+  contract](/docs/spec/cli); command names and options are this tool's own
+  surface, following the names the specification recommends.
 </Callout>
 
-Every command accepts `--json`. Under `--json`, successful output goes to **stdout** and
-errors go to **stderr** as `{"error": {"code", "message", "details"}}`. See the
-[JSON contract](/docs/reference/json-contract) for shapes and exit codes.
+## Global options
 
-Global flags:
+Accepted by every command, before or after the command name, so a harness can append
+them to any invocation:
 
-| Flag              | Effect                                                   |
-| ----------------- | -------------------------------------------------------- |
-| `-v`, `--version` | Print the CLI version and exit `0`.                      |
-| `-h`, `--help`    | Print help for the program or a subcommand and exit `0`. |
-| `--json`          | Emit machine-readable JSON, including for errors.        |
+| Option              | Effect                                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-C`, `--dir <dir>` | Start the search for `.tasks/` in `<dir>` instead of the current directory. For `init`, the directory to scaffold in.                        |
+| `--as <actor>`      | Act as this actor. The identity that would have acted is recorded as the operator: `alice via agent`. Must be listed when `config.yml` lists [actors](/docs/reference/configuration#actors). See [the actor](/docs/reference/configuration#the-actor). |
+| `--session <token>` | The session token, else `TASKS_SESSION`. Recorded on claims and in every log heading. See [sessions](/docs/reference/configuration#the-session). |
+| `-v`, `--version`   | Print the CLI version and exit `0`.                                                                                                          |
+| `-h`, `--help`      | Print help for the program or a command and exit `0`.                                                                                        |
 
-## `tasks init`
+Every command that produces output accepts **`--json`**: success is one JSON document on
+stdout, and an error is one JSON document on stderr. Without `--json` the output is for
+people and may change at any time. See the [JSON contract](/docs/reference/json-contract)
+for every shape.
 
-Scaffold a `.tasks/` directory in the current project.
+### Exit codes
 
-```sh
-tasks init [--force] [--no-skill] [--json]
-```
+| Code | Meaning                                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success. An empty result is success.                                                                                            |
+| `1`  | Internal: an unexpected failure.                                                                                                |
+| `2`  | Usage: an unknown option, a malformed reference, an ambiguous suffix, a missing message, an invalid `config.yml`, a v1 tree, an actor or session that does not match its pattern, an actor the roster does not list. |
+| `3`  | Not found: no tree discovered, no such task, a path that exists only in `.archive/`, nothing to take for `claim --next`.         |
+| `4`  | Conflict: the tree's state forbids the command — an illegal transition, an authorization failure, a gate, `state.md`, a live claim, a cycle, a reserved path, a failed session check, a busy lock. |
 
-| Flag         | Effect                                                                               |
-| ------------ | ------------------------------------------------------------------------------------ |
-| `--force`    | Reinitialize even if `.tasks/` already exists. Existing files are **not** clobbered. |
-| `--no-skill` | Skip installing the agent skill into `.claude/skills/tasks/`.                        |
+### Task arguments
 
-Creates `config.yml`, `README.md`, `.gitignore`, and the `.locks/` directory, then
-installs the [agent skill](/docs/guides/agent-workflow).
+A `<task>` argument is the task's full path, or any **unambiguous suffix** of it
+(`token-schema` for `auth-rework/token-schema`), searched in the local tree. Prefix an
+alias listed under `projects:` to address a task there: `backend:token-schema`. Several
+candidates are a usage error naming them; a path that exists only under `.archive/` is
+not found, and says how to restore it. Arguments that name a **new** path — the path of
+`new`, the destination of `move`, the archive path of `restore` and `purge` — are taken
+literally, never as suffixes.
 
-**Fails with exit `4`** if `.tasks/` already exists and `--force` was not passed.
+### What a write does
 
-<Callout title="Ask before running this">
-  Creating `.tasks/` is a project-level decision. An agent should ask rather
-  than run `init` as a side effect of a question about work.
-</Callout>
+Every command that changes a tree takes that tree's lock, `.tasks/.locks/tree.lock`,
+re-reads the tree inside it, and decides from what it finds there; a refused command
+writes nothing. Manifests are rewritten atomically in canonical form, and every
+transition appends an entry to the task's `log.md`. When `.tasks/index.md` exists, it is
+regenerated after the write.
 
-## `tasks new`
+## Setup
 
-Create a task from the template, in a given phase.
+### `tasks init`
 
-```sh
-tasks new <phase> <name...> [--id <id>] [--json]
-```
-
-| Argument / flag | Meaning                                                 |
-| --------------- | ------------------------------------------------------- |
-| `<phase>`       | Phase directory. Created if it does not exist.          |
-| `<name...>`     | Human-readable title. Unquoted words are joined.        |
-| `--id <id>`     | Explicit id. Defaults to a kebab-case slug of the name. |
-
-```sh
-tasks new auth-rework "Design token schema"
-tasks new auth-rework Design token schema --id token-schema
-```
-
-The body is scaffolded with `## Description`, `## Acceptance criteria`, and `## Notes`.
-Fill it in with a normal file edit at the `path` returned under `--json`.
-
-**Fails with exit `2`** if the id is not lowercase kebab-case, or the phase is not a
-valid slug. **Fails with exit `4`** if the id is already taken by a live _or archived_
-task — archived ids stay reserved so a new task can never silently inherit an archived
-one's inbound dependencies.
-
-## `tasks list`
-
-List tasks, filterable.
+Scaffold a `.tasks/` tree in the current directory (or `-C <dir>`), print the actor it
+resolved, and install the agent skill.
 
 ```sh
-tasks list [-p <phase>] [-a] [-s <status>] [--json]
+tasks init [--force] [--no-skill] [--actors [<names>]] [--json]
 ```
 
-| Flag                      | Effect                                       |
-| ------------------------- | -------------------------------------------- |
-| `-p`, `--phase <phase>`   | Restrict to one phase.                       |
-| `-a`, `--all`             | Search every phase, ignoring `active_phase`. |
-| `-s`, `--status <status>` | Restrict to one status.                      |
+| Option               | Effect                                                                 |
+| -------------------- | ---------------------------------------------------------------------- |
+| `--force`            | Add the scaffold files an existing tree lacks. Never overwrites a file. |
+| `--no-skill`         | Skip installing the agent skill into `.claude/skills/tasks/`.           |
+| `--actors [<names>]` | Write [`actors:`](/docs/reference/configuration#actors) live, so the roster is on from the first command: the actor it resolved and `agent`, or the comma-separated names given. Run as `agent`, the bare form is refused: name the person too. |
 
-Without `-p` or `-a`, output is scoped to `active_phase` from `config.yml` when it is
-set. If a task you expect is missing, retry with `--all` before concluding it does not
-exist.
+**Writes** `.tasks/config.yml` (`version: 2`, every other key commented out; the
+`actors:` example already names the actor it resolved and `agent`, so switching the roster
+on later is uncommenting that block),
+`.tasks/README.md`, `.tasks/.gitignore` (ignoring `.locks/`), the `.tasks/.locks/`
+directory, and the [skill](/docs/guides/agent-protocol#the-skill) unless `--no-skill`.
+`init` does not discover: it scaffolds exactly where it runs. It never prompts — agents
+run without a terminal — so the decision to create a tree belongs to whoever runs it; an
+agent asks the person first.
 
-**Fails with exit `2`** if `--status` names a status that is not in the configured list.
+**Fails** with exit `4` when `.tasks/` already exists and `--force` was not given, and
+with exit `2` when the existing tree is a v1 tree, `--force` or not: upgrade it with
+[`migrate`](#tasks-migrate). Exit `2` too when `--actors` names an actor that fails the
+pattern, names nobody, is given bare by `agent` itself, or is given while a `config.yml`
+already exists: the names go into that file by hand.
 
-## `tasks show`
+### `tasks skill install`
 
-Print one task's metadata, resolved dependencies, and body.
-
-```sh
-tasks show <id> [--json]
-```
-
-Under `--json` this is the richest single-task shape: it adds `title`, `ready`,
-`dependencies[]` (each with `satisfied`, `status`, `reason`), and `body`.
-
-**Fails with exit `3`** if no such task exists.
-
-## `tasks ready`
-
-List unblocked tasks — what can be worked on right now.
-
-```sh
-tasks ready [-p <phase>] [-a] [--json]
-```
-
-A task appears when its status is the `ready` role **and** every dependency is
-satisfied. An empty result is success: exit `0` with `{"count": 0, "tasks": []}`.
-
-```sh
-tasks ready --json | jq -r '.tasks[0].id // empty'
-```
-
-## `tasks claim`
-
-Take ownership of a task and mark it in progress.
-
-```sh
-tasks claim <id> [--as <who>] [--force] [--json]
-```
-
-| Flag         | Effect                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------- |
-| `--as <who>` | Identity to record. Defaults to `$TASKS_ACTOR`, then `$USER` / `$USERNAME`, then `unknown`. |
-| `--force`    | Claim even if dependencies are unsatisfied.                                                 |
-
-Claim is legal from **any** status that can reach the `claimed` role — not just the
-ready one. That is what makes reopening a completed task work (`DONE → IN_PROGRESS`)
-while still recording who took it on.
-
-**Fails with exit `4`** when the task is already claimed, when the transition to the
-claimed role is illegal from its current status, or when a dependency is unsatisfied and
-`--force` was not passed.
-
-<Callout type="warn" title="What --force does and does not override">
-  `--force` overrides **dependencies**, not somebody else's claim. A `CONFLICT`
-  saying a task is already claimed means someone else has it — pick a different
-  task, do not reach for `--force`.
-</Callout>
-
-## `tasks release`
-
-Give up a claimed task and return it to the ready pool. Clears `claimed_by` and
-`claimed_at`.
-
-```sh
-tasks release <id> [--json]
-```
-
-**Fails with exit `4`** if the task is not currently in the claimed status, or if
-`claimed → ready` is not a legal transition under this project's rules.
-
-## `tasks status`
-
-Move a task through its lifecycle, validating the transition.
-
-```sh
-tasks status <id> <STATUS> [--json]
-```
-
-```sh
-tasks status token-schema DONE
-```
-
-Leaving the claimed status releases the claim automatically.
-
-**Fails with exit `2`** if the status is unknown, or if the target is the `claimed`
-role — that case redirects to `tasks claim` so claim metadata can never be bypassed.
-**Fails with exit `4`** if the task already has that status, or the transition is
-illegal; the error's `details.allowed` lists what _is_ legal from here.
-
-```json
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
-    "details": {
-      "id": "token-schema",
-      "from": "PENDING",
-      "to": "DONE",
-      "allowed": ["IN_PROGRESS"]
-    }
-  }
-}
-```
-
-## `tasks dep`
-
-Manage dependencies. See [dependencies](/docs/reference/dependencies) for reference
-syntax.
-
-```sh
-tasks dep add <id> <ref>... [--json]
-tasks dep rm  <id> <ref>... [--json]
-tasks dep list <id> [--json]
-```
-
-`add` validates before writing: it refuses a self-reference and a local ref to a task
-that does not exist (exit `2` / `3`), and refuses to introduce a cycle (exit `4`).
-Duplicates are silently ignored rather than appended twice.
-
-`rm` **fails with exit `3`** if the task does not currently depend on one of the given
-refs — removing something that was never there is treated as a mistake, not a no-op.
-
-`list` resolves each dependency and reports whether it is satisfied, plus a `reason`
-when it is not.
-
-## `tasks move`
-
-Reassign a task's phase, relocating the file.
-
-```sh
-tasks move <id> <phase> [--json]
-```
-
-Always use this rather than `mv`: the directory determines the phase, and the move is
-ordered write-then-unlink so a crash leaves a duplicate that `validate` reports rather
-than losing the task. An emptied phase directory is cleaned up.
-
-**Fails with exit `4`** if the task is already in that phase.
-
-## `tasks delete`
-
-Archive a task, or permanently remove it.
-
-```sh
-tasks delete <id> [--force] [--purge] [--json]
-```
-
-| Flag      | Effect                                               |
-| --------- | ---------------------------------------------------- |
-| `--force` | Delete even if other tasks depend on it.             |
-| `--purge` | Permanently remove the file instead of archiving it. |
-
-The default moves the task to `.tasks/.archive/<id>.md`, preserving the originating
-phase in frontmatter — the archive is flat, so the directory can no longer carry it.
-Archived tasks are excluded from every default query, never satisfy a dependency, and
-keep their id reserved.
-
-**Fails with exit `4`** if live tasks depend on it and `--force` was not passed. With
-`--force`, those dependents are reported as `orphaned_dependents` and are now
-permanently blocked — run `tasks validate`.
-
-## `tasks reindex`
-
-Regenerate `_index.md` from task frontmatter.
-
-```sh
-tasks reindex [--json]
-```
-
-`_index.md` is a generated overview. No command reads it, so drift is cosmetic — but it
-is committed, so a stale one misleads reviewers in a diff. Regenerate before committing.
-
-## `tasks validate`
-
-Check tree integrity and report anything that has drifted.
-
-```sh
-tasks validate [--fix] [--json]
-```
-
-| Finding                                                                        | Severity | Fixable by `--fix`                                  |
-| ------------------------------------------------------------------------------ | -------- | --------------------------------------------------- |
-| `filename-mismatch`                                                            | error    | yes — file renamed to match `id`                    |
-| `phase-drift`                                                                  | error    | yes — `phase` rewritten to the containing directory |
-| `stale-index`                                                                  | warning  | yes — `_index.md` regenerated                       |
-| `malformed`                                                                    | error    | no                                                  |
-| `duplicate-id`                                                                 | error    | no                                                  |
-| `unknown-status`                                                               | error    | no                                                  |
-| `malformed-ref`                                                                | error    | no                                                  |
-| `cycle`                                                                        | error    | no                                                  |
-| `dependency-missing` / `dependency-archived` / `dependency-unresolved-project` | warning  | no                                                  |
-
-Errors exit `4`, so CI can gate on them. Warnings do not — a stale `_index.md` is
-deliberately never a build failure, because the index is not a source of truth.
-
-```sh
-tasks validate --json | jq -e '.ok'
-```
-
-## `tasks skill install`
-
-Install the bundled agent skill into `.claude/skills/tasks/`.
+Install the bundled agent skill into `.claude/skills/tasks/` at the root of the discovered
+tree, the directory that holds `.tasks/`; without a tree, into the current directory (or
+`-C`), where `init` would create one.
 
 ```sh
 tasks skill install [--force] [--json]
 ```
 
-An existing install is left alone unless `--force`, so local edits survive. Use
-`--force` to refresh after upgrading the CLI. See
-[working with agents](/docs/guides/agent-workflow).
+An existing install is left alone unless `--force`, so local edits survive. Use `--force`
+after upgrading the CLI. Commit `.claude/skills/tasks/` so every agent working in the
+repository gets it.
+
+### `tasks hooks install`
+
+Write the [harness hooks](/docs/guides/harness) into `.claude/settings.json` at the root
+of the discovered tree, the directory that holds `.tasks/`: Claude Code then runs
+`tasks mine` on `SessionStart`, `tasks heartbeat` on `PostToolUse`, `tasks session-check`
+on `Stop` and `tasks session-end` on `SessionEnd`.
+
+```sh
+tasks hooks install [--actor <name>] [--force] [--json]
+```
+
+| Option           | Effect                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. Default: `agent`. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
+| `--force`        | Replace the tasks hooks already in the file with the documented ones.                    |
+
+The file and `.claude/` are created when absent, and what is written is the guide's
+[hooks block](/docs/guides/harness#the-hooks-block) exactly. Everything else an existing
+file holds — other settings, other events, other hooks of the same events — stays where it
+is. An event that already has a tasks hook, one whose command runs that event's
+subcommand (also through a path such as `./node_modules/.bin/tasks`), keeps it as it is
+unless `--force`, so local edits survive; with nothing to add or replace, the file is not
+touched and the command says so. Use `--force` after upgrading the CLI. The hooks need
+`tasks` and [`jq`](https://jqlang.org) on `PATH`. Commit `.claude/settings.json` so every
+session in the repository runs them.
+
+**Fails** with exit `2`, changing nothing, when the file is not a JSON object or its
+`hooks` is not an object of event lists, when the tree's `config.yml` cannot be read, or
+when it lists [actors](/docs/reference/configuration#actors) without the hooks' name
+(pass `--actor` with a listed one, or add `agent` to the roster), and with exit `3` when
+no tree is found.
+
+## Reading
+
+None of these write anything except the session heartbeat when a session is known.
+
+### `tasks show`
+
+```sh
+tasks show <task> [--json]
+```
+
+The task: its fields, its derived conditions (situation, blocked by, ready, held by,
+liveness, last log entry, …), the workspace files present, the live tasks that
+reference it through `depends_on` or `finishes_after` — here and in listed projects —
+and its body. **Fails** with exit `3` for an unknown or archived task, and with exit `4`
+when its `task.md` is malformed.
+
+### `tasks resume`
+
+```sh
+tasks resume <task> [--json]
+```
+
+Everything the next session reads to continue a task, in reading order: the task's
+fields and conditions; one line per ancestor, outermost first, with its title, status
+and workspace files; the children with their situations; the workspace file list;
+`state.md` in full; and the last log entry. It is the second command of the
+[agent protocol](/docs/guides/agent-protocol), after `mine`.
+
+### `tasks ready`
+
+```sh
+tasks ready [--scope <path>] [--all] [--local] [--json]
+```
+
+| Option           | Effect                                                                   |
+| ---------------- | ------------------------------------------------------------------------ |
+| `--scope <path>` | Restrict the local tree to this group or task path. Default: `scope` in `config.yml`. |
+| `--all`          | Ignore the configured scope.                                             |
+| `--local`        | The local tree only, not the projects it lists.                          |
+
+The tasks free for you — the calling actor — to take, best first: effective priority,
+then `PAUSED` before `TODO`, then oldest. A task is ready when it is `TODO` or `PAUSED`,
+its start gate is satisfied, it is assigned to nobody or to you, it has no open child,
+and no ancestor is claimed or assigned. With `projects:` configured, listed trees are
+included and their ids carry the alias. A scope applies to the local tree only.
+
+An empty set is success: exit `0` with `"count": 0`. **Fails** with exit `3` when
+`--scope` names no task or group, and exit `2` when `--scope` and `--all` are combined.
+
+### `tasks mine`
+
+```sh
+tasks mine [--local] [--json]
+```
+
+Open tasks whose claimant or assignee is you: first the claims of this session, then
+your other claims (orphaned ones are yours to take over), then the tasks merely assigned
+to you — your inbox. Each row carries its situation, liveness and last log entry, which
+is where a handoff's note is read. Not restricted by `scope`. Use `--as <actor>` to see
+someone else's.
+
+### `tasks actors`
+
+```sh
+tasks actors [--local] [--json]
+```
+
+Who is around: the actors `config.yml` lists under
+[`actors`](/docs/reference/configuration#actors), in their order, each with its
+description and how many open tasks it has claimed and is assigned; then, by name, every
+other actor an open task names — a name to add to the roster, or to correct — and you,
+marked `(you)`. The counts span the listed projects unless `--local`; `listed` is judged by
+this tree's roster alone, so an actor a listed project names in its own `config.yml` shows
+here as not listed. Without a roster the footer says so: any name may be assigned.
+
+### `tasks list`
+
+```sh
+tasks list [--scope <path>] [--all] [--local] [--<situation>…] [--json]
+```
+
+Every open task, in tree order, with its situation and secondary labels. Situation
+filters select by the [situation](/docs/concepts#situations-not-statuses) word and
+combine with OR:
+
+| Filter        | Selects                                         |
+| ------------- | ----------------------------------------------- |
+| `--ready`     | free to take                                    |
+| `--blocked`   | blocked by a dependency                         |
+| `--waiting`   | paused, waiting for their assignee              |
+| `--assigned`  | assigned to someone and not paused              |
+| `--held`      | held by a claimed or assigned ancestor          |
+| `--working`   | claimed                                         |
+| `--parked`    | `BACKLOG` with started work                     |
+| `--backlog`   | `BACKLOG` without started work                  |
+| `--closable`  | finish gate satisfied: children and joins resolved |
+| `--open`      | parents with open children                      |
+| `--done`      | done (resolved tasks appear only through these) |
+| `--cancelled` | cancelled                                       |
+| `--resolved`  | done and cancelled                              |
+
+A filter selects by the situation word alone, so `list --ready` is not `tasks ready`:
+the ready set for you also holds tasks assigned to you — `assigned alice`,
+`waiting for alice` — and tasks whose finish gate is satisfied (`closable`).
+`--scope`, `--all` and `--local` work as for `ready`.
+
+### `tasks tree`
+
+```sh
+tasks tree [--scope <path>] [--all] [--local] [--resolved] [--json]
+```
+
+Open tasks nested by containment, with each task's `finishes_after` joins listed under
+it (`↳ after search (not-done)`), tagged with their project. `--resolved` includes done
+and cancelled tasks, so an open parent keeps its finished children beneath it. The JSON
+is the same flat collection as `list`: every task carries `parent`.
+
+```txt
+TASK               SITUATION          LABELS                   TITLE
+auth-rework        open 1/2           active                   Rework authentication
+  wire-refresh     working by agent   live                     Wire the refresh endpoint
+release            backlog            urgent · assigned alice  Release 2.0
+  ↳ after search (not-done)
+search             open 0/3           high                     Full-text search
+  index-docs       ready              high (inherited)         Index documents
+```
+
+### `tasks log --since`
+
+```sh
+tasks log --since <when> [--local] [--json]
+```
+
+Log entries since a time, across the local tree and every listed project, oldest first.
+`<when>` is an ISO timestamp (`2026-09-21T09:14:00Z`), a UTC date (`2026-09-21`), or a
+duration back from now: `30m`, `12h`, `7d`, `2w`. `--local` reads the local tree only.
+Appending an entry is [`tasks log <task>`](#tasks-log).
+
+### `tasks dep list` and `tasks after list`
+
+```sh
+tasks dep list <task> [--json]
+tasks after list <task> [--json]
+```
+
+Each reference in `depends_on` (or `finishes_after`), whether it is satisfied, and why
+not. Each list is judged by its own gate: a `CANCELLED` task satisfies `finishes_after`,
+never `depends_on`. See [`tasks dep`](#tasks-dep-and-tasks-after).
+
+## Transitions
+
+The twelve commands of the [transition table](/docs/spec/lifecycle#transitions). Each
+takes the task as its first argument and these options:
+
+| Option                 | Effect                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| `-m`, `--message <text>` | The note for the log entry. **Required** by `pause`, `handoff`, `done`, `cancel` and `reopen`: it is the closing note the next reader finds. |
+| `--force`              | Override what the command's row below lists, and nothing else. Recorded in the log entry.   |
+| `--json`               | Print the task object with its derived conditions; see [transition results](/docs/reference/json-contract#transition-results). |
+
+**Writes** the task's frontmatter (status, claim fields, assignee or priority, and
+`updated`) and one log entry whose first line names the command —
+`pause: IN_PROGRESS → PAUSED`, `handoff alice: IN_PROGRESS → PAUSED`, `assign: alice`,
+`unassign`, `priority: high` — followed by the message, ` (forced)` when forced, and a
+`supersedes …` line when it passed over an orphaned claim. A cascade writes every task it
+reaches first, deepest first, each with an entry
+`defer with auth-rework: TODO → BACKLOG`, and the named task last, with a
+`reached: …` line.
+
+**Authorization.** A claimed task whose claim is live or unknown is transitioned only by
+its claimant: the same actor and, when the claim has a session, the same session. An
+assigned task that nobody claims is transitioned only by its assignee or the assignee of
+an ancestor. Anything else may be transitioned by anyone. A refusal is exit `4` with
+`details.kind` `authorization`. See [authorization and force](/docs/concepts#sessions-and-liveness).
+
+| Command               | From → to                                                               | Also requires                                                                 | `--force` overrides                                   |
+| --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `schedule`            | `BACKLOG` → `PAUSED` with a `state.md`, else `TODO`                      | no `BACKLOG` ancestor                                                         | authorization                                         |
+| `defer`               | `TODO`, `PAUSED` → `BACKLOG`                                             | no live or unknown claim beneath                                              | authorization, claims beneath                         |
+| `claim`               | `BACKLOG`, `TODO`, `PAUSED` → `IN_PROGRESS`                              | start gate; parent open; no `BACKLOG` ancestor; no claimed or assigned ancestor | authorization, a live or unknown claim, start gate, hold |
+| `pause`               | `IN_PROGRESS` → `PAUSED`                                                 | `state.md` exists; message                                                    | authorization                                         |
+| `release`             | `IN_PROGRESS` → `TODO`                                                   | no `state.md`                                                                 | authorization                                         |
+| `done`                | any open → `DONE`                                                        | start gate; finish gate; message                                              | authorization, start gate                             |
+| `cancel`              | any open → `CANCELLED`                                                   | no live or unknown claim beneath; message                                     | authorization, claims beneath                         |
+| `reopen`              | `DONE`, `CANCELLED` → `BACKLOG` under a `BACKLOG` ancestor, else `PAUSED` with a `state.md`, else `TODO` | parent open; message             | authorization                                         |
+| `handoff <actor>`     | `IN_PROGRESS` → `PAUSED`, assignee set                                   | `state.md` exists; message                                                    | authorization                                         |
+| `assign <actor>`      | any open, unchanged                                                      |                                                                               | authorization                                         |
+| `unassign`            | any open, unchanged                                                      | an assignee to clear                                                          | authorization                                         |
+| `priority <level>`    | any open, unchanged                                                      | `urgent`, `high`, `normal` or `low`                                           | authorization                                         |
+
+Nothing overrides the finish gate, the `state.md` rules, a resolved parent, a `BACKLOG`
+ancestor, or a missing message.
+
+### `tasks schedule`
+
+```sh
+tasks schedule <task> [-m <text>] [--force] [--json]
+```
+
+Put a `BACKLOG` task on the plan: `PAUSED` when it has a `state.md` (work had started),
+`TODO` otherwise. **Cascades**: every `BACKLOG` descendant comes with it, by the same
+rule. Refused under a `BACKLOG` ancestor (`details.kind` `backlog-ancestor`), naming the
+ancestor to schedule instead.
+
+### `tasks defer`
+
+```sh
+tasks defer <task> [-m <text>] [--force] [--json]
+```
+
+Take a `TODO` or `PAUSED` task off the plan. **Cascades**: every open descendant goes to
+`BACKLOG`; `state.md` and assignees are kept, so `schedule` later restores `PAUSED`
+where work had started. A descendant with a live or unknown claim refuses the whole
+command (`cascade-claim`, naming the claims); an orphaned claim is superseded and
+recorded.
+
+### `tasks claim`
+
+```sh
+tasks claim <task> [-m <text>] [--force] [--json]
+tasks claim --next [--scope <path>] [--all] [--local] [-m <text>] [--force] [--json]
+```
+
+| Option           | Effect                                                                           |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `--next`         | Claim the first task of your ready set, in ready order, in the same operation.   |
+| `--scope <path>` | With `--next`: only local tasks within this path. Default: the configured scope. |
+| `--all`          | With `--next`: ignore the configured scope.                                      |
+| `--local`        | With `--next`: the local tree only, even when `projects:` lists others.          |
+
+Start working on a task now. Records `claimed_by`, `claimed_at` and `claimed_session`.
+Claim **before** working: the claim is what stops a second agent starting the same task.
+
+On a task that is already `IN_PROGRESS`, `claim` is a **takeover**: it succeeds when the
+claim is orphaned (its session ended or went silent past `session_timeout_minutes`) and
+records the superseded session in the log; it is refused for a live or unknown claim
+(`authorization`), and for your own claim in this same session (`already-claimed`).
+
+`--next` decides under the tree lock, so agents running it at once get different tasks.
+It fails with exit `3` when nothing is ready. When the claimed task has open
+descendants, the result reports how many it now holds (`holds`).
+
+**Fails** with exit `4` for an unsatisfied start gate (`start-gate`, with `blocked_by`),
+a claimed or assigned ancestor (`held`), a `BACKLOG` ancestor (`backlog-ancestor`), a
+resolved ancestor (`resolved-ancestor`), and an illegal status (`illegal-transition`).
+
+### `tasks pause`
+
+```sh
+tasks pause <task> -m <text> [--force] [--json]
+```
+
+Stop working on a claimed task; the resume point stays. Clears the claim. Refused while
+the task has no `state.md` (`missing-state`): write it first with
+[`tasks state`](#tasks-state). This refusal is what guarantees a resume point.
+
+### `tasks release`
+
+```sh
+tasks release <task> [-m <text>] [--force] [--json]
+```
+
+Give back a claim that produced nothing: `IN_PROGRESS` → `TODO`, claim cleared. Refused
+while a `state.md` exists (`present-state`) — work that produced anything is paused.
+
+### `tasks done`
+
+```sh
+tasks done <task> -m <text> [--force] [--json]
+```
+
+Close a task as finished, from any open status. Requires the start gate (`start-gate`,
+overridable) and the finish gate (`finish-gate`, with `open_children` and
+`finishes_after`, never overridable): every live child and every `finishes_after` task
+must be `DONE` or `CANCELLED`. Clears the claim. Never cascades.
+
+### `tasks cancel`
+
+```sh
+tasks cancel <task> -m <text> [--force] [--json]
+```
+
+Decide not to do a task. **Cascades**: every open descendant is cancelled and its claim
+cleared; `finishes_after` is ignored. A live or unknown claim beneath refuses the command
+(`cascade-claim`). The result lists as `dependents` every open task whose `depends_on`
+names a task it cancelled — here and in listed projects — because those are now
+[stranded](/docs/reference/gates#cancelled-dependencies-are-stranded).
+
+### `tasks reopen`
+
+```sh
+tasks reopen <task> -m <text> [--force] [--json]
+```
+
+Bring a `DONE` or `CANCELLED` task back: to `BACKLOG` under a `BACKLOG` ancestor, else
+`PAUSED` when it has a `state.md`, else `TODO`. Refused while its parent is resolved
+(`resolved-ancestor`): reopen the parent first. Reopening a parent reopens none of its
+children.
+
+### `tasks handoff`
+
+```sh
+tasks handoff <task> <actor> -m <text> [--force] [--json]
+```
+
+Pause a task you are working on and assign it to `<actor>`, whose review or decision it
+now waits for: the task reads `waiting for <actor>`. One log entry,
+`handoff <actor>: IN_PROGRESS → PAUSED`. Same `state.md` rule as `pause`. On an epic, the
+assignment keeps holding the children until the assignee releases them.
+
+**Fails** with exit `2`, writing nothing, when the tree lists
+[actors](/docs/reference/configuration#actors) and `<actor>` is not among them; `--force`
+does not lift this, and it is judged before the task's state is.
+
+### `tasks assign` and `tasks unassign`
+
+```sh
+tasks assign <task> <actor> [-m <text>] [--force] [--json]
+tasks unassign <task> [-m <text>] [--force] [--json]
+```
+
+Set or clear the actor a task waits on, in any open status; the status does not change.
+An assigned task **holds** its subtree, so the result of `assign` reports `holds` when
+open descendants exist. `unassign` on a task with no assignee is refused
+(`not-assigned`). Assigning the current assignee again only writes the log entry.
+
+**Fails** with exit `2`, writing nothing, when the tree lists
+[actors](/docs/reference/configuration#actors) and `<actor>` is not among them; `--force`
+does not lift this, and it is judged before the task's state is.
+
+### `tasks priority`
+
+```sh
+tasks priority <task> <level> [-m <text>] [--force] [--json]
+```
+
+Set `priority` to `urgent`, `high`, `normal` or `low`. Descendants inherit the higher of
+their own level and their ancestors' as their effective priority.
+
+## Structure
+
+### `tasks new`
+
+```sh
+tasks new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>] [--json]
+```
+
+| Argument / option    | Meaning                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `<path>`             | The new task's id, e.g. `auth-rework/token-schema`; `alias:path` creates it in a listed project. Never a suffix. |
+| `<title…>`           | The title, one line: the first heading of `task.md`. Unquoted words are joined.  |
+| `--backlog`          | Create it in `BACKLOG`, not yet scheduled.                                       |
+| `--assign <actor>`   | Set the assignee, who must act on it next; a listed actor when the tree that holds the task lists [actors](/docs/reference/configuration#actors). |
+| `--priority <level>` | `urgent`, `high`, `normal` (default) or `low`.                                    |
+
+Creates the task in `TODO` — in `BACKLOG` with `--backlog`, and always under a `BACKLOG`
+parent. Groups on the way are created on demand, and an existing group at the path
+becomes the task, its tasks now the task's children.
+
+**Writes** `<path>/task.md` with a scaffolded body (`## Description`,
+`## Acceptance criteria`, `## Notes`) and a `log.md` entry `new: TODO`. Fill in the body
+with an ordinary edit at the `path` in the result.
+
+**Fails** with exit `4` when a task already exists there (`exists`), the path is
+reserved by an archived task (`reserved`; purge or restore it), an ancestor is resolved
+(`resolved-ancestor`), or `--backlog` would put open, scheduled tasks under an
+unscheduled one (`backlog-invariant`); with exit `2` when `--assign` names an actor the
+tree's roster lacks.
+
+### `tasks dep` and `tasks after`
+
+```sh
+tasks dep add <task> <ref>… [--force] [--json]
+tasks dep rm <task> <ref>… [--force] [--json]
+tasks dep list <task> [--json]
+tasks after add <task> <ref>… [--force] [--json]
+tasks after rm <task> <ref>… [--force] [--json]
+tasks after list <task> [--json]
+```
+
+`dep` edits `depends_on`, the start gate: the tasks that must be `DONE` before the task
+may be claimed or done. `after` edits `finishes_after`: tasks beyond its own children that
+must be resolved before it may be done; `cancel` does not wait for them. Each `<ref>`
+resolves like a task argument — full id, unambiguous suffix, or `alias:path` — and is
+stored in full; see [gates](/docs/reference/gates).
+
+`add` refuses a self-reference (exit `2`), a task that does not exist or is archived
+(exit `3`), the task's own ancestor (exit `4`, `ancestor`), and a reference that would
+close a cycle (exit `4`, `cycle`, with the cycle). Adding a reference already present
+changes nothing. `rm` accepts a reference as stored or as `add` would resolve it, and
+fails with exit `3` when the task does not hold it. `--force` overrides authorization
+only.
+
+**Writes** the field, `updated`, and a log entry such as
+`dep add: auth-rework/token-schema`.
+
+### `tasks move`
+
+```sh
+tasks move <source> <destination> [--force] [--json]
+```
+
+| Argument / option | Meaning                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `<source>`        | A task — full path, unambiguous suffix, or `alias:path` in a listed project — or a group, by its full path. |
+| `<destination>`   | The new path, in the source's tree. Never a suffix; an alias prefix must name the same tree. |
+| `--force`         | Move work in progress claimed by someone else, or a task assigned to someone else.       |
+
+Relocate a task or a group, with everything beneath it. The directory moves in one
+rename — across filesystems, a copy that marks its destination with `.moving` until it
+is complete — so `created`, `log.md` and every workspace file travel with it. Ids are
+paths, so every task beneath gets a new id.
+
+**References** that resolve to a moved task are rewritten: first in the source's tree,
+then in every other tree the command can write — the local tree and the trees it lists —
+one tree at a time under each tree's lock, keeping each reference's project path and
+replacing its id. References found in trees it can read but not write are reported as
+not rewritten; they resolve as `missing` until someone edits them. A listed tree that
+cannot be written does not fail the move: its references are reported too. Run `move`
+from the tree that lists the others — the tracker, in a multi-repository layout — and it
+reaches every reference the tooling can see.
+
+**Under a `BACKLOG` parent**, the moved subtree is deferred, as `defer` would do it:
+`state.md` and assignees are kept, claims are cleared.
+
+**Writes** the directory rename, and on every moved task a log entry
+`move: <old-id> → <new-id>` (` (forced)` when forced), followed by the defer line or an
+`over the claim of …` line where one applies: the claim travels with the task. `updated` is stamped only on manifests whose
+frontmatter changed — a deferred task, a rewritten reference; a pure relocation leaves
+it alone. Groups have no manifest and get no entry.
+
+```txt
+✓ move inbox → later/inbox
+  inbox/bump-deps → later/inbox/bump-deps
+  inbox/fix-typo → later/inbox/fix-typo
+  deferred under a BACKLOG parent: later/inbox/bump-deps, later/inbox/fix-typo
+  rewritten in this tree:
+    release depends_on: inbox/fix-typo → later/inbox/fix-typo
+```
+
+**Fails** with exit `2` for an invalid destination, an unknown alias, or a destination
+in another tree; exit `3` when nothing matches the source or it is archived; and exit `4`
+when:
+
+| `details.kind`          | The destination…, or the source…                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `same-path`             | is where the source already is                                                      |
+| `inside-subtree`        | lies inside the subtree that moves                                                  |
+| `exists`                | holds a task, a group, or any directory: a move needs a new path                    |
+| `path-blocked`          | runs through a file or a symbolic link                                              |
+| `reserved`              | would put a moved task on a path an archived task reserves — `purge` releases it    |
+| `resolved-ancestor`     | lies under a resolved task                                                          |
+| `malformed-ancestor`    | lies under a task whose `task.md` does not parse                                    |
+| `malformed`, `malformed-descendants` | the source, or a task beneath it, has a `task.md` that does not parse  |
+| `interrupted-move`      | the source still holds the `.moving` marker of a move into it that did not finish   |
+| `ancestor`              | would make a moved task depend on, or finish after, its own new ancestor            |
+| `cycle`                 | would close a cycle in the gate graph                                               |
+| `cascade-claim`         | a moved task is `IN_PROGRESS` with a live or unknown claim that is not yours        |
+
+An orphaned claim does not refuse the move: it is superseded and recorded. The assignee
+rule of authorization applies to the source task. `--force` overrides those two refusals
+and nothing else.
+
+Never `mv` a task directory by hand: every reference to it would dangle.
+
+## Workspace
+
+### `tasks state`
+
+```sh
+tasks state <task> [--edit] [--force] [--json]
+```
+
+| Option    | Effect                                                                   |
+| --------- | ------------------------------------------------------------------------ |
+| `--edit`  | Open the current `state.md` (or a Done / Verified / Open / Next skeleton) in `$VISUAL`, else `$EDITOR`. |
+| `--force` | Override authorization: another session's live claim, an assignee.        |
+
+Replace the task's `state.md`, its resume point, with standard input — or with what you
+save in the editor. Nothing else: no transition, no log entry, no change to `task.md`.
+On a claimed task only the claimant's session may write it, checked inside the lock like
+a transition, so a session whose claim was taken over is refused before it overwrites
+the new claimant's file.
+
+```sh
+tasks state auth-rework/token-schema < state.md
+cat <<'MD' | tasks state token-schema
+## Done
+- Claims table drafted.
+MD
+```
+
+**Fails** with exit `2` for empty content, or `--edit` with neither `VISUAL` nor `EDITOR`
+set; with exit `4` when the editor exits non-zero (nothing is written) or `state.md`
+changed while you edited (`state-changed`; your text is kept, and the error says where).
+
+### `tasks log`
+
+```sh
+tasks log <task> "<text>" [--json]
+```
+
+Append a narrative entry to the task's `log.md`, headed with the time, the actor, the
+operator under `--as`, and the session. History, not state: the manifest and `updated`
+do not change. A line of text that would read as a log heading or a version-control
+conflict marker is refused (exit `2`). Listing entries is
+[`tasks log --since`](#tasks-log---since).
+
+## Archive
+
+### `tasks archive`
+
+```sh
+tasks archive <task> [--force] [--json]
+tasks archive --resolved-before <when> [--json]
+tasks archive --all-resolved [--json]
+```
+
+Move a resolved task and its subtree to `.tasks/.archive/<id>/`, where it is excluded
+from every query, satisfies no gate, and keeps its path reserved. When the destination
+exists because a descendant was archived earlier, the two merge. Logs `archive` on the
+task first, so the history travels with it.
+
+Refused when the task is open (`not-resolved`), a descendant is open
+(`open-descendants`), or open tasks — here or in listed projects — reference anything in
+the subtree (`dependents`). `--force` overrides only the last; the result then lists the
+tasks it left blocked. A manifest that cannot be parsed, here or in a listed project, may
+hold references the command cannot see; it says so on stderr and goes ahead.
+
+**In one call.** `--resolved-before <when>` archives every resolved subtree of this tree
+whose root was resolved — by its `updated` stamp — before `<when>`: a timestamp, a date,
+or a duration back from now (`30d`, `2w`). Without a value it uses
+`archive_resolved_after_days` from `config.yml`, and is refused when that is not set.
+`--all-resolved` takes every resolved subtree, whatever its age. A resolved task under a
+resolved parent goes with the parent; one under an open parent is a root of its own. Each
+root is archived as the single form would be, under the lock and with the same refusals: a
+root that open tasks reference is skipped and listed with them, never forced, so `--force`
+is refused here. The result names what was archived and what was skipped; `validate`
+reports the roots that are due once the threshold is configured.
+
+### `tasks restore`
+
+```sh
+tasks restore <path> [--json]
+```
+
+Move an archived task and its archived subtree back to the live tree, at the same path.
+`<path>` is the full path under `.archive/` — no suffixes — or `alias:path`. Refused onto
+a live task, under a resolved or unreadable ancestor, and where the result would break
+containment. Logs `restore`.
+
+### `tasks purge`
+
+```sh
+tasks purge <path> [--json]
+```
+
+Delete an archive entry and everything beneath it for good, releasing the path it
+reserves. Never refused for references: the result names the live tasks whose
+references would reach a task recreated there — purging is that decision.
+
+### `tasks delete`
+
+```sh
+tasks delete <task> [--force] [--json]
+```
+
+Remove a live task without archiving it, only when it was never worked: its log records
+nothing but its creation, it has no `state.md`, nothing lies beneath it, and no live task
+references it. Everything else is archived instead; the refusal (`history`,
+`present-state`, `descendants`, `dependents`) says so. `--force` overrides authorization
+only, never the conditions.
+
+## Sessions
+
+These three take the session from `--session` or `TASKS_SESSION`. A harness calls them;
+see [harness hooks](/docs/guides/harness).
+
+### `tasks heartbeat`
+
+```sh
+tasks heartbeat [--json]
+```
+
+Record that the session is alive: touch `.tasks/.locks/sessions/<token>` in this tree and
+in every listed tree, so a claim held in a listed tree is judged by heartbeats that reach
+it. Every command run with a session does this too; `heartbeat` does nothing else.
+**Fails** with exit `2` without a session.
+
+### `tasks session-end`
+
+```sh
+tasks session-end [--json]
+```
+
+Mark the session ended, in this tree and every listed one, by writing `ended` into its
+registry file. Every claim it holds is orphaned at once, without waiting for the timeout,
+and the command lists them; the actor's next session takes them over. Exits `0` even when
+the session holds nothing. A later command run with the same session clears the mark.
+**Fails** with exit `2` without a session.
+
+### `tasks session-check`
+
+```sh
+tasks session-check [--json]
+```
+
+The exit invariant: every `IN_PROGRESS` task claimed by the current session has a
+`state.md`. Without a session, it checks your claims that carry no session. Exits `4`
+listing the violations; a `state.md` older than the claim or than the task's last log
+entry is reported as a warning, which does not change the exit code. A `Stop` hook runs
+it at the end of every turn.
+
+## Maintenance
+
+### `tasks validate`
+
+```sh
+tasks validate [--fix] [--json]
+```
+
+Check the local tree against the convention and report every finding with its severity.
+Exits `4` when an error is found, `0` on warnings alone, so CI can gate on it. `--fix`
+regenerates `index.md` when it exists and is out of date — nothing else is ever repaired,
+because every other finding needs a person's intent. See
+[validation](/docs/reference/validation).
+
+### `tasks reindex`
+
+```sh
+tasks reindex [--json]
+```
+
+Regenerate `.tasks/index.md` from the task directories, creating it if needed. Once it
+exists, every write regenerates it, so this is needed once, or after a hand edit.
+
+## Migration
+
+### `tasks migrate`
+
+```sh
+tasks migrate [<alias>] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
+```
+
+| Argument / option       | Effect                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `<alias>`               | Migrate the v1 tree of a project this v2 tree lists, instead of this tree.              |
+| `--map <OLD=NEW>`       | The v2 status of a v1 status: needed for a status outside the v1 roles; may also override a role's. Repeatable. |
+| `--map-phase <OLD=NEW>` | The v2 directory name of a v1 phase: needed when its name has a `.` or `_`; may also rename a valid one. Repeatable. |
+
+The one-time upgrade of a v1 tree, and the only command a v1 tree accepts. Under the
+migrated tree's lock it reads everything and checks everything first; then every phase
+becomes a top-level group, every `<phase>/<id>.md` becomes `<phase>/<id>/task.md` (and
+`.archive/<id>.md` becomes `.archive/<phase>/<id>/task.md`), the frontmatter is
+rewritten canonically, `depends_on` ids become paths, `config.yml` becomes `version: 2`
+with `active_phase` as `scope`, `_index.md` is removed and `index.md` generated.
+`README.md` is replaced only when it is exactly v1's scaffold. Nothing is logged: a v1
+task's history is in its body, which is kept as it is.
+
+References into the migrated tree are then repaired in the tree the command runs in and
+in every tree that tree lists, one tree at a time under each tree's lock; those it finds
+in trees it can read but not write are reported. The output names the consequences a
+person must know about: `IN_PROGRESS` tasks whose claims now have no session, `PAUSED`
+tasks without a `state.md`, references kept as written, an edited `README.md` kept.
+
+```txt
+✓ Migrated /Users/you/acme-api/.tasks to .tasks v2: 3 tasks
+  phases      auth, release_1.2 → release-1-2
+  statuses    PENDING → TODO, IN_PROGRESS → IN_PROGRESS, REVIEW → PAUSED, DONE → DONE
+  scope       auth
+  references  2 rewritten, 0 kept as written
+  README.md   none
+  index.md    generated
+! IN_PROGRESS with claimed_session: null, so the liveness of each claim is unknown and a claimant that runs with a session token recovers it only with --force: auth/token-schema
+! PAUSED without a state.md, which validation reports until one is written (`tasks state <task>`): auth/wire-refresh
+```
+
+**Fails** — writing nothing — with exit `2` and one error that lists every problem it
+found (`details.problems`): a phase or status that needs a mapping, a mapping that names
+nothing, a value v2 cannot hold, claim fields that disagree with the mapped status, a v1
+file that does not parse, an id present twice, two tasks landing on one path. Also exit
+`2` for a tree that is already v2 or of an unsupported version, exit `3` when there is no
+tree or the alias is not checked out, and exit `4` for a busy lock. See the
+[migration guide](/docs/guides/migration).

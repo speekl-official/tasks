@@ -1,0 +1,132 @@
+---
+title: Sessions and liveness
+description: Actors, session tokens, heartbeats, the liveness of a claim, takeovers, and the session check.
+icon: Activity
+---
+
+## Actors
+
+The acting identity is resolved, in order, from an explicit override (`--as`), the
+`TASKS_ACTOR` environment variable, the version-control identity of the working copy
+(`user.name`, then `user.email`), and the operating-system user. An implementation MUST document
+its resolution order, and `init` MUST print the actor it resolved, so the person sees the name
+that will head every log entry they write.
+
+An actor and a session token are opaque to implementations but MUST match:
+
+```txt
+^[A-Za-z0-9][A-Za-z0-9._@+-]*$
+```
+
+An explicit override or an environment variable that does not match is a usage error, and an
+empty environment variable counts as unset; a
+version-control identity that does not match is skipped with a diagnostic and the next source is
+tried — a one-word `user.name` passes, a name with spaces is skipped and `user.email` is used.
+Nothing is normalized silently. The pattern is what keeps log headings parseable and makes
+a session token safe as a file name under `.locks/`.
+
+A tree MAY list its actors under `actors:` in `config.yml` ([Configuration](/docs/spec/configuration)),
+each with a line on who they are — what an agent reads to pick the right person for a
+`handoff`. A non-empty list is a **roster**: a name typed for someone else — the actor of
+`assign`, `handoff` or `new --assign`, an `--as` — MUST be on it, or the command fails as a
+usage error naming the listed actors, so a misspelt name cannot create an inbox nobody reads.
+The identity a command resolves for itself is never refused for being unlisted, since the
+remedy lies in the environment or the file, but an implementation SHOULD diagnose it on every
+command. An implementation SHOULD offer a command (`actors`) that lists the roster with each
+actor's description and open tasks, and names the actors open tasks carry that the roster lacks.
+
+<Callout type="info" title="Non-normative">
+  Two actors share one machine in the target mode: the maintainer's terminal
+  takes the git identity, the agent's harness exports `TASKS_ACTOR`. By convention the agent's
+  name is `agent`: the harness hooks export it, and an agent without them sets it on every
+  command itself, so `assign <task> agent` reaches the agent either way. Without that split,
+  human and agent actions are indistinguishable in the log and in authorization.
+</Callout>
+
+## Session tokens
+
+A **session** is one run of an agent. Its token comes from an explicit `--session` option, else
+from the `TASKS_SESSION` environment variable; it matches the pattern under [Actors](/docs/spec/sessions#actors).
+When a session is known, an implementation MUST record it in `claimed_session` on `claim` and in
+every log heading the session writes. A claimant without a session leaves `claimed_session` null.
+
+## Heartbeats
+
+An implementation MUST maintain a registry of session liveness at `.tasks/.locks/sessions/<session>`
+in every tree: the file's modification time is the session's last activity, and its content is
+empty while the session runs. Every command executed with a known session MUST touch that file in
+the tree it runs in and in every tree that tree lists under `projects:`, so that a claim held in a
+listed tree is judged by heartbeats that reach it; an implementation MUST offer a command that
+does nothing else (`heartbeat`), so a harness can call it after every tool call.
+
+A session that ends MUST be able to say so. An implementation MUST offer a command
+(`session-end`) that marks the current session **ended** by writing the single line `ended` into
+its registry file, in the tree it runs in and in every listed tree. From that moment every claim
+the session holds is orphaned (see below) without
+waiting for the timeout, and the command reports those claims. A later command executed with the
+same session MUST clear the mark — the session is evidently running again, and the re-check on
+its next transition protects any claim taken over in between. Like `heartbeat`, the command needs
+a session; it never fails on a session that holds no claim.
+
+An implementation SHOULD remove a heartbeat file older than the timeout that no `IN_PROGRESS`
+task in the tree references, and MAY remove an ended session's file at once under the same
+condition; one that a claim references stays, because it is what tells an orphaned claim from an
+unknown one.
+
+## Liveness of a claim
+
+For an `IN_PROGRESS` task, the claim's liveness is:
+
+| State | Condition |
+| --- | --- |
+| **live** | `claimed_session` is non-null, its heartbeat is younger than `session_timeout_minutes` (default 30) and its registry file is not marked `ended`. |
+| **orphaned** | `claimed_session` is non-null and its heartbeat is older than the timeout, or its registry file is marked `ended`. |
+| **unknown** | `claimed_session` is null, or no heartbeat file exists for it (another machine, or a cleaned `.locks/`). |
+
+A null session is the normal state of a claim taken by a person at a terminal, not a finding. A
+non-null session without a heartbeat file came from another machine or survived a cleaned
+registry, and is worth a warning. Overview commands MUST label every `IN_PROGRESS` task that has a
+session with its liveness and, when the claim is orphaned, with the time last seen; a claim
+without a session carries no liveness label.
+
+## Claims across sessions
+
+`claim` on a task that is already `IN_PROGRESS`:
+
+- by the same actor from the same session — MUST be refused (the task is already this session's);
+- by anyone else — MUST be refused while the claim is **live**, MUST be refused while it is
+  **unknown**, and MUST succeed as a **takeover** while it is **orphaned** and the remaining
+  [authorization](/docs/spec/lifecycle#authorization) rules allow the actor, recording in the log which session was
+  superseded and when it was last seen. The same actor's next session is the usual taker; another
+  actor needs no force for an orphaned claim and always does for a live or unknown one.
+
+An explicit force overrides every refusal above. Every transition on an `IN_PROGRESS` task by its
+claimant, and every `state` write to it, MUST re-check that the claim still belongs to its
+session; a session whose task was taken over MUST receive a conflict rather than write over the
+new claimant's state.
+
+<Callout type="info" title="Non-normative">
+  Liveness means "acted recently, or said goodbye", not "the process exists". A
+  session whose harness reports its end hands its claims over at once; one that dies without a
+  word is orphaned after the timeout, and so is an open but idle one, whose task another session
+  may then take — the first one gets a conflict on its next transition or `state` write and stops.
+  Nothing is lost,
+  because the freshness rule of the [agent protocol](/docs/spec/agent-protocol) keeps `state.md` current as
+  of the end of every turn. Across machines there is no heartbeat, so only a force works — as v1
+  already said about claims across clones.
+</Callout>
+
+## Session check
+
+An implementation MUST offer a command that verifies the **exit invariant** for the current
+session: every `IN_PROGRESS` task claimed by it has a `state.md`. It exits `4` with the list of
+violating tasks when the invariant fails, and SHOULD report, as warnings, tasks whose `state.md`
+is older than the claim or older than the task's last log entry. When no session is known, the
+check covers every `IN_PROGRESS` task claimed by the actor with a null session.
+
+<Callout type="info" title="Non-normative">
+  Existence is the invariant because it is the only fact a hook can enforce
+  without forcing meaningless writes. A task claimed from `TODO` has no resume point until one is
+  written; a task claimed from `PAUSED` carries a correct one until the work moves, and the
+  freshness rule of the [agent protocol](/docs/spec/agent-protocol) covers the move. Age is advice.
+</Callout>

@@ -1,7 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "globalEnv": ["TASKS_ACTOR", "TASKS_DEBUG", "USER", "USERNAME"],
+  "globalEnv": ["TASKS_ACTOR", "TASKS_SESSION", "TASKS_DEBUG", "USER", "USERNAME"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

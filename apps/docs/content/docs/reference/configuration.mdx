@@ -1,171 +1,251 @@
 ---
 title: Configuration
-description: The .tasks/config.yml schema — statuses, roles, transitions, and the default phase scope.
+description: The .tasks/config.yml keys, how the actor and the session are resolved, and the environment the CLI reads.
 icon: Settings
 ---
 
 <Callout type="info" title="Explanatory, not normative">
-  The authoritative definition is [specification ›
-  configuration](/docs/spec/configuration). This page is the practical
-  walkthrough.
+  The authoritative definitions are [specification ›
+  configuration](/docs/spec/configuration) and [sessions and
+  liveness](/docs/spec/sessions). This page is the practical walkthrough.
 </Callout>
 
-`.tasks/config.yml` is **optional**. With no file at all, the CLI behaves as though you
-had written:
+## `config.yml`
 
-```yaml
-version: 1
-statuses: [PENDING, IN_PROGRESS, DONE]
-roles:
-  ready: PENDING
-  claimed: IN_PROGRESS
-  done: DONE
-```
-
-`tasks init` scaffolds a commented version of this so the options are discoverable
-without leaving the repo.
-
-## Schema
+`.tasks/config.yml` is **required** and declares the convention version. `tasks init`
+scaffolds it with every optional key commented out; the `actors:` example already names
+the actor it resolved (`alice` below) and `agent`, and `tasks init --actors` writes that
+block live:
 
 ```yaml title=".tasks/config.yml"
-version: 1 # config schema version
+# .tasks convention v2. See `tasks --help` or .tasks/README.md.
+version: 2
 
-active_phase: auth-rework # optional; default scope for `list` and `ready`
+# Default scope for `list`, `ready` and `tree`: a group or task path.
+# scope: auth-rework
 
-statuses: [TODO, DOING, REVIEW, SHIPPED] # optional; minimum 2 entries
+# Minutes without a heartbeat after which a claim counts as orphaned.
+# session_timeout_minutes: 30
 
-roles: # optional; defaults to first / second / last
-  ready: TODO
-  claimed: DOING
-  done: SHIPPED
+# Days after which a resolved task is expected to be archived: validate reports
+# older ones, and tasks archive --resolved-before without a value uses it.
+# archive_resolved_after_days: 30
 
-transitions: # optional; REPLACES the default step rule
-  - [TODO, DOING]
-  - [DOING, REVIEW]
-  - [REVIEW, SHIPPED]
-  - [SHIPPED, DOING]
+# The actors tasks may be assigned to, each with a line on who they are. Once
+# any is listed, assign, handoff, new --assign and --as refuse other names.
+# actors:
+#   alice:
+#   agent: the coding agent
+
+# Sibling trees by alias, as paths relative to this project's root.
+# projects:
+#   backend: ../backend
 ```
 
 <TypeTable
   type={{
     version: {
-      description: "Config schema version. Only 1 exists.",
-      type: "1",
-      default: "1",
-    },
-    active_phase: {
       description:
-        "Default phase scope for `list` and `ready` when neither --phase nor --all is passed.",
-      type: "string",
+        "The convention version. Required. A tree without config.yml, or without version, is a v1 tree.",
+      type: "2",
     },
-    statuses: {
+    scope: {
       description:
-        "Ordered status list. Order defines the default transition rule and the role defaults.",
-      type: "string[]",
-      default: "[PENDING, IN_PROGRESS, DONE]",
+        "Default scope for list, ready and tree when the caller gives none: a group or task path of this tree. Never restricts addressing by id, gates, or validation.",
+      type: "path",
+      default: "none",
     },
-    roles: {
+    session_timeout_minutes: {
       description:
-        "Maps the three behavioural roles onto status names. Each key is optional.",
-      type: "{ ready?, claimed?, done? }",
-      default: "first / second / last of statuses",
+        "Heartbeat age after which a claim counts as orphaned and may be taken over.",
+      type: "integer ≥ 1",
+      default: "30",
     },
-    transitions: {
+    archive_resolved_after_days: {
       description:
-        "Explicit [from, to] pairs. Providing this replaces the default step rule entirely.",
-      type: "[string, string][]",
+        "Days after which a resolved subtree is expected to be archived: validate reports the ones still live, and archive --resolved-before without a value uses it.",
+      type: "integer ≥ 1",
+      default: "none",
+    },
+    actors: {
+      description:
+        "The roster: who tasks may be assigned to, each with a line on who they are. Once any is listed, assign, handoff, new --assign and --as refuse other names.",
+      type: "map of actor → line or null",
+      default: "{}",
+    },
+    projects: {
+      description:
+        "Aliases for the sibling trees this tree works with, as paths relative to the project root.",
+      type: "map of alias → relative path",
+      default: "{}",
     },
   }}
 />
 
-**Unknown keys are rejected.** A typo like `status:` fails the load with exit `2` rather
-than being silently ignored.
+**Unknown keys are rejected** with exit `2`, so an older CLI refuses a newer tree rather
+than misreading it. The v1 keys are named in the error: `active_phase` is `scope` in v2,
+and `statuses`, `roles` and `transitions` are gone because the lifecycle is fixed.
+Invalid YAML, or a document that is not a mapping, fails the command you ran with exit
+`2`, naming the file.
 
-## `active_phase`
-
-Sets the default scope for `tasks list` and `tasks ready`:
+### `scope`
 
 ```yaml
-active_phase: auth-rework
+scope: auth-rework
 ```
 
-`--phase` overrides it; `--all` ignores it entirely. Resolution order is
-`--phase` → `--all` → `active_phase` → the whole tree.
+Sets the default scope of `tasks ready`, `tasks list`, `tasks tree` and `claim --next`.
+`--scope <path>` overrides it, and `--all` ignores it. A scope applies to the local tree
+only: listed projects are never scoped. `mine` is not scoped — what is yours does not
+depend on what you work on next. A configured scope that names no task or group is
+applied as written, with a warning on stderr, so the file gets fixed instead of every
+overview failing.
 
 <Callout title="A missing task is usually a scope">
-  If a task you expect is absent from `list` or `ready`, retry with `--all`
-  before concluding it does not exist.
+  If a task you expect is absent from `list` or `ready`, retry with `--all` before
+  concluding it does not exist.
 </Callout>
 
-## `statuses` and `roles`
+### `session_timeout_minutes`
 
-Statuses are fully renameable because commands bind to **roles**, not literals:
+How long a claim's session may stay silent before the claim is **orphaned** and the next
+session may take it over. Heartbeats are written when a command runs, and a harness runs
+`tasks heartbeat` after every tool call — so a single tool call that runs longer than
+the timeout (a long test suite) produces no heartbeat while it runs. Keep the timeout
+well above your longest tool call; the default of 30 is not meant to be lowered.
 
-| Role      | Used by                                                                | Default       |
-| --------- | ---------------------------------------------------------------------- | ------------- |
-| `ready`   | What `tasks ready` looks for, and where `tasks release` returns a task | first status  |
-| `claimed` | What `tasks claim` moves to                                            | second status |
-| `done`    | What satisfies another task's `depends_on`                             | last status   |
+The liveness of a claim is judged by the timeout of the tree that holds the task.
 
-A minimum of two statuses is required. Beyond that the list is free — see
-[custom statuses](/docs/guides/custom-statuses) for worked examples.
-
-## `transitions`
-
-Omit it, and the default rule applies: **step forward or back by exactly one** position
-in `statuses`, uniformly.
-
-Provide it, and that rule is **replaced entirely** — not layered onto. Every legal move,
-including every backward one, must be listed:
+### `archive_resolved_after_days`
 
 ```yaml
-transitions:
-  - [TODO, DOING] # claim
-  - [DOING, TODO] # release
-  - [DOING, REVIEW]
-  - [REVIEW, DOING] # changes requested
-  - [REVIEW, SHIPPED]
-  - [SHIPPED, DOING] # reopen
+archive_resolved_after_days: 30
 ```
 
-Forgetting `[DOING, TODO]` here would leave `tasks release` permanently failing with
-exit `4`. If you write `transitions`, walk the whole graph.
+How long a resolved subtree may stay in the live tree before it counts as due for
+archiving. With it set, `tasks validate` warns `resolved-unarchived` with the count and the
+roots, and `tasks archive --resolved-before` without a value archives exactly those (see
+[archive](/docs/reference/commands#tasks-archive)). Nothing is archived on its own: the
+warning is the signal, the command the action. Unset, neither applies.
 
-## Validation
+### `actors`
 
-The config is validated on load, and a bad one fails the _command you ran_ with exit `2`
-rather than surfacing later as a mysterious conflict:
-
-- Every name in `roles` must be a real status.
-- Every name in `transitions` must be a real status.
-- `roles.ready → roles.claimed` must be a legal transition. A config where it is not
-  would make `tasks claim` unusable by construction, so it is refused outright.
-
-```txt
-config.yml: the transition TODO -> REVIEW (roles.ready -> roles.claimed) is not legal,
-so `tasks claim` could never succeed. Add it to `transitions` or adjust `roles`.
+```yaml
+actors:
+  alice: maintainer; approves plans and does releases
+  agent: the coding agent
+  bob:
 ```
 
-## Changing config on a live tree
+The roster: who tasks may be assigned to, each with a line on who they are — what an
+agent reads to pick the right person for a `handoff`. Names match the actor pattern; a
+bare name (`bob:`) needs no description. With at least one actor listed:
 
-Renaming a status does **not** rewrite existing task files. Tasks still carrying the old
-name become `unknown-status` findings in `tasks validate`, which `--fix` cannot repair —
-it is not mechanically safe to guess what the old name should map to.
+- `tasks assign`, `tasks handoff` and `tasks new --assign` refuse a name that is not
+  listed, with exit `2`, naming the listed actors and the file; a name that differs in
+  case alone is suggested. The roster that applies is the one of the tree that holds the
+  task, so a task created in a listed project is judged by that project's `config.yml`.
+- `--as`, on every command that opens the tree, and `tasks hooks install --actor` refuse
+  an unlisted name the same way. `--force` lifts none of these refusals.
+- The actor a command resolves for itself — from `TASKS_ACTOR`, git or the OS user — is
+  never refused for being unlisted, but every command that opens the tree says so on
+  stderr (not under `--json`, where `tasks actors --json` carries the fact as
+  `listed: false`) until you set `TASKS_ACTOR` to a listed name or add yours. The operator
+  behind an `--as` is diagnosed the same way.
+- A name YAML would read as a number or a boolean (`007`, `True`) is refused unless
+  quoted (`"007":`), so a roster never holds a name nobody typed; `init --actors` quotes
+  such names itself. A purely numeric name sorts first in every listing, whatever its
+  position in the file.
+- `tasks validate` warns `unknown-actor` for every open task whose `assignee` or
+  `claimed_by` is not listed.
 
-The safe order is:
+[`tasks actors`](/docs/reference/commands#tasks-actors) shows the roster with each actor's
+open tasks, and the names in use that it lacks. Without the key, any name may be assigned.
+`tasks init --actors [<names>]` writes the key from the start, with the actor it resolved
+and `agent`, or the names given (run as `agent`, the bare form is refused: name the
+person); without the flag the scaffold carries those two names commented out, ready to
+switch on.
 
-<Steps>
+### `projects`
 
-<Step>Add the new status names alongside the old ones and ship that.</Step>
+```yaml
+projects:
+  backend: ../backend
+  cli: ../tasks-cli
+```
 
-<Step>Move each task onto a new status with `tasks status`.</Step>
+Aliases match `^[a-z0-9][a-z0-9-]*$`; paths are relative to the project root (the
+directory that holds `.tasks/`). An absolute path is rejected, because it would not
+resolve in another clone, and so is an alias that leads back to this tree. A listed
+project that is not checked out is a validation warning, and references into it block
+with reason `not-checked-out`. See [projects](/docs/reference/projects).
 
-<Step>
-  Remove the old names from `statuses` once `tasks validate` is clean.
-</Step>
+## The actor
 
-</Steps>
+Every log entry is headed with an **actor**, and the authorization rules compare actors.
+The CLI resolves it, in order, from:
 
-For a small tree, a search-and-replace across `.tasks/**/*.md` followed by
-`tasks validate` is faster and perfectly legitimate — the frontmatter is only
-machine-_owned_, not machine-_only_.
+1. `--as <actor>` — acting on someone's behalf. The identity that would otherwise have
+   acted is recorded as the operator: `alice via agent`.
+2. `TASKS_ACTOR`.
+3. The repository's git identity: `git config user.name`, then `user.email`, read with
+   the project root as the working directory.
+4. The operating-system user.
+
+An actor matches `^[A-Za-z0-9][A-Za-z0-9._@+-]*$` — no spaces — which is what keeps log
+headings parseable. A `--as` or `TASKS_ACTOR` that does not match is a usage error. A git
+identity that does not match is skipped with a diagnostic on stderr: a one-word
+`user.name` is used, a name with spaces falls through to `user.email`. Nothing is
+normalized silently. `tasks init` prints the actor it resolved, so you see the name that
+will head every entry you write. With [`actors`](#actors) listed, a resolved identity that is
+not among them is reported on stderr by every command, and `--as` must name a listed actor.
+
+<Callout type="info" title="Give agents their own name">
+  A person and an agent often share one machine and one git identity. Export
+  `TASKS_ACTOR` for the agent — the [harness hooks](/docs/guides/harness) do — so the
+  log, the inbox and the authorization rules tell the two apart. By convention the name
+  is `agent`: the hooks export it and the skill sets it without them, so
+  `tasks assign <task> agent` reaches the agent either way.
+</Callout>
+
+## The session
+
+A **session** is one run of an agent. Its token comes from `--session <token>`, else
+`TASKS_SESSION`; an empty variable counts as unset. Tokens follow the actor pattern,
+which also makes them safe as file names under `.tasks/.locks/sessions/`. On a
+case-insensitive filesystem two tokens that differ only in case share one heartbeat file,
+and Windows refuses its reserved names (`CON`, `NUL`) as tokens.
+
+With a session known, the CLI records it in `claimed_session` on `claim`, in every log
+heading it writes (`s:<token>`), and touches the session's heartbeat in this tree and in
+every listed tree before doing anything else. A claim taken without a session is normal
+for a person at a terminal; its liveness is `unknown`, so nobody else can take it over
+without `--force`.
+
+An agent uses one token for the whole session, on every command. With the harness
+hooks, `TASKS_SESSION` is exported for it; without them, generate a token once at the
+start (`uuidgen`, a timestamp, anything matching the pattern) and pass `--session` to
+every command. See the [agent protocol](/docs/guides/agent-protocol#the-session-token).
+
+## `-C <dir>`
+
+`-C, --dir <dir>` starts the search for `.tasks/` in `<dir>` instead of the current
+directory, before or after the command name. A session working in a secondary git
+worktree runs its `tasks` commands with `-C` pointing at the main checkout, so task state
+stays in one working copy on the integration branch:
+
+```sh
+tasks -C ~/src/acme-api ready
+tasks claim token-schema -C ~/src/acme-api
+```
+
+For `tasks init`, `-C` names the directory to scaffold in.
+
+## Environment
+
+| Variable                | Read by                         | Meaning                                                    |
+| ----------------------- | ------------------------------- | ---------------------------------------------------------- |
+| `TASKS_ACTOR`           | every command                   | The actor, when `--as` is not given.                       |
+| `TASKS_SESSION`         | every command                   | The session token, when `--session` is not given.          |
+| `VISUAL`, then `EDITOR` | `tasks state --edit`            | The editor to open `state.md` in; a shell command line.    |
+| `TASKS_DEBUG`           | every command                   | When set, an internal error also prints its stack trace.   |

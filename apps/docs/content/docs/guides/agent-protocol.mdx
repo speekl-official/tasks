@@ -1,0 +1,221 @@
+---
+title: The agent protocol
+description: What an agent does on entry, during work, and on exit — the Agent role in practice, and the skill that teaches it.
+icon: Bot
+---
+
+<Callout type="info" title="The normative version">
+  This is the [Agent role](/docs/spec/agent-protocol) of the specification in
+  practice. The bundled skill teaches it to agents; the [harness
+  hooks](/docs/guides/harness) make it automatic.
+</Callout>
+
+The CLI is usable by a person, but it exists because agents need somewhere to put state
+that outlives a context window. The protocol is short: one session token on every
+command, enter through `mine` and `resume`, claim before working, keep `state.md`
+current, and leave through `pause`, `handoff` or `done`.
+
+## The skill
+
+`tasks init` installs an [agent skill](https://agentskills.io) into
+`.claude/skills/tasks/`. It is what makes an agent reach for this CLI on its own rather
+than inventing a `TODO.md`: it carries the protocol on this page, the command table, the
+JSON contract, and what to do when something looks wrong.
+
+```sh
+tasks skill install [--force]
+```
+
+Add it to a project that predates it, or refresh it after upgrading the CLI, with the
+command above. An existing install is **left alone** unless `--force`, so local edits
+survive. Commit `.claude/skills/tasks/` so every agent working in the repository gets it;
+`tasks init --no-skill` scaffolds a tree without it.
+
+## The session token
+
+An agent acts as the actor **`agent`** — the conventional name, unless the tree's
+[roster](/docs/reference/configuration#actors) names it otherwise — with a **session
+token** on every command. A claim taken without one cannot be told apart from live work,
+so nobody — not even the agent's own next session — can take it over without a force.
+Subagents act under the same name and token as the agent that spawned them.
+
+- **With the harness hooks**, `TASKS_SESSION` and `TASKS_ACTOR` are exported for every
+  shell command of the session, and the agent passes nothing.
+- **Without them**, the agent generates one token at the start of the session — a UUID
+  or a timestamp, matching `^[A-Za-z0-9][A-Za-z0-9._@+-]*$` — and runs every command as
+  `TASKS_ACTOR=agent tasks … --session <token>`. Shell state often does not survive
+  between an agent's tool calls, so the prefix and the flag are safer than an `export`.
+  Without `TASKS_ACTOR` the agent acts under the repository's git identity, which is the
+  person's: it works, but the log cannot tell the two apart, and a task assigned to
+  `agent` never reaches it.
+
+The actor names who acted; the session names which run. Two sessions of the same agent
+are the same actor, and the log, the liveness rules and `mine` tell them apart by token.
+
+## Entry
+
+<Steps>
+
+<Step>
+
+### Run `tasks mine`
+
+```sh
+tasks mine --json
+```
+
+It lists your claims first — this session's, then older ones — and then the tasks merely
+assigned to you, each with its last log entry, which is where a handoff's note is read.
+
+- **Continue** a task claimed by this session.
+- **Take over** a task claimed by you in an older session once it is orphaned
+  (`liveness: "orphaned"`): `tasks claim <task>` succeeds and records the takeover.
+- A task held by another **live** session is not yours.
+- A claim of **unknown** liveness is reported to the person, never forced.
+- Another actor's orphaned claim is taken over only on the person's instruction.
+
+</Step>
+
+<Step>
+
+### Run `tasks resume` and read in order
+
+```sh
+tasks resume <task>
+```
+
+Read, in this order: `task.md`, `state.md`, `design.md`, `plan.md` — then, for each
+ancestor as far as needed, its `task.md`, `design.md` and `plan.md`. An epic's design and
+plan live on the epic. `resume` lists the ancestors outermost first, with the workspace
+files each one has.
+
+**Do not read `log.md` on entry.** The present is fully described by the other files;
+the last entry — the note the previous actor left — is already in the `resume` output.
+
+</Step>
+
+<Step>
+
+### Claim before working
+
+```sh
+tasks claim --next          # the first task of your ready set, claimed in one step
+tasks claim <task>          # a specific task
+```
+
+The claim is what stops a second agent starting the same task, and it is only useful if
+it happens first. A conflict (exit `4`) means another agent was first: move on to the
+next ready task. Never reach for `--force` to win a claim.
+
+</Step>
+
+</Steps>
+
+## During work
+
+- **Never hand-edit frontmatter.** Every field has a command. The body below it is
+  yours; edit it with ordinary file tools.
+- **Never move a task directory by hand.** Its id is its path; use `tasks move`, which
+  rewrites the references.
+- **Write `state.md` through `tasks state`**, so the write is fenced like a transition: a
+  session whose claim was taken over learns of it before it overwrites the new claimant's
+  file.
+
+  ```sh
+  tasks state <task> < state.md
+  ```
+
+- **Put each input where it belongs.** A clarification of the statement changes
+  `Description` or `Acceptance criteria` in place; an input received after the start
+  goes to `## Notes`; a decision goes to `design.md`; a change of plan goes to `plan.md`.
+- **A follow-up that is not part of the deliverable** becomes a separate `BACKLOG` task
+  **outside** the parent (`tasks new <path> "<title>" --backlog`), linking to the
+  context in its body.
+- **A step a person must take** — a review, an approval, a deploy — is a `handoff` to
+  that person when it concerns this task, and a separate task assigned to them
+  (`--assign`) only when other tasks must depend on it. `tasks actors` says who they
+  are and how they are named; a refused name is corrected, never added to `config.yml`
+  on your own.
+- **Children are parts of the deliverable, never phases.** No child for planning,
+  review or verification: the plan is `plan.md`, the review is a `handoff`.
+- **A task with open children is never cancelled, deferred or archived on the agent's
+  own initiative.** Such a decision comes as a person's instruction, quoted in the
+  message.
+- **`--as` only on an explicit instruction** from that actor, given in the current
+  session, and the message quotes it. Never use `--as` to satisfy an assignee rule on
+  your own initiative.
+- **The freshness rule:** every turn in which the work progressed ends with `state.md`
+  updated. The status stays `IN_PROGRESS` between turns.
+
+## Exit
+
+- **A deliberate end of work is `pause`, `handoff` or `done`, each with a message.** The
+  message is the closing note the next reader sees. Never end a session deliberately with
+  a task `IN_PROGRESS`.
+
+  ```sh
+  tasks pause <task> -m "Parser done and tested; the CLI flag is next (see state.md)."
+  tasks handoff <task> alice -m "Ready for review: design.md has the two options."
+  tasks done <task> -m "Merged as abc123; docs updated."
+  ```
+
+- **`state.md` names, under _Open_, every uncommitted file and branch** the work leaves
+  behind.
+- **Promote knowledge before `done`.** What must outlive the task goes into the
+  project's documentation; the task directory is working memory, not documentation.
+- **Project state lives only in the tree.** An agent's private memory keeps preferences
+  and reference facts, never the state of a task.
+
+## Approval of a plan
+
+The hold gives an epic its approval gate without a procedural child:
+
+```sh
+tasks claim auth-rework                       # the planner takes the epic
+# write design.md and plan.md, then create the parts — held by the claimed epic
+tasks new auth-rework/token-schema "Design the token schema"
+tasks new auth-rework/wire-refresh "Wire the refresh endpoint"
+tasks state auth-rework < state.md
+tasks handoff auth-rework alice -m "Plan ready for review."
+```
+
+While the epic is claimed or assigned, nothing beneath it is ready. The approver either
+releases the children with `tasks unassign auth-rework -m "APPLY"`, or sends the plan back
+with `tasks assign auth-rework agent -m "Split the refresh work in two."`, which keeps
+them held until the planner reworks it and hands it off again.
+
+## A task that is not being worked
+
+Every case maps to a stored status plus what overviews show:
+
+| Case                                                      | Stored                                | Shown                                         |
+| --------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
+| not started, free                                         | `TODO`                                | `ready`                                       |
+| not started, waits for a task                             | `TODO` + `depends_on`                 | `blocked by X`                                |
+| not started, not scheduled                                | `BACKLOG`                             | `backlog`                                     |
+| a specific person's own step (deploy, release)            | `TODO` + `assignee`                   | `assigned alice`                              |
+| being worked                                              | `IN_PROGRESS`                         | `working by agent · live`                     |
+| session ended deliberately, work unfinished               | `pause` → `PAUSED`                    | `ready · started`, first in `ready`           |
+| session ended without `pause`, or crashed                 | `IN_PROGRESS`                         | `working by agent · orphaned since T`; the next session takes over |
+| started, waits for a task                                 | `pause` + `dep add` → `PAUSED`        | `blocked by X · started`                      |
+| started, needs a decision or review                       | `handoff alice` → `PAUSED`            | `waiting for alice`                           |
+| started, set aside                                        | `pause`, then `defer` → `BACKLOG`     | `parked`; `schedule` brings it back to `PAUSED` |
+| started, decided not to do                                | `cancel`                              | `cancelled`                                   |
+| finished, awaits confirmation                             | `handoff alice` → `PAUSED`            | `waiting for alice`; her `done` confirms it   |
+| an epic whose child is being worked                       | `TODO` or `PAUSED`                    | `open 2/5 · active`                           |
+| an epic whose plan awaits approval                        | `handoff alice` → `PAUSED`            | `waiting for alice`; children `held by` it    |
+
+## When something looks wrong
+
+- Run **`tasks validate --json`** before hand-repairing anything. See
+  [validation](/docs/reference/validation).
+- A **conflict means someone else was first** — another agent's claim, a cascade, a
+  takeover of your own stale session. Re-read with `tasks resume` and move on.
+- **Never `--force` on your own initiative.** It is for a person's explicit decision, and
+  the log records it.
+- **Never hand-edit frontmatter, never `mv` a task directory.** Both bypass the checks
+  that keep the tree trustworthy.
+- If `tasks` is not on `PATH`, use `npx @speekl/tasks` in its place. Exit `3` with no
+  `.tasks/` found means the project is not set up: **ask before running `tasks init`** —
+  creating a tree is a project-level decision — and ask whom to list as actors:
+  `tasks init --actors <person>,agent` writes the roster at once.

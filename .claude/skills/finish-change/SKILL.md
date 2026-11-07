@@ -49,6 +49,8 @@ Check each and update the ones the change touches. Missing one is the usual fail
   ("When something looks wrong", etc.). This is the **source**; never edit `.claude/skills/tasks/`,
   which is an installed copy.
 - `packages/tasks/skill/reference/convention.md` — only if the `.tasks/` layout changed.
+- `apps/docs/content/docs/` — `spec/` first when the convention itself changed (it is normative),
+  then `reference/` for the CLI surface and `guides/` where a workflow changed.
 
 ## 4. Run the gate
 
@@ -62,9 +64,10 @@ Report failures with their output rather than summarizing them.
 
 ## 5. Reindex the task tree
 
-If the change was tracked in `.tasks/`, set the status (`tasks status <id> DONE`) and then run
-`node packages/tasks/dist/index.js reindex` so the committed `_index.md` matches. Use the freshly
-built local bin, not a globally installed `tasks`, so you exercise the code you just changed.
+If the change was tracked in `.tasks/`, close the task with the freshly built local bin —
+`node packages/tasks/dist/index.js done <task> -m "<note>"` — not a globally installed `tasks`, so
+you exercise the code you just changed. A mutation regenerates the committed `index.md` when it
+exists; `node packages/tasks/dist/index.js reindex` creates it.
 
 ## 6. Hand off
 

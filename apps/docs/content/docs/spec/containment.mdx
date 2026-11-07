@@ -1,0 +1,100 @@
+---
+title: Containment
+description: What a decision on a parent does to its subtree — the BACKLOG invariant, the hold, and the cascades.
+icon: Layers
+---
+
+A parent owns its subtree. Decisions taken on a parent apply to every task beneath it and are
+written into each of them, so every file states the truth about its own task; what is *happening*
+in the subtree is computed and never stored (see [Situation](/docs/spec/lifecycle#situation)).
+
+Children are parts of the parent's deliverable, never phases of its lifecycle. Designing,
+planning, executing, verifying and approving a task happen on the task itself — in `design.md`,
+`plan.md` and `state.md`, and through a `handoff` to the approver, whose assignment is the approval
+gate. A child named `plan`, `review` or `verify` is a modelling error; an implementation cannot
+detect it, so the rule binds authors and the [Agent](/docs/spec/agent-protocol) role.
+
+## Invariant
+
+Every open descendant of a `BACKLOG` task MUST be `BACKLOG`. Validation reports a violation as an
+error. The rules below maintain it: nothing under an unscheduled parent can be scheduled, claimed
+or reopened past `BACKLOG`, and a parent cannot be deferred around work in flight.
+
+## Hold
+
+A claimed or assigned task **holds** its subtree: while an ancestor is `IN_PROGRESS` or has an
+assignee, no task beneath it is ready, and `claim` on one MUST be refused as a conflict naming the
+ancestor. Whoever works or must decide on the ancestor comes first; a plan being written or
+awaiting approval is not executed. The hold ends when the ancestor is neither claimed nor
+assigned: a `handoff` to the approver keeps it, the approver's `unassign` releases it, and an
+`assign` back to the author keeps it until the author has reworked and handed off again. Claims
+already held beneath are unaffected. An explicit force overrides the hold; it is a judgment, not
+an invariant, so validation has nothing to check. An `assign` or `claim` on a task with open
+descendants SHOULD report, in its result, how many tasks it now holds, so that a hold is never
+taken by accident.
+
+<Callout type="info" title="Non-normative">
+  The hold gives the approval flow its gate without a procedural child: the
+  planner claims the epic, writes `design.md` and `plan.md`, creates the children — held — and
+  hands the epic to the approver; `unassign -m "APPLY"` releases the children to whoever is free,
+  `assign` back with a note sends the plan for rework. It also means that an epic assigned to
+  someone is an epic that waits on them, and so does everything under it, which makes `assign` the
+  gentlest stop of a subtree: new starts cease, work in flight runs to its own pause. "Owning" an
+  epic is not expressed by assignment; protection of a subtree against an agent's unilateral
+  decisions comes from the [agent protocol](/docs/spec/agent-protocol), which forbids them.
+</Callout>
+
+## Cascades
+
+A **cascade** is the part of a transition that applies to the subtree. Three transitions cascade:
+
+| On a task | Each descendant it reaches |
+| --- | --- |
+| `defer` | every open descendant → `BACKLOG`; `state.md` and `assignee` are kept |
+| `schedule` | every `BACKLOG` descendant → `PAUSED` when its `state.md` exists, else `TODO` |
+| `cancel` | every open descendant → `CANCELLED`; claims are cleared |
+
+- `done` never cascades: a parent is done only when every child is resolved (the finish gate),
+  and nobody can finish a child's work by fiat. `reopen` never cascades either.
+- `new` under a `BACKLOG` parent creates the task in `BACKLOG`. `move` of a subtree under a
+  `BACKLOG` parent defers the moved subtree as `defer` would.
+- `claim` and `schedule` on a task with a `BACKLOG` ancestor MUST be refused as a conflict that
+  names the ancestor and `schedule` of it as the remedy; no force overrides this, because the
+  remedy is one command.
+- **Cascade liveness rule.** A cascade over an `IN_PROGRESS` descendant applies the claimant rule
+  of [Authorization](/docs/spec/lifecycle#authorization) to the whole command: a live or unknown claim MUST refuse it,
+  naming the claimants; an orphaned claim is superseded and recorded as a takeover would be; an
+  explicit force overrides. A `defer` cascade keeps the superseded claim's `state.md`, so
+  `schedule` later restores the task to `PAUSED`.
+- **Authorization** is checked on the task the command names (see
+  [Authorization](/docs/spec/lifecycle#authorization)); descendants are not checked individually.
+- **Logging.** The parent's entry names the command and lists the ids the cascade reached; every
+  reached descendant gets an entry of its own whose first line is
+  `<command> with <parent-id>: <from> → <to>`, followed by the parent's message. History lives
+  where the decision was taken and where it took effect.
+- **Order and recovery.** A cascade MUST write descendants before the parent, deepest first, so an
+  interrupted cascade is completed by repeating the command: descendants already written are
+  skipped, and the parent, not yet written, keeps the repeat legal. An interrupted `schedule`
+  leaves the invariant violated until the repeat, which validation reports meanwhile.
+- **`schedule` is total.** A descendant deferred on its own before its parent was deferred comes
+  back with the parent. The decision is in its log; repeating its `defer` is one command, and
+  re-deciding it when the parent returns to the plan is what the moment calls for.
+- **`finishes_after` is not containment.** A reference there is a join on a task in another
+  scope: `cancel` neither cancels it nor waits for it; only `done` waits.
+- **A child's cancellation does not cancel the parent.** The parent's deliverable was redefined,
+  not lost; the parent stays open until its own `done` or `cancel`.
+
+<Callout type="info" title="Non-normative">
+  The model is structured concurrency as Kotlin coroutines define it: a scope
+  cannot complete before its children, cancelling the scope cancels every child, a child of a
+  not-yet-started scope cannot run, a child that must survive its parent's cancellation is launched
+  in another scope — here, moved out first — and cancellation is cooperative: a claimant whose task
+  was cancelled or deferred under it finds out at its next command, which conflicts, exactly as
+  after a takeover. Two deliberate differences: a child's cancellation is absorbed by the parent (a
+  supervisor scope, because an epic that loses one part is redefined, not failed), and the parent's
+  own status does not follow its children's activity, because a parent has no claimant and two
+  sessions on two children would make any single claimant a lie; activity is shown as `active`
+  instead. An earlier draft derived a child's parking from its ancestor and left the child's own
+  status untouched, which let a file say `TODO` under an unscheduled epic; the cascade keeps every
+  file truthful at the cost of a few extra writes per rare decision.
+</Callout>

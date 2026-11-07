@@ -1,0 +1,90 @@
+---
+title: Identity and references
+description: Paths as ids, the reference grammar, command-line addressing, and relocation.
+icon: FingerprintPattern
+---
+
+## Ids are paths
+
+The **id** of a task is its path relative to `.tasks/`, segments joined by `/`:
+`auth-rework/token-schema`, `policy-mutations/cli-flag`. The filesystem guarantees uniqueness.
+There is no `id` field and no `phase` field; identity is structural, so nothing can drift.
+
+A task's **name** is its last segment. Its **title** is the text of the first level-one ATX heading
+in the manifest body, or its name when there is none.
+
+<Callout type="info" title="Non-normative">
+  v1 used globally unique ids and mirrored them in filenames, which forced every
+  subtask across the whole tree to carry a distinct name. With paths, `auth-rework/tests` and
+  `billing/tests` coexist, and the namespace never fills up.
+</Callout>
+
+## Reference grammar
+
+```txt
+reference    = local | external
+local        = path
+external     = project-path ":" path
+path         = segment *("/" segment)
+segment      = ^[a-z0-9][a-z0-9-]*$
+```
+
+A reference MUST be parsed by splitting on the **last** `:`; absent a colon, the whole string is a
+local path. Segments cannot contain a colon, so the split is unambiguous.
+
+- `project-path` is a filesystem path relative to the **project root of the tree in which the
+  reference is stored**, never absolute and never a drive-letter path; both MUST fail as usage
+  errors. It MUST NOT be empty.
+- References in files MUST be stored in this form. An implementation MAY additionally accept a
+  **project alias** (see [Projects](/docs/spec/projects)) on the command line and MUST translate it before
+  storing into the path from the storing tree's project root to the target's project root — which
+  is the configured alias path only when the storing tree is the one that configured it.
+
+External paths resolve relative to the storing tree's project root and are then subject to
+[discovery](/docs/spec/layout#discovery). Authors SHOULD point external references only at directories that own a
+`.tasks/`, and SHOULD prefer aliases declared in `projects:`.
+
+## Command-line addressing
+
+An implementation that takes a task on the command line SHOULD accept, besides the full path, any
+**unambiguous suffix**: an argument `x` resolves to the live task whose id equals `x`, and when
+none does, to the single live task whose id ends with `/x`. Several suffix candidates MUST fail
+as a usage error naming them. Without an alias prefix the search covers the local tree only, even
+where `projects:` is set; the same rule applies after an alias prefix (`backend:kernel-tests`).
+
+A **reference argument** — the `<ref>` of `dep add|rm` and `after add|rm` — resolves by the same
+rule, with or without an alias prefix, and is stored as a full reference in the form of the
+[grammar](/docs/spec/identity#reference-grammar): `tasks dep add deploy execute` works whenever both suffixes are
+unambiguous. The destination of `move` is a new path and is never resolved as a suffix.
+
+## Relocation and renaming
+
+Moving a task or group changes the ids of everything under it. An implementation that offers a
+move MUST:
+
+- relocate the directory as described under [Writes](/docs/spec/layout#writes);
+- rewrite every local reference in this tree that names the old id or an id beneath it;
+- keep `created`, the log, and every workspace file with the directory;
+- refuse a destination that is reserved by `.archive/`, or that lies under a resolved parent, or
+  that would place a task inside its own subtree;
+- refuse a destination under which a task would depend on its own ancestor or any other local
+  cycle would arise — the same rule as for [dependency editing](/docs/spec/dependencies#cycles);
+- when the task or a descendant is `IN_PROGRESS`, require its claimant or a force; the claimant's
+  session finds the task again through `mine`;
+- when the destination lies under a `BACKLOG` parent, defer the moved subtree as
+  [Containment](/docs/spec/containment) defines, under the cascade liveness rule.
+
+References in **other** trees are rewritten as far as the writing reaches: after the local rename
+and rewrite, the implementation MUST rewrite every reference to the old ids in each tree that the
+tree the command runs in lists under `projects:`, one tree at a time under that tree's lock.
+References in a tree it can read but not write — one reached by a bare relative path, or any tree
+when the current tree lists nothing — MUST be listed in the result; they resolve as `missing`
+until repaired, which blocks (fail safe). A directory moved by hand has the same effect on every
+reference and is repaired by re-adding the dependency; validation reports the dangling references.
+
+<Callout type="info" title="Non-normative">
+  The rewrite is not a transaction: a crash between trees leaves the remaining
+  references dangling, which is the state validation already reports and gates already block on.
+  Move from the tree that lists the others — the tracker repository, in the multi-repository
+  layout — and every reference the tooling can see is repaired by one command.
+</Callout>

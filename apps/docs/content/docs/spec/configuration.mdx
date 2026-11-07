@@ -1,186 +1,43 @@
 ---
 title: Configuration
-description: The config.yml schema, the status/role indirection, and the transition rules.
+description: The keys of config.yml, with their types and defaults.
 icon: Settings
 ---
 
-`.tasks/config.yml` is OPTIONAL. A project without one is configured entirely by the
-defaults below, and MUST be treated as valid.
+`.tasks/config.yml` is REQUIRED and MUST carry `version: 2`. All other keys are OPTIONAL.
 
-```yaml title=".tasks/config.yml"
-version: 1
-active_phase: auth-rework
-statuses: [TODO, DOING, REVIEW, SHIPPED]
-roles:
-  ready: TODO
-  claimed: DOING
-  done: SHIPPED
-transitions:
-  - [TODO, DOING]
-  - [DOING, REVIEW]
-  - [REVIEW, SHIPPED]
-  - [SHIPPED, DOING]
+```yaml
+version: 2
+scope: auth-rework               # default query scope, a group or task path
+session_timeout_minutes: 30      # heartbeat age after which a claim is orphaned
+archive_resolved_after_days: 30  # resolved this long ago and still live: reported
+actors:                          # who tasks may be assigned to
+  alice: maintainer; approves plans and does releases
+  agent: the coding agent
+projects:                        # aliases for sibling trees
+  backend: ../backend
+  cli: ../arkveil-cli
 ```
 
-## Schema
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `version` | `2` | — | Convention version; REQUIRED. |
+| `scope` | path | none | Default scope for `list`, `ready` and `tree` when the caller gives none; never restricts addressing by id, gate resolution or validation. |
+| `session_timeout_minutes` | integer ≥ 1 | 30 | Liveness threshold for claims. |
+| `archive_resolved_after_days` | integer ≥ 1 | none | Resolved subtrees whose root's `updated` is older than this are reported by validation as not yet archived; `archive --resolved-before` without a value uses it. |
+| `actors` | map actor → one-line description or `null` | `{}` | The roster: who tasks may be assigned to, each with a line on who they are. See [Actors](/docs/spec/sessions#actors). |
+| `projects` | map alias → relative path | `{}` | See [Projects](/docs/spec/projects). |
 
-<TypeTable
-  type={{
-    version: {
-      description: "Convention version this project is written against.",
-      type: "1",
-      default: "1",
-    },
-    active_phase: {
-      description:
-        'Default phase scope for queries when the caller specifies neither a phase nor "all phases".',
-      type: "string",
-    },
-    statuses: {
-      description: "Ordered list of lifecycle states. Minimum two entries.",
-      type: "string[]",
-      default: "[PENDING, IN_PROGRESS, DONE]",
-    },
-    roles: {
-      description:
-        "Maps behavioural roles onto status names. Each key independently optional.",
-      type: "{ ready?, claimed?, done? }",
-      default: "first / second / last of statuses",
-    },
-    transitions: {
-      description:
-        "Explicit legal [from, to] pairs. Presence replaces the default rule entirely.",
-      type: "[string, string][]",
-    },
-  }}
-/>
+Unknown top-level keys MUST be rejected as a usage error. Invalid YAML, or a document that is not
+a mapping, MUST fail as a usage error naming the file. There are no `statuses`, `roles` or
+`transitions` keys: the lifecycle is fixed by this specification.
 
-Unknown top-level keys MUST be **rejected**, failing the operation as a usage error.
-
-<Callout type="info" title="Non-normative">
-  Rejecting rather than ignoring is deliberate: a typo like `status:` for
-  `statuses:` would otherwise leave the project silently running on defaults,
-  and the resulting behavior would be baffling. This is the one place the
-  convention chooses strictness over tolerance, because the file is small,
-  closed, and hand-edited.
-</Callout>
-
-Invalid YAML, or a document that is not a mapping, MUST fail as a usage error naming the
-file.
-
-## Statuses
-
-`statuses` is an **ordered** list of at least two distinct strings. Order is significant:
-it determines both the role defaults and the default transition rule.
-
-Status names are opaque. An implementation MUST NOT attach behavior to any particular
-name — not `DONE`, not `BLOCKED`, not any other.
-
-## Roles
-
-Every behavior binds to a **role**, never to a literal status name:
-
-| Role      | Meaning                                                | Default                    |
-| --------- | ------------------------------------------------------ | -------------------------- |
-| `ready`   | The status a task must hold to be a candidate for work | first entry of `statuses`  |
-| `claimed` | The status a task moves to when claimed                | second entry of `statuses` |
-| `done`    | The status that satisfies another task's dependency    | last entry of `statuses`   |
-
-Each key of `roles` is independently optional; an absent key takes its default.
-
-Every role value MUST name a member of `statuses`. A role naming an unknown status MUST
-fail as a usage error.
-
-<Callout type="info" title="Non-normative">
-  This indirection is the reason a project can rename its whole lifecycle to
-  `[TODO, DOING, REVIEW, SHIPPED]` and have every implementation keep working.
-  It also means a consumer reading a foreign tree must resolve roles from that
-  tree's config before interpreting any status — including when judging a
-  cross-repository dependency.
-</Callout>
-
-## Transitions
-
-### Default rule
-
-When `transitions` is absent, a transition from status `a` to status `b` is legal if and
-only if:
-
-```txt
-|index(b) − index(a)| == 1
-```
-
-Positions are taken in `statuses`. A transition from a status to itself is never legal.
-
-Two properties follow, and both are intended:
-
-- **No forward skipping.** A task cannot reach the last status without passing through
-  every intermediate one.
-- **The last status is not terminal.** Stepping back from it is legal, and is the defined
-  way to reopen completed work.
-
-### Explicit rule
-
-When `transitions` is present it **replaces** the default rule entirely. It is not
-additive. Exactly the listed ordered pairs are legal; every other transition, including
-every backward one, is illegal.
-
-Each element MUST be a two-element sequence of status names, and every name MUST be a
-member of `statuses`. A name outside `statuses` MUST fail as a usage error.
-
-<Callout type="warn" title="Replacement, not augmentation">
-  An implementation MUST NOT merge explicit transitions with the default step
-  rule. A project that lists only forward pairs has, correctly, made release and
-  reopen impossible.
-</Callout>
-
-## Coherence
-
-Configuration MUST be validated when it is loaded, not when a command that depends on it
-happens to run. In addition to the per-field rules above:
-
-- The transition `roles.ready → roles.claimed` MUST be legal. A configuration where it is
-  not makes claiming impossible by construction and MUST be rejected outright.
-
-An implementation SHOULD name the offending key and suggest a repair in the error.
-
-```txt
-config.yml: the transition TODO -> REVIEW (roles.ready -> roles.claimed) is not legal,
-so `tasks claim` could never succeed. Add it to `transitions` or adjust `roles`.
-```
-
-<Callout type="info" title="Non-normative">
-  Only the `ready → claimed` edge is mandated because it is the one whose
-  absence makes the project inert rather than merely awkward. A missing `claimed
-  → ready` edge just means this project does not support releasing a claim,
-  which is a legitimate choice.
-</Callout>
-
-## `active_phase`
-
-When set, `active_phase` is the default scope for queries whose caller did not specify
-one. Scope resolution order is:
-
-1. An explicit phase supplied by the caller.
-2. An explicit "all phases" request by the caller, which yields no scope.
-3. `active_phase`, if set.
-4. Otherwise, no scope — the whole tree.
-
-`active_phase` MUST NOT restrict anything other than query scope. Direct addressing of a
-task by id, dependency resolution, and validation MUST always consider the entire tree.
-
-<Callout type="warn" title="A common confusion">
-  Because `active_phase` silently narrows queries, a task outside it appears not
-  to exist. An implementation SHOULD make the active scope visible in query
-  output.
-</Callout>
-
-## Migration
-
-Changing `statuses` does not rewrite existing task files. Tasks holding a status no
-longer in the list become validation errors, and an implementation MUST NOT guess a
-mapping to repair them.
-
-An implementation SHOULD document that the safe migration is to widen `statuses` to
-include both old and new names, move tasks across with normal status transitions, then
-narrow the list again.
+A non-empty `actors` is a roster. An actor named for someone else — by `assign`, `handoff`,
+`new --assign`, or `--as` on a command that opens the tree — MUST be listed, or the command
+fails as a usage error naming the listed actors, which no force lifts; the roster of the tree
+that holds the task judges `assign`, `handoff` and `new --assign`, the local tree's judges
+`--as`. The identity a command resolves for itself MUST NOT be refused for being unlisted, and
+SHOULD be diagnosed. Validation reports an open task whose `assignee` or `claimed_by` is
+unlisted. Keys match the actor pattern and MUST be read as the names written (a name YAML would
+take for a number or a boolean, `007` or `True`, is refused unquoted); a bare name carries
+`null`. Empty or absent, the roster constrains nothing.

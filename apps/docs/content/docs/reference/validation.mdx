@@ -1,0 +1,130 @@
+---
+title: Validation
+description: Every finding tasks validate reports, at its severity, what --fix repairs, and what the counts mean.
+icon: ListChecks
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative list is [specification › task file ›
+  validation](/docs/spec/task-file#validation). This page adds the `kind` each
+  finding carries in `@speekl/tasks`.
+</Callout>
+
+```sh
+tasks validate [--fix] [--json]
+```
+
+```txt
+✗ c: .tasks/c/task.md: the frontmatter has no closing `---` line [malformed]
+✗ a: is in a gate cycle, a → b → a: each task waits for the next, so none of them can ever be done [cycle]
+! a: is PAUSED without a state.md, the resume point a paused task keeps; write one with `tasks state a` [paused-without-state]
+! d: frontmatter key "estimate" is not defined by .tasks v2; it is kept as it is on every write [unknown-key]
+
+2 errors, 2 warnings · 4 tasks checked
+```
+
+`validate` checks the local tree and reports every finding, errors first, each with the
+task it concerns. It **exits `4` when any error is found** and `0` on warnings alone, so
+CI can gate on it, and it changes nothing — unless `--fix` is given.
+
+Run it after any merge that touched `.tasks/`: a `log.md` merges mechanically, but which
+status survives in a `task.md` is a person's decision.
+
+## Errors
+
+| `kind`                           | What it means                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `malformed`                      | A `task.md` cannot be parsed as a manifest: no frontmatter, not a mapping, a field of the wrong type. The task blocks everything that references it and is never ready. |
+| `unknown-status`                 | `status` is not one of the six statuses.                                                               |
+| `unknown-priority`               | `priority` is not `urgent`, `high`, `normal` or `low`.                                                 |
+| `claim-fields`                   | The claim fields disagree with the status: `claimed_by` and `claimed_at` are set exactly while `IN_PROGRESS`, `claimed_session` never outside it. |
+| `malformed-ref`                  | A `depends_on` or `finishes_after` entry does not parse as a reference.                               |
+| `cycle`                          | A cycle in the combined gate graph — dependencies and finish edges — so none of its tasks can ever be done. |
+| `ancestor-dependency`            | A task depends on, or finishes after, its own ancestor: a guaranteed deadlock.                         |
+| `resolved-with-open-descendant`  | A `DONE` or `CANCELLED` task has live open tasks beneath it.                                           |
+| `backlog-invariant`              | An open task under a `BACKLOG` task is not `BACKLOG` itself — typically an interrupted `schedule`; repeating it completes it. |
+| `archived-path-conflict`         | A live task sits at a path an archived task reserves.                                                  |
+| `duplicate-id`                   | An interrupted cross-filesystem move left the same task twice, recorded by a `.moving` marker: keep one copy, then delete the marker. |
+| `log-conflict-markers`           | A `log.md` holds version-control conflict markers: keep both entries, in time order.                  |
+
+## Warnings
+
+| `kind`                 | What it means                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `paused-without-state` | A `PAUSED` task has no `state.md` — after a migration, or a hand edit. Write one with `tasks state`.       |
+| `todo-with-state`      | A `TODO` task has a `state.md`: started work is `PAUSED`, not `TODO`.                                       |
+| `unsatisfiable-ref`    | A reference of an open task can never be satisfied: missing, archived, cancelled (for `depends_on`), malformed, in a project that does not resolve, is not checked out, or has an unsupported version. |
+| `claim-liveness`       | An `IN_PROGRESS` claim is orphaned and may be taken over, or its session has no heartbeat file here (another machine, or a cleaned `.locks/`). A claim without a session is normal and not reported. |
+| `unknown-key`          | A frontmatter key the convention does not define. It is kept on every write; v1's `id` and `phase` are named as such. |
+| `unknown-actor`        | An open task's `assignee` or `claimed_by` is not under `actors:` in `config.yml`: a misspelt name, or a roster that is behind. `tasks assign` a listed actor, or add the name. Only with a roster. |
+| `project-unavailable`  | A project listed in `config.yml` is not checked out, leads to no tree, or is a v1 or unsupported-version tree. |
+| `duplicate-project`    | Two aliases in `config.yml` lead to the same tree, which is then listed once under each. Drop one alias. |
+| `resolved-unarchived`  | Resolved subtrees older than `archive_resolved_after_days` are still live; one finding with the count and the roots. `tasks archive --resolved-before` archives them. |
+| `index-stale`          | `index.md` no longer matches the tree. Regenerate it with `tasks reindex` or `--fix`.                     |
+
+Gate, containment and liveness rules cover live tasks; the rules about a single file —
+it parses, its claim fields agree, its references parse, its keys are known, its log has
+no conflict markers — cover archived tasks too, since a restore brings one back exactly
+as it is. Listed projects are validated by their own tree; here they are only checked for
+being available.
+
+## `--fix`
+
+Repair is opt-in and confined to one file: `--fix` regenerates `index.md` when it exists
+and is out of date. The `index-stale` finding then disappears from the result and
+`fixed` lists `index.md`. Nothing else is ever repaired, because every other finding
+needs to know what was intended.
+
+```sh
+tasks validate --fix --json
+```
+
+```json
+{
+  "ok": true,
+  "checked": 9,
+  "fixed": ["index.md"],
+  "findings": [
+    {
+      "severity": "warning",
+      "kind": "unsatisfiable-ref",
+      "task": "billing/reminders",
+      "message": "depends on billing/invoices, which is CANCELLED, and cancelled work never satisfies a dependency (cancelled)"
+    }
+  ]
+}
+```
+
+- `ok` is `false` if and only if a finding has error severity.
+- `checked` counts the manifests examined: live and archived, parsed or not.
+- `task` is `null` for a finding about the tree rather than one task
+  (`project-unavailable`, `index-stale`).
+
+## Fixing what `--fix` cannot
+
+**`malformed`, `unknown-status`, `unknown-priority`** — open the file. It is almost
+always the YAML: an unquoted timestamp, a stray tab, an unclosed `---`, a v1 status left
+behind. Compare against the [file format](/docs/reference/file-format#taskmd). While the
+manifest is broken, commands on the task are refused and it blocks its dependents.
+
+**`claim-fields`** — usually a hand edit or a bad merge. Decide whether the task is being
+worked; then restore the manifest from git, or make the three claim fields agree with the
+status by hand, once, and run `validate` again.
+
+**`cycle`, `ancestor-dependency`** — break the edge with `tasks dep rm` or
+`tasks after rm`. Worth doing promptly: every task in a cycle is out of `ready` forever.
+
+**`resolved-with-open-descendant`, `backlog-invariant`** — the subtree disagrees with its
+parent. Repeat the interrupted cascade (`schedule`, `defer`, `cancel`) or resolve the
+open descendants; `reopen` the parent if it was closed too early.
+
+**`unsatisfiable-ref`** — the reference points at something that will never be done.
+Recreate the task, point the reference elsewhere, or drop it with `tasks dep rm`. A
+cancelled dependency is [stranded](/docs/reference/gates#cancelled-dependencies-are-stranded):
+a person decides.
+
+**`claim-liveness`** — an orphaned claim is the next session's to take over with
+`tasks claim`. A claim with no heartbeat file here came from another machine; only its
+claimant, or `--force` on a person's say-so, moves it.
+
+**`paused-without-state`** — write the resume point with `tasks state <task>`.

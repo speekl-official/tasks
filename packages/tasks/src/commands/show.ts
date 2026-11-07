@@ -1,63 +1,44 @@
 import { Command } from "commander";
 
-import { openTree } from "../context.js";
-import { DependencyResolver } from "../core/deps.js";
-import { findTask } from "../core/repo.js";
-import { taskTitle } from "../core/task.js";
-import {
-  colorStatus,
-  emitJson,
-  renderDependencyList,
-  taskToJson,
-  ui,
-  writeOut,
-} from "../output.js";
+import { deriveWithin, openContext, resolveTaskArgument } from "../context.js";
+import type { TaskWithDerivedJson, WorkspaceFilename } from "../core/types.js";
+import { workspaceFiles } from "../core/workspace.js";
+import { emitJson, renderShow, writeOut } from "../output.js";
+
+/** What `show --json` prints: the task object with derived conditions. */
+export interface ShowJson extends TaskWithDerivedJson {
+  body: string;
+  /** The workspace vocabulary files present beside `task.md`. */
+  workspace: WorkspaceFilename[];
+  /** Live tasks, here and in listed trees, whose gates name this task. */
+  referenced_by: string[];
+}
+
+export const TASK_ARGUMENT_HELP =
+  "a task path, an unambiguous suffix of one, or alias:path in a listed project";
 
 export function showCommand(): Command {
   return new Command("show")
-    .description("print one task's frontmatter and body")
-    .argument("<id>", "task id")
+    .description(
+      "a task: its fields, derived conditions, workspace files, the tasks that reference it, and its body",
+    )
+    .argument("<task>", TASK_ARGUMENT_HELP)
     .option("--json", "emit machine-readable JSON")
-    .action(async (id: string, options: { json?: boolean }) => {
-      const tree = await openTree();
-      const task = findTask(tree, id);
+    .action(async (arg: string, _options: unknown, command: Command) => {
+      const context = await openContext(command);
+      const { load, task } = await resolveTaskArgument(context, arg);
+      const { task: shown } = await deriveWithin(context, load, task.id);
+      const extras = {
+        body: task.body,
+        workspace: workspaceFiles(task),
+        referenced_by: await context.gates.referencedBy(load, task.id),
+      };
 
-      const resolver = new DependencyResolver(tree);
-      const deps = await resolver.resolveAll(task.depends_on);
-      const ready = task.status === tree.config.roles.ready && deps.every((d) => d.satisfied);
-
-      if (options.json) {
-        emitJson({
-          ...taskToJson(task, { title: taskTitle(task), ready }),
-          dependencies: deps.map((d) => ({
-            ref: d.raw,
-            satisfied: d.satisfied,
-            status: d.status ?? null,
-            reason: d.reason ?? null,
-          })),
-          body: task.body,
-        });
+      if (context.json) {
+        const result: ShowJson = { ...shown.json, ...extras };
+        emitJson(result);
         return;
       }
-
-      writeOut(ui.bold(taskTitle(task)));
-      writeOut("");
-      writeOut(`  ${ui.dim("id")}       ${task.id}`);
-      writeOut(`  ${ui.dim("phase")}    ${task.phase}`);
-      writeOut(`  ${ui.dim("status")}   ${colorStatus(task.status, tree.config)}`);
-      writeOut(`  ${ui.dim("created")}  ${task.created}`);
-      writeOut(`  ${ui.dim("updated")}  ${task.updated}`);
-      if (task.claimed_by) {
-        writeOut(`  ${ui.dim("claimed")}  ${task.claimed_by} at ${task.claimed_at}`);
-      }
-      writeOut(`  ${ui.dim("path")}     ${task.filePath}`);
-
-      if (deps.length > 0) {
-        writeOut("");
-        writeOut(renderDependencyList(deps));
-      }
-
-      writeOut("");
-      writeOut(task.body.trim());
+      writeOut(renderShow(shown, extras));
     });
 }

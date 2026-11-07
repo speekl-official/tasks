@@ -1,13 +1,12 @@
 ---
 title: JSON contract
-description: Output shapes, exit codes, and the error envelope agents branch on.
+description: Exit codes, the error envelope and its details, and every --json shape the CLI emits, with examples.
 icon: Braces
 ---
 
 <Callout type="info" title="Explanatory, not normative">
-  The authoritative definition is [specification › CLI
-  contract](/docs/spec/cli). This page is the same contract with worked
-  examples.
+  The authoritative definition is [specification › CLI contract](/docs/spec/cli).
+  This page is the same contract for `@speekl/tasks`, with real examples.
 </Callout>
 
 Three things are **contract**, not implementation. They change only in a major version:
@@ -16,40 +15,46 @@ Three things are **contract**, not implementation. They change only in a major v
 2. **`--json` output shapes**
 3. **The `.tasks/` on-disk conventions**
 
-The human-readable tables are _not_ contract. Their layout, colors, and column widths
-can change at any time — never parse them.
+The human-readable output is _not_ contract. Its layout, colours and wording can change
+at any time — never parse it.
 
 ## Streams
 
-Every command accepts `--json`.
+Every command that produces output accepts `--json`.
 
-| Stream     | Carries                                                                            |
-| ---------- | ---------------------------------------------------------------------------------- |
-| **stdout** | Successful output, pretty-printed JSON under `--json`.                             |
-| **stderr** | Errors. Under `--json`, a structured error envelope; otherwise a `✗ message` line. |
+| Stream     | Carries                                                                         |
+| ---------- | ------------------------------------------------------------------------------- |
+| **stdout** | Successful output: one JSON document under `--json`.                            |
+| **stderr** | Errors and diagnostics: under `--json`, one error envelope and nothing else.    |
 
-The split is absolute, so `tasks ready --json | jq` never chokes on a diagnostic that
-got mixed into the stream.
+The split is absolute, so `tasks ready --json | jq` never chokes on a diagnostic mixed
+into the stream. Two commands answer with a document **and** a non-zero code:
+`validate` with an error finding and `session-check` with a violation print their result
+on stdout and exit `4`.
 
 ## Exit codes
 
-```ts
-0  success
-1  internal    an unexpected failure
-2  usage       bad flags, unknown status, malformed dependency ref
-3  not found   no .tasks/ discovered, unknown task id
-4  conflict    illegal transition, already claimed, blocked, delete refused
+```txt
+0  success      the command completed; an empty result is success
+1  internal     an unexpected failure
+2  usage        bad invocation or configuration: unknown option, malformed reference,
+                ambiguous suffix, missing message, invalid config.yml, unsupported
+                version, a v1 tree, an actor or session that fails its pattern, an
+                actor the roster does not list, a command group without its subcommand
+3  not found    no tree discovered, no such task, a path only in .archive/,
+                nothing for claim --next to take
+4  conflict     the tree's state forbids the command: illegal transition, authorization,
+                gate, state.md, live claim, cycle, reserved path, archive with
+                dependents, failed session check, a busy lock
 ```
 
-**Branch on the code, never on message text.** Messages are written for humans and may
-be reworded in a patch release; codes may not.
-
-`--help` and `--version` exit `0`.
+**Branch on the code, never on message text.** Messages are written for people and may
+be reworded in a patch release; codes may not. `--help` and `--version` exit `0`.
 
 <Callout type="warn" title="An empty result is success">
-  `tasks ready` with nothing available exits `0` with `{"count": 0, "tasks": []}`. "There
-  is nothing to do" is an answer, not a failure — an agent that treats it as an error
-  will loop or bail out for no reason.
+  `tasks ready` with nothing available exits `0` with `"count": 0`. "There is nothing to
+  do" is an answer, not a failure — an agent that treats it as an error loops or bails
+  out for no reason. Only `claim --next` turns an empty ready set into exit `3`.
 </Callout>
 
 ## The error envelope
@@ -58,164 +63,530 @@ be reworded in a patch release; codes may not.
 {
   "error": {
     "code": "CONFLICT",
-    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
+    "message": "auth-rework/token-schema is IN_PROGRESS and has no state.md; write it before pausing (`tasks state auth-rework/token-schema` reads it from stdin).",
+    "details": { "id": "auth-rework/token-schema", "kind": "missing-state" }
+  }
+}
+```
+
+| Field     | Notes                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `code`    | `USAGE` (2), `NOT_FOUND` (3), `CONFLICT` (4), `INTERNAL` (1).                                  |
+| `message` | For people. Do not parse.                                                                      |
+| `details` | Structured facts about this failure. Present on most errors. Prefer it over the message.       |
+
+### What `details` carries
+
+| Failure                                   | `details`                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------- |
+| Illegal transition                        | `id`, `from`, `to`, and `allowed`: the statuses the command applies to    |
+| Authorization                             | `id`, `claimed_by`, `claimed_session`, `assignee`, `liveness`             |
+| Unsatisfied start gate                    | `id`, `blocked_by`: `[{ref, reason, status}]`                             |
+| Unsatisfied finish gate                   | `id`, `open_children`, `finishes_after`: `[{ref, reason, status}]`        |
+| Cascade over a live or unknown claim      | `id`, `claims`: `[{id, claimant, session, liveness}]`                     |
+| Ancestor in `BACKLOG`, claimed or assigned | `id`, `ancestor`                                                         |
+| Missing or present `state.md`             | `id`, `kind`                                                              |
+| Ambiguous suffix                          | `argument`, `candidates`                                                  |
+| Archive with dependents                   | `id`, `dependents`                                                        |
+| A task that exists only in the archive    | `id`, `archived: true`                                                    |
+| A v1 tree                                 | `tasksDir`, `version: 1`, `upgrade: "tasks migrate"`                      |
+| A busy tree lock                          | `lock`, `holder`                                                          |
+| An actor the roster does not list         | `field`, `value`, `actors`, `file`                                        |
+
+Conflicts also carry **`details.kind`**, one word naming the refusal, so a caller can
+branch without reading the message:
+
+| `kind`                  | Refused by                                     | With                                    |
+| ----------------------- | ---------------------------------------------- | --------------------------------------- |
+| `illegal-transition`    | a transition from a status its row excludes    | `from`, `to`, `allowed`                 |
+| `authorization`         | a transition, `state`, a gate edit, `delete` or `move` by someone the rules exclude | `claimed_by`, `claimed_session`, `assignee`, `liveness` |
+| `already-claimed`       | `claim` of a task this session already holds   | as `authorization`                      |
+| `start-gate`            | `claim`, `done`                                | `blocked_by`                            |
+| `finish-gate`           | `done`                                         | `open_children`, `finishes_after`       |
+| `held`                  | `claim` under a claimed or assigned ancestor   | `ancestor`                              |
+| `backlog-ancestor`      | `claim`, `schedule` under a `BACKLOG` ancestor | `ancestor`                              |
+| `resolved-ancestor`     | `claim`, `reopen`, `new`, `restore`, `move` under a resolved ancestor | `ancestor`, `status` |
+| `cascade-claim`         | `defer`, `cancel`, `move` over work in progress | `claims`                               |
+| `missing-state`         | `pause`, `handoff`                             |                                         |
+| `present-state`         | `release`, `delete`                            |                                         |
+| `not-assigned`          | `unassign`                                     | `assignee`                              |
+| `malformed`             | any command on a task whose `task.md` does not parse | `path`, `message`                 |
+| `malformed-ancestor`    | a command that must read an unreadable ancestor | `ancestor`, `path`                     |
+| `malformed-descendants` | a cascade, `move` or `restore` over unreadable tasks | `descendants` or `tasks`          |
+| `exists`                | `new`, `restore` onto a live task; `move` onto anything | `path` for `move`                |
+| `reserved`              | `new`, `move` onto a path an archived task reserves | `archived`                         |
+| `same-path`, `inside-subtree` | `move` to where the source is, or inside it | `to`                                |
+| `interrupted-move`      | `move` of a source that holds a `.moving` marker | `path`                                 |
+| `path-blocked`          | a file or a symbolic link where a directory must go | `path`                             |
+| `backlog-invariant`     | `new --backlog`, `restore` that would schedule work under `BACKLOG` | `descendants`, or `task` and `ancestor` |
+| `open-under-resolved`   | `restore` that would leave open work under a resolved task | `task`, `ancestor`, `status`  |
+| `duplicate`, `collision` | an archive or restore merge that would hold a file twice | `destination`, `paths`         |
+| `ancestor`              | `dep add`, `after add` of the task's own ancestor, a `move` under one | `field`, `ref`, `ancestor` |
+| `cycle`                 | `dep add`, `after add`, `move` that would close a cycle | `cycle`                          |
+| `not-resolved`          | `archive` of an open task                      | `status`                                |
+| `open-descendants`      | `archive` with open tasks beneath              | `open_descendants`                      |
+| `dependents`            | `archive` without `--force`, `delete`          | `dependents`                            |
+| `history`, `descendants` | `delete` of a task that was worked, or has tasks beneath | `entries`, `descendants`       |
+| `state-changed`         | `state --edit` when the file changed meanwhile | `kept`                                  |
+
+### The `migrate` refusal
+
+`migrate` checks the whole tree before it writes anything, and refuses once, with exit
+`2`, listing every problem it found:
+
+```json
+{
+  "error": {
+    "code": "USAGE",
+    "message": "Cannot migrate /Users/you/acme-api/.tasks to .tasks v2; nothing was written. Fix these first:\n  - phase \"release_1.2\" is not a v2 directory name …",
     "details": {
-      "id": "wire-refresh",
-      "from": "PENDING",
-      "to": "DONE",
-      "allowed": ["IN_PROGRESS"]
+      "tasksDir": "/Users/you/acme-api/.tasks",
+      "problems": [
+        { "kind": "unmapped-phase", "phase": "release_1.2", "message": "phase \"release_1.2\" is not a v2 directory name (^[a-z0-9][a-z0-9-]*$); v1 allowed . and _ in a phase name, v2 does not: rename it with --map-phase release_1.2=<name>" },
+        { "kind": "unmapped-status", "status": "REVIEW", "paths": ["/Users/you/acme-api/.tasks/auth/wire-refresh.md"], "message": "…" },
+        { "kind": "invalid-value", "path": "/Users/you/acme-api/.tasks/auth/token-schema.md", "field": "claimed_by", "value": "build bot", "message": "…" }
+      ]
     }
   }
 }
 ```
 
-| Field     | Notes                                                                                                               |
-| --------- | ------------------------------------------------------------------------------------------------------------------- |
-| `code`    | `USAGE` (2), `NOT_FOUND` (3), `CONFLICT` (4), `INTERNAL` (1).                                                       |
-| `message` | Human-readable. Do not parse.                                                                                       |
-| `details` | Structured facts about this specific failure. Present on most errors, absent on some. Prefer this over the message. |
+| Problem `kind`    | Means                                                                                           | With                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `malformed`       | a v1 file that does not parse, or a phase directory that is a symbolic link                     | `path`                                 |
+| `unmapped-phase`  | a phase name that is not a v2 segment, with no `--map-phase`                                    | `phase`                                |
+| `unmapped-status` | a status outside the v1 roles (or carrying two of them), with no `--map`                        | `status`, `paths`                      |
+| `unknown-mapping` | a `--map` or `--map-phase` naming a status or phase the tree does not have                      | `option`, `old`                        |
+| `invalid-value`   | a value v2 cannot hold: an id that is not a segment, a `claimed_by` that is not an actor, a timestamp that is not ISO 8601, a key v2 defines that v1 did not | `path`, `field`, `value` |
+| `claim-fields`    | a task mapped to `IN_PROGRESS` without `claimed_by` and `claimed_at`, or claim fields on a task mapped to anything else | `path`, `status`, `claimed_by`, `claimed_at` |
+| `duplicate-id`    | two live, or two archived, v1 tasks with one id                                                 | `id`, `paths`                          |
+| `collision`       | two phases mapped to one name, a destination that already exists, an archived task landing on a live task's path, an existing `index.md` | `path`, `paths` |
 
-`details` is where the useful recovery information lives — `allowed` transitions,
-`blocked_by` refs, `claimed_by`, `statuses`. Read it.
+Every problem carries a `message`.
 
-## Task object
+## The task object
 
-`new`, `show`, `claim`, `release`, `status`, `move`, `dep add`, and `dep rm` all emit a
-single task object:
+Every command that reports or changes one task emits the task object: the frontmatter
+fields, the task's identity, and the absolute path of its directory.
 
-```json
-{
-  "id": "wire-refresh",
-  "phase": "auth-rework",
-  "status": "IN_PROGRESS",
-  "depends_on": ["token-schema"],
-  "created": "2026-08-21T09:14:00Z",
-  "updated": "2026-08-22T11:02:41Z",
-  "claimed_by": "agent-7",
-  "claimed_at": "2026-08-22T11:02:41Z",
-  "path": "/Users/you/acme-api/.tasks/auth-rework/wire-refresh.md"
-}
-```
+| Field             | Notes                                                                             |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `id`              | The path relative to `.tasks/`; `alias:path` for a task in a listed project.      |
+| `name`            | The last segment.                                                                 |
+| `parent`          | The id of the nearest ancestor task, or `null`.                                   |
+| `project`         | The alias of the task's tree, `null` for the local tree.                          |
+| `title`           | The first `# ` heading of the body, else the name.                                |
+| `status` … `updated` | The ten [frontmatter fields](/docs/reference/file-format#taskmd), as stored.   |
+| `path`            | The absolute path of the task **directory**.                                      |
 
-Some commands add context-specific fields on top:
+### Derived conditions
 
-| Command  | Adds                                       |
-| -------- | ------------------------------------------ |
-| `status` | `previous_status`                          |
-| `move`   | `previous_phase`                           |
-| `show`   | `title`, `ready`, `dependencies[]`, `body` |
+Reporting commands — `show`, `resume`, `ready`, `list`, `tree`, `mine` — and every
+command that changes a task add the conditions computed for the calling actor. They are
+never stored.
 
-`path` is absolute — it is what you open to write the task body after `tasks new`.
-
-## Collection shape
-
-`list` and `ready` share one shape:
-
-```json
-{
-  "phase": "auth-rework",
-  "count": 1,
-  "tasks": [
-    {
-      "id": "wire-refresh",
-      "phase": "auth-rework",
-      "status": "PENDING",
-      "…": "…"
-    }
-  ]
-}
-```
-
-`phase` is the resolved scope, and is `null` when the query spanned the whole tree
-(`--all`, or no `active_phase` configured).
-
-## `show`
-
-The richest read. On top of the task object:
+| Field                | Notes                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `situation`          | One of `done`, `cancelled`, `working`, `parked`, `backlog`, `held`, `waiting`, `assigned`, `blocked`, `closable`, `open`, `ready`. Its object is in the fields below. |
+| `blocked_by`         | Unsatisfied `depends_on` references: `[{ref, reason, status}]`.                       |
+| `ready`              | Ready for the calling actor.                                                          |
+| `effective_priority` | The highest of the task's own priority and its ancestors'.                            |
+| `held_by`            | The nearest claimed or assigned ancestor, or `null`.                                  |
+| `started`            | A `state.md` exists on the task or beneath it.                                        |
+| `children`           | `{open, resolved}`: live children by state.                                           |
+| `active`             | A task beneath is `IN_PROGRESS`.                                                      |
+| `waiting_for`        | The assignee of a `PAUSED` task, else `null`.                                         |
+| `closable`           | An open task with children or `finishes_after` whose finish gate is satisfied.        |
+| `liveness`           | For `IN_PROGRESS`: `live`, `orphaned` or `unknown`; else `null`.                      |
+| `last_seen`          | The claimant session's last heartbeat, or `null`.                                     |
+| `last_entry`         | The most recent log entry — `{time, actor, via, session, text}` — or `null`.          |
 
 ```json
 {
-  "id": "wire-refresh",
+  "id": "auth-rework/wire-refresh",
+  "name": "wire-refresh",
+  "parent": "auth-rework",
+  "project": null,
   "title": "Wire the refresh endpoint",
-  "ready": false,
-  "status": "PENDING",
-  "dependencies": [
-    {
-      "ref": "token-schema",
-      "satisfied": false,
-      "status": "PENDING",
-      "reason": "not-done"
-    }
+  "status": "TODO",
+  "priority": "normal",
+  "depends_on": ["auth-rework/token-schema"],
+  "finishes_after": [],
+  "assignee": null,
+  "claimed_by": null,
+  "claimed_at": null,
+  "claimed_session": null,
+  "created": "2026-10-26T02:55:55Z",
+  "updated": "2026-10-26T02:55:55Z",
+  "path": "/Users/you/acme-api/.tasks/auth-rework/wire-refresh",
+  "situation": "blocked",
+  "blocked_by": [
+    { "ref": "auth-rework/token-schema", "reason": "not-done", "status": "IN_PROGRESS" }
   ],
-  "body": "# Wire the refresh endpoint\n\n## Description\n…"
+  "ready": false,
+  "effective_priority": "normal",
+  "held_by": null,
+  "started": false,
+  "children": { "open": 0, "resolved": 0 },
+  "active": false,
+  "waiting_for": null,
+  "closable": false,
+  "liveness": null,
+  "last_seen": null,
+  "last_entry": {
+    "time": "2026-10-26T02:55:55Z",
+    "actor": "alice",
+    "via": null,
+    "session": null,
+    "text": "dep add: auth-rework/token-schema"
+  }
 }
 ```
 
-`ready` is the same predicate `tasks ready` uses: status is the `ready` role **and**
-every dependency is satisfied. `status` and `reason` on a dependency are `null` when
-they do not apply — see [dependencies](/docs/reference/dependencies) for every `reason`.
-
-## Other shapes
-
-`dep list`:
+A task being worked carries its claim and its liveness:
 
 ```json
 {
-  "id": "wire-refresh",
+  "id": "auth-rework/token-schema",
+  "status": "IN_PROGRESS",
+  "claimed_by": "agent",
+  "claimed_at": "2026-10-26T02:55:55Z",
+  "claimed_session": "7f3a",
+  "situation": "working",
+  "liveness": "live",
+  "last_seen": "2026-10-26T02:55:55Z",
+  "…": "…"
+}
+```
+
+### `show` and `resume`
+
+`show` adds:
+
+| Field           | Notes                                                                          |
+| --------------- | ------------------------------------------------------------------------------ |
+| `body`          | The markdown body of `task.md`.                                                |
+| `workspace`     | The vocabulary files present, in reading order: `["state.md", "log.md"]`.      |
+| `referenced_by` | Live tasks, here and in listed projects, whose `depends_on` or `finishes_after` name this task. |
+
+`resume` adds `body`, `workspace` and `referenced_by` too, and:
+
+| Field         | Notes                                                                                  |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `ancestors`   | Outermost first: `[{id, title, status, workspace}]`.                                   |
+| `child_tasks` | The children, as task objects with derived conditions. (`children` stays the count.)  |
+| `state`       | `state.md` in full, or `null`.                                                         |
+
+```json
+{
+  "id": "auth-rework/token-schema",
+  "status": "PAUSED",
+  "situation": "ready",
+  "started": true,
+  "…": "…",
+  "ancestors": [
+    { "id": "auth-rework", "title": "Rework authentication", "status": "TODO", "workspace": ["log.md"] }
+  ],
+  "child_tasks": [],
+  "workspace": ["state.md", "log.md"],
+  "state": "## Done\n\n- Drafted the claims table in design.md.\n\n## Next\n\n- Decide the refresh-token lifetime.\n",
+  "referenced_by": ["auth-rework/wire-refresh"],
+  "body": "# Design the token schema\n\n## Description\n\n## Acceptance criteria\n\n- [ ]\n\n## Notes"
+}
+```
+
+## Collection object
+
+`ready`, `list`, `tree` and `mine` share one shape:
+
+```json
+{
+  "scope": null,
+  "projects": ["backend"],
+  "count": 2,
+  "tasks": [ { "id": "auth-rework/token-schema", "…": "…" }, { "id": "backend:kernel/claims-api", "…": "…" } ],
+  "malformed": [
+    { "path": "/Users/you/acme-api/.tasks/billing/task.md", "message": "the frontmatter has no closing `---` line" }
+  ],
+  "unavailable": [
+    { "alias": "web", "reason": "not-checked-out" }
+  ]
+}
+```
+
+| Field       | Notes                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `scope`     | The resolved local scope, or `null`.                                                      |
+| `projects`  | The aliases of the listed projects spanned.                                               |
+| `count`     | Equals `tasks.length`.                                                                    |
+| `tasks`     | Task objects with derived conditions, in the command's order.                             |
+| `malformed` | Every task directory in the query whose `task.md` could not be parsed: `{path, message}`. Such a task is never in `tasks`, and it blocks whatever references it. |
+| `unavailable` | Listed projects the query could not read: `{alias, reason}`, with `not-checked-out`, `unresolved-project` or `unsupported-version`. The human output prints a line for each; `--local` spans none. |
+
+`tree` emits the same flat list: every task carries `parent`, and nesting is only how the
+human output presents it.
+
+## Log entries
+
+`log --since` emits entries across the trees in time order, oldest first:
+
+```json
+{
   "count": 1,
-  "blocked": true,
-  "dependencies": [
+  "entries": [
     {
-      "ref": "token-schema",
-      "satisfied": false,
-      "status": "PENDING",
-      "reason": "not-done"
+      "task": "auth-rework/token-schema",
+      "time": "2026-09-22T08:02:41Z",
+      "actor": "alice",
+      "via": "agent",
+      "session": null,
+      "text": "done: PAUSED → DONE\nAPPLY. Committed as abc123."
     }
   ]
 }
 ```
 
-`validate`:
+`task` is qualified with its alias for a foreign tree; `via` and `session` are `null` when
+the heading has none; `text` is the entry's body below the heading. `log <task> "<text>"`
+prints the one entry it appended, in the same shape. `last_entry` on a task object is
+this shape without `task`.
+
+## Transition results
+
+The twelve transitions print the task object with its derived conditions, as the tree
+reads after the write, plus:
+
+| Field        | Present on                                           | Notes                                                    |
+| ------------ | ---------------------------------------------------- | -------------------------------------------------------- |
+| `cascaded`   | `defer`, `schedule`, `cancel`, always                 | The tasks the cascade reached, in tree order; may be `[]`. |
+| `dependents` | `cancel`, always                                     | Open tasks whose `depends_on` names a task it cancelled — now stranded. |
+| `holds`      | `claim`, `assign`, `handoff`, when the count is above 0 | How many open descendants the task now holds.        |
 
 ```json
 {
-  "ok": true,
-  "checked": 17,
-  "fixed": [],
-  "findings": []
+  "id": "billing/invoices",
+  "status": "CANCELLED",
+  "situation": "cancelled",
+  "…": "…",
+  "last_entry": {
+    "time": "2026-10-26T02:36:01Z",
+    "actor": "agent",
+    "via": null,
+    "session": "s1",
+    "text": "cancel: TODO → CANCELLED\nBilling moves to the payment provider."
+  },
+  "cascaded": [],
+  "dependents": ["billing/reminders"]
 }
 ```
 
-`ok` is `false` when there is at least one **error**-severity finding; warnings alone
-keep it `true`. Each finding carries `severity`, `kind`, `message`, `task`, and `file`.
+```json
+{
+  "id": "search",
+  "status": "PAUSED",
+  "assignee": "alice",
+  "situation": "waiting",
+  "waiting_for": "alice",
+  "…": "…",
+  "holds": 3
+}
+```
 
-`init`, `delete`, `reindex`, and `skill install` emit small command-specific objects —
-`{tasksDir, created[], skill}`, `{id, purged, archived_to?, orphaned_dependents[]}`,
-`{path, tasks}`, and `{installed, dir, files[], skipped?}` respectively.
+`new`, `restore`, `dep add`/`rm` and `after add`/`rm` print the task object with derived
+conditions too.
+
+## Other commands
+
+### `dep list` and `after list`
+
+```json
+{
+  "id": "billing/reminders",
+  "field": "depends_on",
+  "refs": [
+    {
+      "ref": "billing/invoices",
+      "project": null,
+      "id": "billing/invoices",
+      "satisfied": false,
+      "reason": "cancelled",
+      "status": "CANCELLED"
+    }
+  ]
+}
+```
+
+Every reference, satisfied or not. `project` is the target's alias, `null` for the local
+tree, or its project path for a tree reached without an alias; `id` is the target inside
+its own tree; `reason` is `null` when satisfied; `status` is `null` when the target is not
+a live, readable task.
+
+### `actors`
+
+```json
+{ "actor": "agent", "via": null, "projects": ["backend"], "actors": [ { "actor": "alice", "description": "maintainer; approves plans and does releases", "listed": true, "claimed": 1, "assigned": 2 }, { "actor": "agent", "description": "the coding agent", "listed": true, "claimed": 0, "assigned": 0 }, { "actor": "zed", "description": null, "listed": false, "claimed": 0, "assigned": 1 } ], "unavailable": [] }
+```
+
+`actor` and `via` are the caller, as `init` reports them. `actors` lists the roster in
+its configured order, then by name every other actor an open task names and the caller;
+`description` is the roster's line or `null`, `listed` whether `config.yml` names the
+actor, `claimed` and `assigned` count the open tasks across the spanned trees. `projects`
+and `unavailable` are as in the collection object.
+
+### `state`
+
+```json
+{ "id": "auth-rework/token-schema", "path": "/Users/you/acme-api/.tasks/auth-rework/token-schema/state.md", "bytes": 164 }
+```
+
+### `move`
+
+```json
+{
+  "from": "kernel/claims-api",
+  "to": "api/claims",
+  "kind": "task",
+  "tasks": [{ "from": "kernel/claims-api", "to": "api/claims" }],
+  "deferred": [],
+  "rewritten": [
+    { "project": null, "task": "kernel/ui-check", "field": "depends_on", "from": "kernel/claims-api", "to": "api/claims" },
+    { "project": "web", "task": "session-ui", "field": "depends_on", "from": "../backend:kernel/claims-api", "to": "../backend:api/claims" }
+  ],
+  "unrewritten": [
+    { "project": "../upstream", "task": "publish", "field": "depends_on", "ref": "../backend:kernel/claims-api" }
+  ],
+  "skipped": []
+}
+```
+
+| Field         | Notes                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `from`, `to`  | The source and the destination, qualified with the alias for a listed project.             |
+| `kind`        | `task` or `group`.                                                                          |
+| `tasks`       | Every task that moved, `{from, to}`, in tree order of the old ids; empty for an empty group. |
+| `deferred`    | The new ids of the tasks a `BACKLOG` destination deferred.                                  |
+| `rewritten`   | Each reference changed: `project` is the tree holding it — `null` for the local tree, else its alias — and `from`, `to` the stored forms. The source's tree comes first. |
+| `unrewritten` | References to a moved task found in trees the command could read but not write: `project` is that tree's alias, or its project path when it is reached without one. |
+| `skipped`     | Trees the command could write but did not — their lock stayed busy, or a write failed — as `{project, reason}`: `null` for the local tree, else the alias. Their references are in `unrewritten`. |
+
+### `archive`, `restore`, `purge`, `delete`
+
+```json
+{ "id": "billing/invoices", "path": "/Users/you/acme-api/.tasks/.archive/billing/invoices", "tasks": ["billing/invoices"], "left_blocked": ["billing/reminders"] }
+{ "id": "billing/invoices", "path": "/Users/you/acme-api/.tasks/.archive/billing/invoices", "removed": ["billing/invoices"], "referenced_by": ["billing/reminders"] }
+{ "id": "scratch/try-it", "deleted": true }
+{ "before": "2026-10-02T10:00:00Z", "archived": [ { "id": "billing/invoices", "path": "/Users/you/acme-api/.tasks/.archive/billing/invoices", "tasks": ["billing/invoices"], "left_blocked": [] } ], "skipped": [ { "id": "auth/old", "reason": "dependents", "dependents": ["auth/new"] } ] }
+```
+
+`archive` lists every task it archived and, with `--force`, the live tasks it left
+blocked. `archive --resolved-before` and `--all-resolved` print the last shape: `before`
+is the threshold (`null` for all), `archived` the single form's results root by root in
+tree order, and `skipped` the roots a refusal kept — its `kind` as `reason`, its other
+details beside it. `restore` prints the restored task object with derived conditions. `purge`
+lists the archived tasks it removed and the live tasks whose references now reach a task
+recreated at that path. `delete` confirms the removal.
+
+### `migrate`
+
+```json
+{
+  "tree": "/Users/you/acme-api/.tasks",
+  "tasks": 3,
+  "archived": 0,
+  "phases": { "auth": "auth", "release_1.2": "release-1-2" },
+  "statuses": { "PENDING": "TODO", "IN_PROGRESS": "IN_PROGRESS", "REVIEW": "PAUSED", "DONE": "DONE" },
+  "rewritten": [
+    { "project": null, "task": "auth/wire-refresh", "field": "depends_on", "from": "token-schema", "to": "auth/token-schema" },
+    { "project": null, "task": "release-1-2/notes", "field": "depends_on", "from": "wire-refresh", "to": "auth/wire-refresh" }
+  ],
+  "unrewritten": [
+    { "project": null, "task": "release-1-2/notes", "field": "depends_on", "ref": "../upstream:publish" }
+  ],
+  "readme": "absent",
+  "scope": "auth",
+  "consequences": [
+    "IN_PROGRESS with claimed_session: null, so the liveness of each claim is unknown and a claimant that runs with a session token recovers it only with --force: auth/token-schema",
+    "PAUSED without a state.md, which validation reports until one is written (`tasks state <task>`): auth/wire-refresh",
+    "kept as written, so blocking until edited (1 reference): release-1-2/notes depends_on ../upstream:publish"
+  ]
+}
+```
+
+| Field                  | Notes                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `tree`                 | The migrated `.tasks/` directory.                                                       |
+| `tasks`, `archived`    | How many live and archived tasks were migrated.                                         |
+| `phases`               | Every v1 phase and its v2 directory name.                                               |
+| `statuses`             | Every v1 status the migration mapped, through a role or `--map`, and its v2 status.     |
+| `rewritten`            | References rewritten: the migrated tree's own, then those other trees held into it.     |
+| `unrewritten`          | References kept as written — they block until someone edits them; `project` is `null` for the local tree. |
+| `readme`               | `replaced` (it was v1's scaffold), `kept` (it was edited, and still describes v1), or `absent`. |
+| `scope`                | The `scope` written to `config.yml`, from v1's `active_phase`; `null` when there was none or it named no phase. |
+| `consequences`         | What a person must know or do, in words — the lines the human output prints with `!`.   |
+
+### Setup and sessions
+
+```json
+{ "actor": "alice", "via": null, "actors": null, "tasksDir": "/Users/you/acme-api/.tasks", "created": ["/Users/you/acme-api/.tasks/config.yml", "…"], "skill": { "installed": true, "dir": "/Users/you/acme-api/.claude/skills/tasks", "files": ["…"] } }
+{ "installed": false, "dir": "/Users/you/acme-api/.claude/skills/tasks", "files": [], "skipped": "exists" }
+{ "installed": true, "file": "/Users/you/acme-api/.claude/settings.json", "actor": "agent", "written": ["SessionStart", "PostToolUse", "SessionEnd"], "kept": ["Stop"] }
+{ "path": "/Users/you/acme-api/.tasks/index.md", "written": true }
+{ "session": "7f3a", "touched": ["/Users/you/acme-api/.tasks", "/Users/you/backend/.tasks"] }
+```
+
+In order: `init` (`actors` lists the roster `--actors` wrote, else `null`; `skill` is
+`null` under `--no-skill`), `skill install`,
+`hooks install`, `reindex`, `heartbeat`. `hooks install` names in `written` the events
+whose tasks hook it added or replaced and in `kept` those whose tasks hook it left as it
+was; when it wrote nothing, `installed` is `false` and `skipped` is `"exists"`, as for
+`skill install`.
+
+## Validation, session-check and session-end
+
+```json
+{ "ok": false, "checked": 4, "fixed": [], "findings": [ { "severity": "error", "kind": "cycle", "task": "a", "message": "is in a gate cycle, a → b → a: each task waits for the next, so none of them can ever be done" } ] }
+{ "ok": false, "session": "7f3a", "violations": [ { "id": "auth-rework/token-schema", "kind": "missing-state" } ], "warnings": [] }
+{ "session": "7f3a", "ended": "2026-09-22T08:02:41Z", "claims": ["auth-rework/token-schema"] }
+```
+
+- **`validate`**: `ok` is `false` if and only if a finding has error severity; `checked`
+  counts the manifests examined, archived ones included; `fixed` lists what `--fix`
+  regenerated — only ever `index.md`; `task` is `null` for a finding about the tree.
+  Exit `4` on errors, `0` on warnings alone. Every `kind` is on the
+  [validation](/docs/reference/validation) page.
+- **`session-check`**: `ok` is `false` if and only if there is a violation, and the
+  command then exits `4`. `session` is `null` when none is known. `warnings` entries are
+  `{id, kind, message}` with `kind` `state-older-than-claim` or `state-older-than-log`.
+- **`session-end`**: `claims` lists the tasks whose claims it orphaned; exit `0` even when
+  there are none.
 
 ## Chaining
 
-Ids are stable and globally unique, so they are safe to carry between commands:
+Ids are stable, so they are safe to carry between commands:
 
 ```sh
 id=$(tasks ready --json | jq -r '.tasks[0].id // empty')
 [ -n "$id" ] && tasks claim "$id" --json
 ```
 
-The `// empty` matters: without it, `jq` yields the string `"null"` on an empty queue and
-the next command fails with a confusing `NOT_FOUND`.
+The `// empty` matters: without it, `jq` yields the string `"null"` on an empty queue.
+Better still, let the CLI pick under the lock, so two agents cannot race for the head of
+the list:
+
+```sh
+tasks claim --next --json
+```
 
 Branching on the exit code:
 
 ```sh
-if ! tasks claim "$id" --json 2>/tmp/err; then
-  case $? in
-    3) echo "no such task" ;;
-    4) echo "someone else has it, or it is blocked"
-       jq -r '.error.details.blocked_by // empty' /tmp/err ;;
-    *) cat /tmp/err ;;
-  esac
-fi
+tasks claim "$id" --json >task.json 2>err.json
+case $? in
+  0) jq -r .id task.json ;;
+  3) echo "no such task" ;;
+  4) jq -r .error.details.kind err.json ;;   # start-gate, held, authorization, …
+  *) cat err.json ;;
+esac
 ```
 
 ## Stability

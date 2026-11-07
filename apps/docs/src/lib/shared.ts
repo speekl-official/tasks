@@ -7,7 +7,7 @@ export const siteUrl = "https://agenttasks.dev";
 
 /** The standard, as distinct from the CLI that implements it. */
 export const standardName = ".tasks";
-export const specVersion = "v1";
+export const specVersion = "v2";
 export const docsRoute = "/docs";
 export const ogRoute = "/og";
 

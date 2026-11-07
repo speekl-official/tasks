@@ -15,6 +15,7 @@ import {
   Cmd,
   Ok,
   Out,
+  Situation,
   Status,
   Terminal,
 } from "@/components/home/terminal";
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/")({
   head: () => {
     const title = `${standardName} — An open format for agent task state`;
     const description =
-      "An open format for tracking agent work that outlives a single session. Tasks are markdown files under .tasks/, committed with your code. @speekl/tasks is the reference implementation.";
+      "An open format for tracking agent work that outlives a single session. Tasks are directories with a markdown manifest under .tasks/, committed with your code, with the resume point the next session reads. @speekl/tasks is the reference implementation.";
 
     return {
       meta: [
@@ -74,9 +75,9 @@ function Hero() {
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-fd-muted-foreground">
           <Code>.tasks</Code> is an open format for tracking work that outlives
-          a single session. Tasks are markdown files in your repository,
-          committed alongside the code they describe. No server, no account, no
-          network.
+          a single session. Tasks are markdown in your repository, committed
+          alongside the code they describe, with the resume point the next
+          session reads to continue. No server, no account, no network.
         </p>
 
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -112,25 +113,33 @@ function Hero() {
 /* -------------------------------------------------------------------------- */
 
 const TREE = `.tasks/
-├── config.yml           # Optional: statuses, default scope
-├── auth-rework/         # A phase — just a directory
-│   ├── token-schema.md  # One task
-│   └── wire-refresh.md
-├── .archive/            # Deleted tasks, ids stay reserved
-└── _index.md            # Optional: generated overview`;
+├── config.yml             # version: 2, optional scope and projects
+├── index.md               # Optional: generated overview
+├── auth-rework/           # A task: the directory holds a task.md
+│   ├── task.md            # The manifest
+│   ├── design.md          # Decisions, for whoever continues
+│   ├── token-schema/      # A child task: part of the deliverable
+│   │   ├── task.md
+│   │   ├── state.md       # The resume point
+│   │   └── log.md         # History, appended by the CLI
+│   └── wire-refresh/
+│       └── task.md
+└── .archive/              # Archived tasks; their paths stay reserved`;
 
 function WhatIsIt() {
   return (
     <Section title={`What is ${standardName}?`}>
       <Prose>
         <p>
-          It is a directory of markdown files. Each task is one file: a YAML
-          frontmatter block the tooling owns, and a body you write yourself.
+          It is a directory of markdown files. Each task is a directory holding
+          a <Code>task.md</Code>: a YAML frontmatter block the tooling owns, and
+          a body you write yourself. Beside it live the files the next session
+          reads — <Code>state.md</Code> says where the work stands.
         </p>
         <p>
-          The directory a task sits in is its <strong>phase</strong> — a
-          milestone, a quarter, a workstream, whatever you group work by. That
-          is the whole structure.
+          A task&apos;s path is its id, and a task inside another task is a part
+          of its deliverable: the parent is done only when its parts are. Group
+          the rest by directory however you like.
         </p>
       </Prose>
 
@@ -139,27 +148,35 @@ function WhatIsIt() {
           <Out>{TREE}</Out>
         </Terminal>
 
-        <Terminal title="auth-rework/token-schema.md">
+        <Terminal title="auth-rework/token-schema/task.md">
           <Out dim>---</Out>
-          <Out>
-            <Key>id</Key>
-            {": token-schema"}
-          </Out>
-          <Out>
-            <Key>phase</Key>
-            {": auth-rework"}
-          </Out>
           <Out>
             <Key>status</Key>
             {": "}
-            <Status value="PENDING" />
+            <Status value="PAUSED" />
+          </Out>
+          <Out>
+            <Key>priority</Key>
+            {": high"}
           </Out>
           <Out>
             <Key>depends_on</Key>
-            {": [audit-current-claims]"}
+            {": [auth-rework/audit-claims]"}
+          </Out>
+          <Out>
+            <Key>finishes_after</Key>
+            {": []"}
+          </Out>
+          <Out>
+            <Key>assignee</Key>
+            {": alice"}
           </Out>
           <Out>
             <Key>claimed_by</Key>
+            {": null"}
+          </Out>
+          <Out>
+            <Key>claimed_session</Key>
             {": null"}
           </Out>
           <Out dim>---</Out>
@@ -194,11 +211,15 @@ const BENEFITS = [
   },
   {
     title: "Safe to run in parallel",
-    body: "A task is claimed before it is worked, and a claim takes an exclusive lock. Two agents cannot pick up the same task.",
+    body: "Every write takes the tree's one lock, and a claim records the session that holds it. Two agents cannot pick up the same task, and a crashed session's claim is taken over, not lost.",
+  },
+  {
+    title: "Resumable by design",
+    body: "Pausing is refused until the task has a state.md, its resume point. The next session reads it first and starts where the last one stopped.",
   },
   {
     title: "Order that means something",
-    body: 'Tasks declare what they wait on, so "what can I start right now" is a real answer instead of a guess.',
+    body: 'Tasks declare what they wait on, and a parent waits for its parts, so "what can I start right now" is a real answer instead of a guess.',
   },
 ];
 
@@ -213,12 +234,13 @@ function Why() {
           rewritten from scratch every session.
         </p>
         <p>
-          None of that survives a second agent working in parallel, and none of
-          it says what is actually ready to start. A shared format gives you:
+          None of that survives a second agent working in parallel, none of it
+          says what is actually ready to start, and none of it tells the next
+          session where the work stopped. A shared format gives you:
         </p>
       </Prose>
 
-      <ul className="mt-8 grid gap-px overflow-hidden rounded-xl border border-fd-border bg-fd-border sm:grid-cols-3">
+      <ul className="mt-8 grid gap-px overflow-hidden rounded-xl border border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
         {BENEFITS.map((benefit) => (
           <li key={benefit.title} className="bg-fd-background p-6">
             <h3 className="text-base font-semibold">{benefit.title}</h3>
@@ -239,8 +261,8 @@ const STAGES = [
     title: "Describe the work",
     body: (
       <>
-        Create a task in a phase and say what it waits on. The phase directory
-        is created for you.
+        Create a task at a path and say what it waits on. A task inside another
+        task is a part of it; the directories on the way are created for you.
       </>
     ),
   },
@@ -248,8 +270,19 @@ const STAGES = [
     title: "Claim it",
     body: (
       <>
-        Claiming records who took the task and when, and it fails if the task is
-        blocked or someone else already has it. Claim before working, not after.
+        A claim records who took the task and in which session, and fails if the
+        task is blocked or another live session has it. Claim before working,
+        not after.
+      </>
+    ),
+  },
+  {
+    title: "Leave a resume point",
+    body: (
+      <>
+        Before stopping, write <Code>state.md</Code>: done, verified, open,
+        next. Pausing without one is refused, so the next session starts where
+        this one stopped.
       </>
     ),
   },
@@ -257,8 +290,9 @@ const STAGES = [
     title: "Finish it",
     body: (
       <>
-        Completing a task unblocks whatever was waiting on it, so the next{" "}
-        <Code>ready</Code> answer is different.
+        A parent is done only when its parts are, and completing a task unblocks
+        whatever was waiting on it, so the next <Code>ready</Code> answer is
+        different.
       </>
     ),
   },
@@ -269,9 +303,12 @@ function HowItWorks() {
     <Section title={`How does ${standardName} work?`} border>
       <Prose>
         <p>
-          Every tool that implements the format answers one question the same
-          way: <strong>what can be worked on right now?</strong> A task is ready
-          when it has not been started and everything it depends on is done.
+          Every tool that implements the format answers two questions the same
+          way: <strong>what can be worked on right now</strong>, and{" "}
+          <strong>what must the next session read to continue?</strong> A task
+          is ready when it is free, everything it depends on is done, and
+          nothing above it is still being planned. Every write happens under one
+          lock per tree, so two agents never both win.
         </p>
       </Prose>
 
@@ -296,39 +333,70 @@ function HowItWorks() {
         </ol>
 
         <Terminal>
-          <Cmd>tasks new auth-rework &quot;Wire refresh&quot;</Cmd>
+          <Cmd>tasks new auth-rework/wire-refresh &quot;Wire refresh&quot;</Cmd>
           <Ok>
-            {"Created "}
-            <span className="font-bold">wire-refresh</span>
-            {" in phase auth-rework"}
+            {"new "}
+            <span className="font-bold">auth-rework/wire-refresh</span>
           </Ok>
           <Cmd>tasks dep add wire-refresh token-schema</Cmd>
+          <Ok>
+            {"dep add "}
+            <span className="font-bold">auth-rework/wire-refresh</span>
+            {": auth-rework/token-schema"}
+          </Ok>
           <Blank />
           <Cmd>tasks ready</Cmd>
           <Out dim>
-            {" ID             STATUS    PHASE         DEPENDS ON   UPDATED"}
+            {" ID                         SITUATION   LABELS    TITLE"}
           </Out>
           <Out>
-            {" token-schema   "}
-            <Status value="PENDING" />
-            {"   auth-rework   —            "}
-            <span className="text-term-dim">2026-08-21 09:14</span>
+            {" auth-rework/token-schema   "}
+            <Situation value="ready" />
+            {"       "}
+            <span className="text-term-dim">started</span>
+            {"   Design the token schema"}
           </Out>
           <Blank />
           <Out dim>{"# wire-refresh is blocked, so it is not listed"}</Out>
           <Blank />
-          <Cmd>tasks claim token-schema</Cmd>
+          <Cmd>tasks claim token-schema --session s1</Cmd>
           <Ok>
-            {"Claimed "}
-            <span className="font-bold">token-schema</span>
-            {" as dan → "}
+            {"claim "}
+            <span className="font-bold">auth-rework/token-schema</span>
+            {": "}
+            <Status value="PAUSED" />
+            {" → "}
             <Status value="IN_PROGRESS" />
           </Ok>
-          <Blank />
-          <Cmd>tasks status token-schema DONE</Cmd>
+          <Cmd>
+            tasks pause token-schema --session s1 -m &quot;Lifetime open&quot;
+          </Cmd>
           <Ok>
-            <span className="font-bold">token-schema</span>
-            {"  "}
+            {"pause "}
+            <span className="font-bold">auth-rework/token-schema</span>
+            {": "}
+            <Status value="IN_PROGRESS" />
+            {" → "}
+            <Status value="PAUSED" />
+          </Ok>
+          <Out dim>{"# state.md tells the next session where it stopped"}</Out>
+          <Blank />
+          <Cmd>tasks claim --next --session s2</Cmd>
+          <Ok>
+            {"claim "}
+            <span className="font-bold">auth-rework/token-schema</span>
+            {": "}
+            <Status value="PAUSED" />
+            {" → "}
+            <Status value="IN_PROGRESS" />
+          </Ok>
+          <Cmd>
+            tasks done token-schema --session s2 -m &quot;Schema agreed&quot;
+          </Cmd>
+          <Ok>
+            {"done "}
+            <span className="font-bold">auth-rework/token-schema</span>
+            {": "}
             <Status value="IN_PROGRESS" />
             {" → "}
             <Status value="DONE" />
@@ -391,7 +459,11 @@ function WhereToUse() {
 const ROLES = [
   ["Reader", "Parses a tree and answers questions about it. Never writes."],
   ["Writer", "Creates and modifies tasks, preserving every invariant."],
-  ["Manager", "Writer, plus claims, validation, repair, and archival."],
+  ["Manager", "Writer, plus claims, sessions, validation, and archival."],
+  [
+    "Agent",
+    "Works tasks for an actor: a session token on every command, a resume point before it leaves.",
+  ],
 ];
 
 function OpenFormat() {

@@ -1,0 +1,198 @@
+---
+title: Gates
+description: The start gate and the finish gate, every blocking reason, cycles, dep and after, and stranded dependencies.
+icon: Network
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definition is [specification › dependencies and
+  gates](/docs/spec/dependencies), including every reason and the cycle rules.
+</Callout>
+
+A task has two gates. Both are computed from the current state of other tasks on every
+query, never stored, and both fail safe: anything that cannot be resolved confidently
+counts as blocking.
+
+| Gate       | Made of                                         | Satisfied when every reference is                   | Checked by        | `--force` |
+| ---------- | ----------------------------------------------- | --------------------------------------------------- | ----------------- | --------- |
+| **Start**  | `depends_on`                                    | a live task that is `DONE`                          | `claim`, `done`   | overrides |
+| **Finish** | every live child, plus `finishes_after`         | a live task that is `DONE` or `CANCELLED`           | `done`            | never     |
+
+## References
+
+A reference names a task by its path. A local reference is just the id; a reference into
+another tree is prefixed with that tree's project path, relative to the project root of
+the tree that stores it:
+
+```yaml
+depends_on: [auth-rework/token-schema, "../backend:kernel/claims-api"]
+```
+
+```txt
+reference = path | project-path ":" path
+path      = segment *("/" segment)       segment = ^[a-z0-9][a-z0-9-]*$
+```
+
+The string splits on its **last** colon; segments cannot contain one. A project path is
+never absolute. On the command line you name the target like any task — full id,
+unambiguous suffix, or `alias:path` for a project listed in `config.yml` — and the CLI
+stores the full form, translating the alias into the relative path:
+
+```sh
+tasks dep add deploy execute           # both suffixes, stored as full ids
+tasks after add launch backend:claims  # stored as ../backend:kernel/claims-api
+```
+
+## The start gate
+
+`depends_on` lists the tasks that must be **`DONE`** before this one may be claimed or
+done. A reference that is not satisfied carries exactly one reason:
+
+| Reason                | The target…                                                                 | Can waiting help? |
+| --------------------- | --------------------------------------------------------------------------- | ----------------- |
+| `not-done`            | exists, is live and open                                                    | yes               |
+| `cancelled`           | exists and is `CANCELLED`                                                   | no — stranded     |
+| `missing`             | does not exist, live or archived; also a reference that does not parse      | no                |
+| `archived`            | exists only under `.archive/`                                               | no                |
+| `malformed`           | exists, but its `task.md` cannot be parsed                                  | no                |
+| `unresolved-project`  | is in a project path that does not lead to a tree                           | no                |
+| `not-checked-out`     | is in a listed project whose directory is absent on this machine            | no                |
+| `unsupported-version` | is in a tree of a version this CLI does not support, a v1 tree included     | no                |
+
+Overviews show the reference, with the reason when waiting cannot help:
+`blocked by auth-rework/token-schema`, `blocked by billing/invoices (cancelled)`.
+`validate` reports every reference that can never be satisfied as a warning
+(`unsatisfiable-ref`).
+
+`--force` on `claim` or `done` overrides the start gate, and the log records it. Use it
+only when a person has said the dependency does not apply.
+
+## The finish gate
+
+A task is **done** only after its parts are: every **live child** must be `DONE` or
+`CANCELLED`, and so must every reference in `finishes_after`. An unresolvable
+`finishes_after` reference blocks, with the reasons above.
+
+`finishes_after` is a join on a task in another scope — typically an epic in a tracker
+repository waiting for its parts in the product repositories. It is not containment:
+`cancel` neither cancels those tasks nor waits for them.
+
+```sh
+tasks done auth-rework -m "…"
+```
+
+```txt
+✗ auth-rework cannot be done: open children auth-rework/wire-refresh. Resolve them first; the finish gate cannot be forced.
+```
+
+The gate is a constraint, not a derivation: the parent's status stays a manual fact. When
+every child is resolved, overviews show the parent as **`closable`** — it can be closed
+either way, `done` or `cancel`, without touching anything else. Consequences the CLI
+enforces:
+
+- No task is created, moved or restored under a resolved parent.
+- A child of a resolved parent cannot be reopened while the parent is resolved.
+- A resolved task with a live open descendant is a validation error.
+
+## Cancelled dependencies are stranded
+
+Cancelled work satisfies a finish gate — the parent's deliverable was redefined — but
+never a start gate: nothing can be built on it. A task that depends on a cancelled task
+is therefore **stranded**: waiting cannot open its gate. Only a person can, in one of
+three ways:
+
+1. **Cancel the dependent too**, because its premise died with the dependency.
+2. **Remove the reference** with `tasks dep rm`, because the dependent can proceed
+   without it.
+3. **Point it elsewhere**, at whatever now does that work.
+
+The tool never cancels dependents on its own, because any of the three may be right. It
+makes the stranding visible instead: the `cancel` that caused it lists them as
+`dependents` in its result — in the local tree and in listed projects — every overview
+shows `blocked by A (cancelled)`, and `validate` warns. A `reopen` of the dependency
+unblocks them without touching them, because blocking is computed.
+
+```sh
+tasks cancel invoices -m "Billing moves to the payment provider."
+```
+
+```txt
+✓ cancel billing/invoices: TODO → CANCELLED
+  ! stranded dependents: billing/reminders
+```
+
+## Cycles
+
+The two gates form one graph: a `depends_on` reference is an edge, and so is the finish
+edge from each child and each `finishes_after` reference to the task. A cycle in that
+graph means the tasks in it can never all resolve.
+
+`tasks dep add` and `tasks after add` refuse, before writing anything:
+
+| Refusal                                     | Exit | `details.kind` |
+| ------------------------------------------- | ---- | -------------- |
+| a reference to the task itself              | `2`  | —              |
+| a task that does not exist, or is archived  | `3`  | —              |
+| a reference to the task's own ancestor       | `4`  | `ancestor`     |
+| a reference that would close a cycle        | `4`  | `cycle`        |
+
+A dependency on an ancestor is a guaranteed deadlock: the ancestor is done only after its
+children. The cycle refusal names the cycle:
+
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Adding a to the depends_on of b would close a cycle: b → a → b.",
+    "details": { "id": "b", "field": "depends_on", "ref": "a", "kind": "cycle", "cycle": ["b", "a"] }
+  }
+}
+```
+
+Edges into other trees join cycle detection when those trees are listed under
+`projects:` and checked out; otherwise they cannot be walked and count as non-edges. A
+cycle that reaches the tree anyway — through a hand edit or a merge — is a `validate`
+error (`cycle`, and `ancestor-dependency` for a dependency on an ancestor).
+
+## Editing the gates
+
+```sh
+tasks dep add wire-refresh token-schema
+tasks dep rm wire-refresh token-schema
+tasks dep list wire-refresh
+tasks after add launch backend:claims
+```
+
+```txt
+auth-rework/wire-refresh depends_on
+ REFERENCE                  SATISFIED   DETAIL
+ auth-rework/token-schema   yes         DONE
+```
+
+Adding a reference that is already present changes nothing. `rm` takes a reference as
+stored — as `list` prints it — or as `add` would resolve it, and fails with exit `3` when
+the task does not hold it. Each edit logs `dep add: …` or `after rm: …` on the task.
+`list --json` reports every reference with `satisfied`, `reason` and the target's
+`status`; see [the JSON contract](/docs/reference/json-contract#dep-list-and-after-list).
+
+## Archiving what others depend on
+
+Archiving a task that open tasks reference would leave them blocked for good, so
+`tasks archive` refuses it and names the dependents. `--force` archives anyway and
+reports which tasks it left blocked. Because an archived path stays reserved, a task
+recreated at the same path is refused rather than silently reconnected to those
+references; `tasks purge` is the explicit decision to allow it.
+
+## Modelling advice
+
+Prefer several small dependent tasks over one large one. A single task with a ten-item
+checklist tells the next agent nothing about what is unblocked; the same work split into
+four tasks with two edges tells it exactly where to start.
+
+- A dependency expresses **order**, not ownership. Two tasks that can proceed in parallel
+  stay independent even when one person does both.
+- Parts of one deliverable are **children**, not dependencies: the parent's finish gate
+  already waits for them.
+- A step a person must take — a review, an approval, a deploy — is a `handoff` when it
+  concerns one task, and a separate task assigned to that person only when other tasks
+  must depend on it.

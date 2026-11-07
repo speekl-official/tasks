@@ -1,0 +1,93 @@
+---
+title: Workspace files
+description: The reserved files of a task directory — task.md, state.md, design.md, plan.md, and log.md.
+icon: Files
+---
+
+Five filenames inside a task directory have a defined meaning **when present**. They are a
+vocabulary, not a requirement: only `task.md` is required, and any other file is free workspace
+content.
+
+| File | Concern | Mode |
+| --- | --- | --- |
+| `task.md` | Definition and acceptance; inputs after the start in `## Notes`. | Edited in place; frontmatter machine-owned. |
+| `state.md` | Where the work is now: done, verified, open, next. | Overwritten in full — by its author or through `state` — never appended. |
+| `design.md` | Decisions and why; rejected alternatives. | Edited in place. |
+| `plan.md` | How: steps, files, verification. May be superseded. | Edited in place. |
+| `log.md` | What happened, who, when. | Append-only; written by the tooling. |
+
+An implementation MUST NOT parse any of them as a task, MUST NOT rewrite `state.md`, `design.md`
+or `plan.md` as a side effect of any command, and MUST NOT delete `state.md` on any transition.
+The one write the tooling may make to `state.md` is the explicit [`state`](/docs/spec/workspace#statemd) command,
+which writes exactly the content the caller supplies.
+
+## `state.md`
+
+`state.md` is the **resume point** of a task and the evidence that work has started.
+
+- Its content is free; the RECOMMENDED structure is four sections — **Done**, **Verified**,
+  **Open**, **Next** — where *Open* names uncommitted files, branches and anything else a reader
+  would otherwise find unexplained in the working tree.
+- `pause` and `handoff` MUST refuse when it is missing; `release` MUST refuse when it is present.
+- `schedule` and `reopen` return a task to `PAUSED` when it exists; `schedule` does so for every
+  descendant its cascade reaches.
+- Its presence is the *started* condition for `BACKLOG` tasks and drives the two consistency
+  warnings under [Validation](/docs/spec/task-file#validation).
+- An implementation SHOULD offer a `state <task>` command that replaces the file with content
+  read from standard input or from the caller's editor, atomically, under the task's
+  [authorization](/docs/spec/lifecycle#authorization) rules, and does nothing else: no transition, no log entry, no
+  change to the manifest. On a claimed task it MUST re-check, inside the lock, that the claim still
+  belongs to the caller — the same fence a transition applies (see
+  [Claims across sessions](/docs/spec/sessions#claims-across-sessions)) — and refuse with a conflict otherwise. It
+  exists so that a person at a terminal can write a resume point and `pause` without leaving the
+  tool, and so that an agent's resume point passes through the same fence as its transitions: a
+  session superseded by a takeover then learns of it before it overwrites the new claimant's
+  `state.md`. An agent SHOULD write the file through it wherever it is offered.
+
+## `log.md`
+
+`log.md` is the task's journal: history only, never the current state. An entry is a level-two
+ATX heading followed by free text:
+
+```markdown
+## 2026-09-21T16:40:12Z agent s:7f3a
+pause: IN_PROGRESS → PAUSED
+Kernel tests green (623/0); docs updated; awaiting review of the CLI rendering.
+
+## 2026-09-22T08:02:41Z alice via agent
+done: PAUSED → DONE
+APPLY. Committed as abc123.
+```
+
+- The heading grammar is normative because implementations parse it for activity queries and for
+  last-activity reporting:
+
+  ```txt
+  heading   = "## " timestamp " " actor [" via " actor] [" s:" session]
+  timestamp = ISO 8601 UTC, second precision, Z-suffixed
+  ```
+
+  `<principal> via <operator>` marks an entry made on behalf of another actor. Actors and
+  sessions match the pattern under [Actors](/docs/spec/sessions#actors), so a heading splits on spaces without
+  ambiguity.
+- An implementation MUST append one entry for every transition, whose first line names the
+  command and, for a status transition, `<from> → <to>` — for `assign` the new assignee, for
+  `unassign` the word alone, for `priority` the new level — followed by the message when one was
+  given, and MUST mark a forced
+  transition in that entry. `handoff` writes one entry, `handoff <actor>: IN_PROGRESS → PAUSED`;
+  a transition a cascade reached writes `<command> with <parent-id>: <from> → <to>` on the task it
+  reached ([Containment](/docs/spec/containment)).
+- An implementation SHOULD offer a way to append a narrative entry without a transition.
+- Entries are never edited. A `log.md` containing version-control conflict markers is a validation
+  error; the resolution is mechanical — keep both entries in time order.
+- The log is not read on entry; the tooling surfaces only a task's **last entry** (see
+  [Task object](/docs/spec/cli#task-object)), because a handoff's closing note is written for the next reader
+  and must reach them without opening the file.
+
+<Callout type="info" title="Non-normative">
+  Splitting the journal from `task.md` keeps the manifest a definition and lets
+  the tooling stamp every significant transition with a message — a commit message for task
+  state. The reading protocol never opens the log because the present is fully described by the
+  other files; the last entry rides along as the note one actor left for the next, and the log
+  exists for audit and for "what happened yesterday across the tree".
+</Callout>

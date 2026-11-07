@@ -1,168 +1,281 @@
 ---
 title: Core concepts
-description: Phases, statuses, roles, dependencies, claims — and what each one buys you.
+description: Tasks as directories, the fixed lifecycle, situations, gates, containment, the resume point, sessions, and projects.
 icon: Lightbulb
 ---
 
-There are five ideas in the whole system. Once these land, the command reference is
-mostly mechanical.
+A handful of ideas carry the whole system. Once these land, the
+[command reference](/docs/reference/commands) is mostly mechanical. The normative text
+for each lives in the [specification](/docs/spec); this page explains them.
 
 ## The tree
 
 `.tasks/` is discovered by walking up from the current directory, git-style: **nearest
-wins, no merging** with a parent tree. Each package in a monorepo that has its own
-`.tasks/` is its own independent scope.
+wins, no merging** with a tree further up. Each package in a monorepo that has its own
+`.tasks/` is its own tree. `-C <dir>` starts the search somewhere else, which is how a
+session working in a secondary worktree addresses the tree of the main checkout.
 
-Everything the CLI knows is derived from files on disk on every invocation. There is no
+Everything the CLI knows is read from files on disk on every invocation. There is no
 cache and no daemon, so editing a task body by hand, or pulling someone else's branch,
-takes effect immediately.
+takes effect immediately. Every change to a tree happens under one lock,
+`.tasks/.locks/tree.lock`, and re-reads what it depends on inside it.
 
-## Phases
+## Tasks are directories
 
-A phase is a **directory**, not a tag:
+A directory under `.tasks/` that contains a file named `task.md` is a **task**. The
+manifest holds the definition — frontmatter the CLI owns, a body you write — and the rest
+of the directory is the task's **workspace**:
 
 <Files>
-  <Folder name=".tasks" defaultOpen>
-    <Folder name="auth-rework" defaultOpen>
-      <File name="token-schema.md" />
-      <File name="wire-refresh.md" />
-    </Folder>
-    <Folder name="2026-q1">
-      <File name="migrate-logging.md" />
-    </Folder>
+  <Folder name="token-schema" defaultOpen>
+    <File name="task.md" />
+    <File name="state.md" />
+    <File name="design.md" />
+    <File name="plan.md" />
+    <File name="log.md" />
+    <Folder name="screenshots" />
   </Folder>
 </Files>
 
-Making it a directory rather than a frontmatter field means a human can browse one body
-of work in a file tree, and a diff of a phase is a diff of a directory. The name is a
-free-form slug — a milestone (`auth-rework`), a quarter (`2026-q1`), a workstream, or
-whatever fits.
+| File        | Holds                                                    | Written                                           |
+| ----------- | -------------------------------------------------------- | ------------------------------------------------- |
+| `task.md`   | The definition and acceptance; later inputs in `## Notes` | Body by you; frontmatter by commands              |
+| `state.md`  | Where the work stands now: done, verified, open, next    | Replaced in full, through `tasks state`           |
+| `design.md` | Decisions and why; rejected alternatives                 | By you, in place                                  |
+| `plan.md`   | How: steps, files, verification                          | By you, in place                                  |
+| `log.md`    | What happened, who, when                                 | Appended by the CLI; never edited                 |
 
-The directory is **authoritative**. If frontmatter and directory disagree, the
-directory wins and `tasks validate --fix` rewrites the field. This is also why you move
-tasks with `tasks move <id> <phase>` rather than `mv`.
+Only `task.md` is required. Anything else in the directory — a `screenshots/` folder, a
+scratch script — is workspace content the CLI never parses or rewrites.
 
-A project that does not want phases can put everything in one directory and never pass
-`--phase`. Set `active_phase` in [config](/docs/reference/configuration) to make `list`
-and `ready` default to one phase without typing `-p` every time.
+## Ids are paths
 
-## Statuses and roles
+A task's **id** is its path relative to `.tasks/`: `auth-rework/token-schema`. Every
+segment matches `^[a-z0-9][a-z0-9-]*$`. There is no `id` field to drift from the
+filename, and the namespace never fills up: `auth-rework/tests` and `billing/tests`
+coexist. A task's **name** is its last segment; its **title** is the first `# ` heading
+of its body.
 
-Statuses are an ordered, project-configurable list. The default is
-`[PENDING, IN_PROGRESS, DONE]`.
+On the command line, any **unambiguous suffix** works: `tasks show token-schema` finds
+`auth-rework/token-schema` when no other id ends in `/token-schema`. Two candidates are a
+usage error that names both. References are always stored as full paths.
 
-**No command hardcodes a literal status.** Each binds to one of three roles:
+Moving a task changes its id and the ids beneath it, so it goes through
+`tasks move`, which rewrites every reference to them — never through `mv`.
 
-| Role      | Meaning                                    | Default       |
-| --------- | ------------------------------------------ | ------------- |
-| `ready`   | What `tasks ready` looks for               | first status  |
-| `claimed` | What `tasks claim` moves to                | second status |
-| `done`    | What satisfies another task's `depends_on` | last status   |
+## Groups, epics and children
 
-That indirection is what lets a project use `[TODO, DOING, REVIEW, SHIPPED]` and keep
-every command working. It also means an agent must never assume the default names — read
-the real list from `.tasks/config.yml`, or from an error's `details`.
+A directory without `task.md` is a **group**: organizational only, no status, any depth.
+The **parent** of a task is its nearest ancestor directory that is a task; groups in
+between do not break parenthood. A task with children is informally an **epic**.
 
-### Transitions
-
-The default rule is: **step forward or back by exactly one.**
-
-```txt
-                tasks claim              tasks status … DONE
-        ┌──────────────────────┐   ┌──────────────────────────┐
-        │                      ▼   │                          ▼
-   ╭─────────╮           ╭─────────────╮                  ╭──────╮
-   │ PENDING │           │ IN_PROGRESS │                  │ DONE │
-   ╰─────────╯           ╰─────────────╯                  ╰──────╯
-        ▲                      │   ▲                          │
-        └──────────────────────┘   └──────────────────────────┘
-              tasks release              tasks claim (reopen)
-```
-
-Two consequences worth internalising:
-
-- `PENDING → DONE` is rejected with exit `4`. Nothing reaches done without having been
-  worked, which is exactly the mistake an over-eager agent makes.
-- **The last status is deliberately not terminal.** Stepping back from it is the
-  supported reopen path, because agents do mark things done in error.
-
-Supplying an explicit `transitions` list in `config.yml` **replaces** this rule rather
-than layering on it. See [custom statuses](/docs/guides/custom-statuses).
-
-## Claims
-
-`tasks claim` does three things at once: it checks the transition is legal, checks
-dependencies are satisfied, and records _who_ took the task and _when_.
-
-```sh
-tasks claim token-schema --as agent-7
-```
-
-It is deliberately not the same as `tasks status <id> IN_PROGRESS` — that form is
-**refused** with exit `2` and redirected here, so claim metadata can never be bypassed.
-
-The claim is only useful if it happens **before** the work. It is what stops a second
-agent starting the same task; claiming afterwards records history but prevents nothing.
-
-Internally the claim takes an exclusive `O_EXCL` lock in `.tasks/.locks/` and re-reads
-state inside it, so two concurrent processes cannot both win. A lock left behind by a
-crashed process goes stale after 10 seconds and is reclaimed.
-
-<Callout type="warn" title="One filesystem, not one team">
-  Locking protects concurrent agents on a single checkout. It does not
-  coordinate across separate clones — two agents on two clones can both claim
-  the same task and only find out at merge. For multi-clone work, treat claims
-  as advisory.
-</Callout>
-
-Leaving the claimed status clears `claimed_by` and `claimed_at` automatically, whether
-you got there via `tasks status` or `tasks release`.
-
-## Dependencies
-
-`depends_on` is a list of references. A reference is either a bare id in this project,
-or `<relative-path>:<id>` pointing into another repository's `.tasks/`:
-
-```yaml
-depends_on: [token-schema, ../upstream-repo:publish-endpoint]
-```
-
-A dependency is satisfied when the referenced task is in the `done` role — of _its own_
-project, which matters for cross-repo references.
-
-**Everything else counts as blocking.** Missing task, archived task, unresolvable path,
-cycle: all blocking, never satisfied. The asymmetry is intentional. A typo that blocks
-costs you a delay and a puzzled look at `tasks dep list`. A typo that reads as satisfied
-sends an agent off to build on something that does not exist.
-
-```sh
-tasks dep list wire-refresh
-```
+Children are **parts of the parent's deliverable, never phases of its lifecycle.**
+Planning, executing, reviewing and approving a task happen on the task itself — in
+`plan.md`, `state.md`, and through a `handoff` to the approver. A child named `plan`,
+`review` or `verify` is a modelling error.
 
 ```txt
- DEPENDENCY     SATISFIED   DETAIL
- token-schema   no          token-schema (PENDING)
+.tasks/
+  auth-rework/            task — the epic
+    task.md
+    design.md             the epic's decisions live with the epic
+    token-schema/         child task
+    wire-refresh/         child task
+  2026-q4/                group — no task.md
+    migrate-logging/      task, parent is the root
 ```
 
-Prefer several small dependent tasks over one large one. `depends_on` is what makes
-`tasks ready` meaningful; a single task with a ten-item checklist in its body tells the
-next agent nothing about what is unblocked.
+Creating a task at the path of an existing group turns the group into a task, and the
+tasks beneath it become its children.
 
-See [dependencies](/docs/reference/dependencies) for resolution rules and every
-`reason` code.
+## The lifecycle
 
-## Ready
+The statuses are a **fixed vocabulary**: they read the same in every repository, grep
+without configuration, and need no legend.
 
-`tasks ready` is the query the whole design exists to answer: **what can be worked on
-right now?**
+| Status        | Fact recorded                                                       | Open? |
+| ------------- | ------------------------------------------------------------------- | ----- |
+| `BACKLOG`     | Not scheduled.                                                      | open  |
+| `TODO`        | Scheduled, not started.                                             | open  |
+| `IN_PROGRESS` | Being worked right now; a claimant is recorded.                     | open  |
+| `PAUSED`      | Started, not being worked: waiting for a dependency, a person, or free hands. | open  |
+| `DONE`        | Finished.                                                           | resolved |
+| `CANCELLED`   | Explicitly decided not to do.                                       | resolved |
 
-A task is ready when its status is the `ready` role _and_ every dependency is satisfied.
-Nothing else qualifies — a claimed task is not ready, and a blocked task is not ready no
-matter how long it has been waiting.
+Each command names the fact it writes:
 
-```sh
-tasks ready --json | jq -r '.tasks[0].id'
+| Command               | From                    | To                                                            |
+| --------------------- | ----------------------- | ------------------------------------------------------------- |
+| `schedule`            | `BACKLOG`               | `PAUSED` when `state.md` exists, else `TODO`                  |
+| `defer`               | `TODO`, `PAUSED`        | `BACKLOG`                                                     |
+| `claim`               | `BACKLOG`, `TODO`, `PAUSED` | `IN_PROGRESS`                                            |
+| `pause`               | `IN_PROGRESS`           | `PAUSED` — needs a `state.md` and a message                   |
+| `handoff <actor>`     | `IN_PROGRESS`           | `PAUSED`, assigned to the actor — needs a `state.md` and a message |
+| `release`             | `IN_PROGRESS`           | `TODO` — only when no `state.md` exists                       |
+| `done`                | any open                | `DONE` — needs a message; the gates must be satisfied         |
+| `cancel`              | any open                | `CANCELLED` — needs a message                                 |
+| `reopen`              | `DONE`, `CANCELLED`     | `BACKLOG` under a `BACKLOG` ancestor, else `PAUSED` with a `state.md`, else `TODO` — needs a message |
+| `assign` / `unassign` | any open                | unchanged; sets or clears `assignee`                          |
+| `priority <level>`    | any open                | unchanged; sets `priority`                                    |
+
+A single `PAUSED` covers every kind of waiting, because _what_ is waited for is recorded
+elsewhere: a task in `depends_on`, a person in `assignee`, or nothing — free hands.
+`release` exists only for a claim that produced nothing; work that produced anything is
+paused, because returning half-done work to `TODO` would be a lie.
+
+**Claimed** and **assigned** are different facts. The claimant (`claimed_by`) is working
+on the task right now. The assignee is who must act on it next — a review, an approval, a
+deploy only one person can run — and who alone may transition it while nobody holds a
+claim. Authority flows down the tree: the assignee of an epic may also transition the
+assigned tasks beneath it.
+
+## Situations, not statuses
+
+The status is what a task says about itself. The **situation** is what the tree says
+about the task: one word computed from its status and its surroundings, chosen as the
+first row that holds.
+
+| Situation       | When                                                       |
+| --------------- | ---------------------------------------------------------- |
+| `done`, `cancelled` | resolved                                               |
+| `working`       | a claimant is recorded; shown with its liveness            |
+| `parked`        | `BACKLOG` with started work (a `state.md`) at or beneath it |
+| `backlog`       | `BACKLOG` without started work                             |
+| `held by X`     | an ancestor X is claimed or assigned                       |
+| `waiting for X` | `PAUSED` with an assignee                                  |
+| `assigned X`    | an assignee, not `PAUSED`                                  |
+| `blocked by X`  | an unsatisfied `depends_on` reference                      |
+| `closable`      | a parent whose children are all resolved                   |
+| `open N/M`      | a parent with open children: `N` of `M` resolved           |
+| `ready`         | free and unblocked                                         |
+
+Overviews — `ready`, `mine`, `list`, `tree` — show the situation and, after it, any
+other condition that holds as a secondary label: `started`, `blocked by A (cancelled)`,
+`active` for a parent with a task in progress beneath it, a priority other than
+`normal`, the claim's liveness, the assignee. They never show the stored status; `show`,
+`resume`, the JSON `status` field and the file do. So an epic whose child is being
+worked reads `open 2/5 · active`, not `TODO`, and a task paused for review reads
+`waiting for alice`, not `PAUSED`.
+
+A task is **ready** for you when it is `TODO` or `PAUSED`, everything it depends on is
+`DONE`, it is assigned to nobody or to you, it has no open child, and no ancestor is
+claimed or assigned. `tasks ready` orders them by effective priority, then `PAUSED`
+before `TODO` — finishing beats starting — then oldest first. An empty answer is a
+successful query, not an error.
+
+## Priority
+
+`priority` is one of `urgent`, `high`, `normal` (the default) or `low`. A task's
+**effective priority** is the highest of its own and its ancestors': an urgent epic makes
+its parts urgent without a write to each of them, and overviews label them
+`urgent (inherited)`. Nobody sets a priority by default, so the queue runs on the
+started-first rule alone; a level set by a person is a deliberate jump of the queue.
+
+## The start and finish gates
+
+A task has two gates, and both fail safe.
+
+- **The start gate** — `depends_on`. A task may be claimed, or done, only when every
+  reference resolves to a live task that is `DONE`. Checked by `claim` and `done`;
+  `--force` can override it.
+- **The finish gate** — the task's children and `finishes_after`. A task may be done
+  only when every live child, and every task in `finishes_after`, is `DONE` or
+  `CANCELLED`. Checked by `done`; nothing overrides it.
+
+Anything that cannot be resolved confidently — a missing task, an archived one, a
+manifest that does not parse, a project that is not checked out — counts as blocking.
+A typo can delay work; it can never make an agent start something prematurely.
+
+Cancelled work never satisfies a dependency: nothing can be built on it. A task that
+depends on a cancelled one is not blocked but **stranded** — waiting cannot open the
+gate. `cancel` lists those dependents in its result, overviews show
+`blocked by A (cancelled)`, and a person decides: cancel the dependent too, remove the
+reference, or point it at whatever now does that work. See
+[gates](/docs/reference/gates).
+
+## Containment
+
+A parent owns its subtree, and decisions taken on it are written into every task
+beneath it, so every file tells the truth about its own task.
+
+- `defer` moves every open descendant to `BACKLOG`, keeping `state.md` and assignees.
+- `schedule` brings every `BACKLOG` descendant back: `PAUSED` where a `state.md` exists,
+  `TODO` elsewhere.
+- `cancel` cancels every open descendant and clears their claims.
+- `done` never cascades — a parent is done only when its children are — and neither
+  does `reopen`.
+
+Every open descendant of a `BACKLOG` task is `BACKLOG`: nothing beneath an unscheduled
+epic can be scheduled, claimed or reopened past it. A cascade that would reach a live or
+unknown claim is refused; one that reaches an orphaned claim supersedes it.
+
+A claimed or assigned task **holds** its subtree: while an epic is being planned, or its
+plan awaits approval, nothing beneath it is ready and `claim` on a child is refused. The
+planner claims the epic, writes `design.md` and `plan.md`, creates the children — held —
+and hands the epic to the approver; the approver's `unassign` releases them to whoever is
+free.
+
+## The resume point
+
+`state.md` is the **resume point** of a task and the evidence that work started. Its
+recommended shape is four sections — **Done**, **Verified**, **Open**, **Next** — with
+_Open_ naming every uncommitted file and branch the work leaves behind.
+
+The exit protocol is part of the contract, not advice:
+
+- `pause` and `handoff` are refused while `state.md` is missing.
+- `release` is refused while it exists: work that produced something is paused.
+- `tasks state` writes it through the same fence as a transition, so a session whose
+  claim was taken over learns of it before it overwrites the new claimant's file.
+- `tasks session-check` verifies that every task the current session holds has one; a
+  harness runs it at the end of every turn.
+- The **freshness rule**: every turn in which the work progressed ends with `state.md`
+  updated. The status stays `IN_PROGRESS` between turns.
+
+The log is history and is never read on entry; the task's last entry — the note one
+actor left for the next — rides along in `show`, `resume` and `mine`.
+
+## Sessions and liveness
+
+An **actor** is the name an action is recorded under: `--as`, else `TASKS_ACTOR`, else
+the repository's git `user.name` or `user.email`, else the operating-system user. A
+**session** is one run of an agent, named by a token: `--session`, else `TASKS_SESSION`.
+A claim records both, and every log heading a session writes carries `s:<token>`.
+
+Every command run with a session touches its heartbeat file under
+`.tasks/.locks/sessions/`, and `tasks session-end` marks the session ended. A claim's
+**liveness** follows:
+
+| Liveness   | When                                                                                   |
+| ---------- | -------------------------------------------------------------------------------------- |
+| `live`     | the claim's session was active within `session_timeout_minutes` (30) and has not ended  |
+| `orphaned` | the session went silent for longer, or said goodbye with `session-end`                  |
+| `unknown`  | the claim has no session (a person at a terminal), or no heartbeat file exists for it   |
+
+A live or unknown claim is protected: only its claimant — the same actor, in the same
+session — may transition it. An orphaned claim protects nothing: the actor's next
+session takes it over with an ordinary `claim`, and the log records which session was
+superseded and when it was last seen. The superseded session, should it come back, gets
+a conflict on its next write instead of overwriting the new claimant's work.
+
+`--force` is the one override, always recorded in the log. It lifts the authorization
+rules, the start gate, a live or unknown claim, and a hold — never the finish gate, the
+`state.md` rules, a resolved parent, the `BACKLOG` invariant, a cycle, a reserved path,
+or a required message.
+
+## Projects
+
+A tree may list the trees it works with under `projects:` in `config.yml`, by alias:
+
+```yaml title=".tasks/config.yml"
+version: 2
+projects:
+  backend: ../backend
+  cli: ../tasks-cli
 ```
 
-An empty result is a **successful query**, not an error: exit `0` with
-`{"count": 0, "tasks": []}`. Agents must not treat "nothing to do" as a failure.
+`backend:auth/token-schema` then addresses a task there, overviews span every listed
+tree with foreign ids qualified by alias, and commands can write into listed trees —
+each under that tree's own lock. A tree reached only by a relative path in a reference,
+without being listed, is read-only. The usual layout is a dedicated tracker repository
+that lists the product repositories; see the [projects guide](/docs/guides/projects).

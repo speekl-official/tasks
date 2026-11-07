@@ -1,0 +1,66 @@
+---
+title: Migration from v1
+description: The one-time upgrade of a v1 tree, and a summary of what changed from v1.
+icon: ArrowUpFromLine
+---
+
+An implementation that offers `migrate` MUST perform, once, under the lock of the tree being
+migrated — the current tree, or a listed project named by alias:
+
+1. Check every phase name against the v2 segment pattern: v1 allowed `.` and `_`, v2 does not. A
+   phase that does not match MUST be renamed through an explicit `--map-phase OLD=NEW` argument;
+   without one, the migration MUST refuse and name the phases.
+2. Move each `<phase>/<id>.md` to `<phase>/<id>/task.md`; each `.archive/<id>.md` to
+   `.archive/<phase>/<id>/task.md` using its frontmatter `phase`.
+3. Drop `id` and `phase`; add `priority: normal`, `finishes_after: []`, `assignee: null`,
+   `claimed_session: null`.
+   A `claimed_by` that does not match the actor pattern under [Actors](/docs/spec/sessions#actors) MUST be named,
+   and the migration MUST refuse until it is corrected in the v1 file.
+4. Map statuses through the v1 tree's roles: the `ready` role's status to `TODO`, the `claimed`
+   role's to `IN_PROGRESS`, the `done` role's to `DONE`. Any other v1 status MUST be mapped by an
+   explicit `--map OLD=NEW` argument; without one, the migration MUST refuse and name the
+   statuses.
+5. Rewrite every `depends_on` reference from a bare id to its path (`<phase>/<id>`): local
+   references always; external references only when the target tree is reachable and holds the
+   id, otherwise the reference is kept as it is and listed.
+6. Rewrite `config.yml`: `version: 2`, `active_phase` → `scope`, and remove `statuses`, `roles`,
+   `transitions`.
+7. Remove v1's `_index.md` and generate `index.md`.
+
+References **into** the migrated tree from other trees still carry bare ids. The migration MUST
+rewrite them in the tree the command runs in and in every tree that tree lists under `projects:`,
+one tree at a time under each tree's lock, and MUST list the ones it finds in trees it can read but
+not write; those resolve as `missing` until edited.
+
+Two consequences the migration SHOULD print: a task migrated to `IN_PROGRESS` carries
+`claimed_session: null`, so its liveness is unknown and a claimant that runs with a session token
+recovers it only by force; a task mapped to `PAUSED` has no `state.md` and is reported by
+validation until one is written.
+
+## Changes from v1
+
+| Area | v1 | v2 |
+| --- | --- | --- |
+| Unit | one markdown file per task, flat under a phase | one directory per task, nested at any depth, with a workspace |
+| Identity | global unique `id`, mirrored in the filename, `phase` field | the path; no `id`, no `phase` |
+| Grouping | phases, one level | groups at any depth; a v1 phase is a top-level group |
+| Hierarchy | none | containment by directory: `done` waits for children, `defer` / `schedule` / `cancel` cascade to them, a `BACKLOG` subtree stays `BACKLOG` |
+| Statuses | configurable list, commands bound to roles | fixed six: `BACKLOG`, `TODO`, `IN_PROGRESS`, `PAUSED`, `DONE`, `CANCELLED` |
+| Transitions | adjacent steps or a configured list | a fixed table with preconditions, messages and authorization |
+| Blocked | derived | derived (unchanged), plus `waiting for`, `started`, `parked`, `held`, `closable`, `active`, liveness, and one computed **situation** per task in overviews |
+| Priority | none | four fixed levels, inherited downwards as effective priority, first key of the ready order |
+| Responsibility | `claimed_by` only | `assignee` (responsible, with authority over the subtree) and `claimed_by` + `claimed_session` (working now) |
+| Finish gates | none | children and `finishes_after` gate `done`; cancelled satisfies finish but never start |
+| Workspace | body only | `state.md`, `design.md`, `plan.md`, `log.md` vocabulary |
+| Journal | free `## Notes` | tool-stamped `log.md`; transitions logged with messages |
+| Resume point | none | `state.md`, required to pause or hand off |
+| Sessions | none | session tokens, heartbeats, explicit session end, orphaned-claim takeover |
+| Locking | per task | one lock per tree |
+| Cross-repository | relative-path references, read-only, cycles undetectable | `projects:` aliases, aggregation, writes into listed trees, cycles detectable when checked out |
+| Relocation | write-then-remove of a file; `phase` drift repaired | atomic directory rename with reference rewriting in this tree and in listed trees |
+| Configuration | statuses, roles, transitions, active phase | `version`, `scope`, `session_timeout_minutes`, `projects` |
+| Unknown frontmatter keys | tolerated on read, dropped on write | tolerated on read, preserved on write, reported by validation |
+| Overview file | `_index.md` | `index.md`, a plain reserved root name like `config.yml` |
+| Removal | archive only, ids reserved forever | archive with merge, `purge` releases a path, `delete` for never-worked tasks |
+| Working copies | unaddressed | one checkout on the integration branch mutates task state; `.tasks/` on a feature branch is a declared merge hazard |
+| Agent contract | a skill's advice | a normative Agent role with entry, freshness and exit rules |

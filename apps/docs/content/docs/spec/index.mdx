@@ -1,123 +1,118 @@
 ---
 title: Overview
-description: What the .tasks convention is, how it is versioned, and how to read these pages.
+description: What the .tasks convention is, how to read this specification, its terms, versioning, and design constraints.
 icon: ScrollText
 ---
 
-**The `.tasks` convention** is an open format for persistent task state in a source
-repository. Tasks are markdown files with YAML frontmatter under a `.tasks/` directory,
-versioned by git. Nothing about the format requires a particular tool, language, or
-runtime — it is files on disk, and any program that can read a directory can implement
-it.
+The `.tasks` convention is an open format for persistent task state in a source repository. Tasks
+are directories with a markdown manifest under `.tasks/`, versioned by git. Nothing about the
+format requires a particular tool, language, or runtime — it is files on disk, and any program that
+can read a directory can implement it.
 
-This section is **normative**. It defines what an implementation has to do. The rest of
-the documentation explains and demonstrates; where the two disagree, this section wins.
+v2 is designed for a mode of work that v1 only touched: **one or more humans plus coding agents,
+with no external tracker**. It answers two questions rather than one — *what to do next*, and
+*what the next agent must read to continue* — and it makes saving state for the next session part
+of the contract instead of a favour the human has to ask for.
 
-<Callout title="Why a format and not just a tool">
-  Agents already read and write files. A task tracker that is only reachable
-  through one binary becomes a dependency every agent, editor, and CI job has to
-  acquire. A format makes the state itself the interface: a shell script with
-  `grep` can answer "what is ready", and a richer tool can enforce the rules on
-  top of the same bytes.
-</Callout>
-
-## Reading these pages
+## Reading this document
 
 The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **SHOULD**,
-**SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** are to be interpreted as
-described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
-[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when and only when they appear in
-capitals.
+**SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** are to be interpreted as described in
+RFC 2119 and RFC 8174 when, and only when, they appear in capitals.
 
-Text in a `Non-normative` callout is explanation, not requirement.
+Paragraphs marked **Non-normative** are explanation, not requirement.
 
-| Page                                             | Defines                                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| [Directory layout](/docs/spec/layout)            | Where `.tasks/` lives, how it is discovered, what it contains.           |
-| [Task file](/docs/spec/task-file)                | Frontmatter fields, types, filename rules, the body.                     |
-| [Configuration](/docs/spec/configuration)        | `config.yml`, statuses, roles, transitions.                              |
-| [Dependency resolution](/docs/spec/dependencies) | Reference grammar and the resolution algorithm.                          |
-| [CLI contract](/docs/spec/cli)                   | Exit codes and JSON shapes, for implementations exposing a command line. |
-| [Conformance](/docs/spec/conformance)            | The roles an implementation can claim, and what each requires.           |
+| Section | Defines |
+| --- | --- |
+| [Overview](/docs/spec) | Terms, versioning, design constraints. |
+| [Directory layout](/docs/spec/layout) | Discovery, groups and tasks, reserved directories, writes, locking, working copies. |
+| [Identity and references](/docs/spec/identity) | Paths as ids, the reference grammar, relocation. |
+| [Task file](/docs/spec/task-file) | The manifest: frontmatter fields, body, canonical serialization, validation. |
+| [Statuses and transitions](/docs/spec/lifecycle) | The fixed lifecycle, derived conditions, situations, priority, the transition table, authorization, force. |
+| [Containment](/docs/spec/containment) | What a parent's decisions do to its subtree: the `BACKLOG` invariant, the cascades of `defer`, `schedule` and `cancel`, liveness and authority over descendants. |
+| [Dependencies and gates](/docs/spec/dependencies) | Start gate, finish gate, resolution, cycles. |
+| [Projects](/docs/spec/projects) | Multi-repository trees: aliases, aggregation, writes across trees. |
+| [Workspace files](/docs/spec/workspace) | The reserved file vocabulary: `state.md`, `design.md`, `plan.md`, `log.md`. |
+| [Sessions and liveness](/docs/spec/sessions) | Actors, session tokens, heartbeats, session end, orphaned claims, takeover. |
+| [Configuration](/docs/spec/configuration) | `config.yml`. |
+| [CLI contract](/docs/spec/cli) | Exit codes, streams, JSON shapes, command semantics. |
+| [Agent protocol](/docs/spec/agent-protocol) | What a conforming agent does on entry, during work, and on exit. |
+| [Harness integration](/docs/spec/harness) | Non-normative: hooks that make the protocol automatic. |
+| [Conformance](/docs/spec/conformance) | Reader, Writer, Manager, Agent. |
+| [Migration from v1](/docs/spec/migration) | The one-time upgrade. |
+| [Changes from v1](/docs/spec/migration#changes-from-v1) | Summary table for readers of the v1 specification. |
+
+## Terms
+
+- **Tree** — one `.tasks/` directory and everything under it. **Project root** — the directory
+  containing it. **Project** — a tree reachable from another tree through configuration.
+- **Task** — a directory under `.tasks/` that contains `task.md`. Its **workspace** is everything
+  else in that directory. Its **id** is its path relative to `.tasks/`.
+- **Group** — a directory under `.tasks/` that does not contain `task.md`. Organizational only.
+- **Parent / children** — the nearest ancestor task of a task, and the tasks whose parent it is.
+  **Descendants** — every task beneath a task, at any depth; together they are its **subtree**. A
+  task with children is informally an **epic**.
+- **Open** statuses: `BACKLOG`, `TODO`, `IN_PROGRESS`, `PAUSED`. **Resolved** statuses: `DONE`,
+  `CANCELLED`; to **close** a task is to move it to either. **Live** — not archived.
+- **Actor** — an identity string, opaque to implementations: a person, an agent, a tool.
+  **Session** — a token identifying one run of an agent, opaque likewise; both follow the pattern
+  under [Actors](/docs/spec/sessions#actors). **Claimant** — the actor working on a task right now. **Assignee** —
+  the actor a task waits on: who must act on it next, and who alone may transition it while it is
+  not claimed.
+- **Start gate** — the conditions under which a task may be claimed. **Finish gate** — the
+  conditions under which a task may be done. **Situation** — the one word an overview says about
+  a task, computed from its status and its surroundings (see [Situation](/docs/spec/lifecycle#situation)).
 
 ## Version
 
-This document defines **`.tasks` convention v1**.
-
-The version is carried in each project's `config.yml`:
+This document defines **`.tasks` convention v2**. A v2 tree MUST declare it:
 
 ```yaml
-version: 1
+# .tasks/config.yml
+version: 2
 ```
 
-A project that omits `config.yml` entirely, or omits `version`, is a v1 project — v1 is
-the default precisely so that the minimal tree (a directory of markdown files) is valid
-without ceremony.
+A tree without `config.yml`, or without `version`, is a v1 tree. v2 is not backward compatible
+with v1 (the layout, the identity model and the lifecycle changed); a v1 tree is upgraded once,
+see [Migration from v1](/docs/spec/migration). On a v1 tree a v2 implementation MUST refuse every
+command except `migrate`, as a usage error that names the upgrade. An implementation that
+encounters a `version` it does not support MUST refuse to operate on the tree.
 
-### Compatibility policy
-
-Within v1:
-
-- Fields and configuration keys MAY be **added**. An implementation MUST tolerate
-  frontmatter keys and `--json` fields it does not recognize, and MUST NOT fail on them.
-- Field meanings MUST NOT change, and fields MUST NOT be removed or repurposed.
-- Constraints MAY be **relaxed** but MUST NOT be tightened.
-
-<Callout type="warn" title="Unknown frontmatter keys are not durable">
-  Tolerating an unknown key on read is required; *preserving* it on write is
-  not. Canonical serialization emits exactly the fields defined in [task
-  file](/docs/spec/task-file), so any other key is dropped the next time an
-  implementation rewrites that file. Do not store metadata in task frontmatter
-  that you need to survive. Put it in the body, which is never rewritten.
-</Callout>
-
-Anything else — removing a field, narrowing a pattern, changing an exit code, altering
-resolution semantics — requires **v2**, and a v2 project MUST declare `version: 2`.
-
-An implementation that encounters a `version` it does not support MUST refuse to operate
-on the tree rather than guessing. Reading it as though it were v1 risks writing state
-back in a form the newer tool will misread.
-
-## Relationship to `@speekl/tasks`
-
-[`@speekl/tasks`](/docs/reference/commands) is the **reference implementation**: a CLI
-that implements every part of this specification, including the optional
-[CLI contract](/docs/spec/cli). Where this document is ambiguous, the reference
-implementation's behavior is the tie-breaker, and the ambiguity is a bug in this
-document.
-
-The reference implementation is versioned separately from the convention. `@speekl/tasks`
-1.4.0 and 2.0.0 can both implement `.tasks` v1; the CLI's major version tracks _its own_
-interface, not the format's.
-
-<Callout type="info" title="Non-normative">
-  Nothing here obliges you to use the CLI, and nothing obliges the CLI to be the
-  only writer. A repository can be edited by hand, by an agent using plain file
-  tools, and by the CLI, in any order. That is the point of specifying the files
-  rather than the commands.
-</Callout>
+Within v2: fields and configuration keys MAY be added by a later revision. An implementation MUST
+tolerate frontmatter keys and JSON fields it does not recognize on read and MUST preserve unknown
+frontmatter keys on write (see [Serialization](/docs/spec/task-file#serialization)), so that a tree touched by two
+revisions loses nothing; validation reports such a key as a warning. A configuration key an
+implementation does not know is a usage error (see [Configuration](/docs/spec/configuration)), so an older
+implementation refuses a newer tree rather than misreading it. Field meanings MUST NOT change,
+fields MUST NOT be removed, constraints MAY be relaxed but MUST NOT be tightened.
 
 ## Design constraints
 
-These are the properties the rest of the specification exists to preserve. An
-implementation choice that satisfies the letter of a rule while breaking one of these is
-non-conforming in spirit, and the rule is probably underspecified.
+These are the properties the rest of the specification exists to preserve.
 
-<Cards>
-  <Card
-    title="Fail safe, never fail useful"
-    description="Any state an implementation cannot resolve confidently counts as blocking. A dependency is satisfied only on positive evidence."
-  />
-  <Card
-    title="The filesystem is authoritative"
-    description="No cache, no index, no daemon holds truth. Every answer is derivable from the files, so an outside edit is never stale."
-  />
-  <Card
-    title="Diffs stay reviewable"
-    description="Canonical serialization and atomic writes, so a file changes only when its meaning changes."
-  />
-  <Card
-    title="Human-editable"
-    description="A person with a text editor can do anything the tooling can, and the tooling can repair what they got wrong."
-  />
-</Cards>
+1. **Facts are stored, conditions are computed.** A status records facts about the task itself:
+   scheduled, started, being worked, resolved and how. A decision taken on a parent — to defer,
+   schedule or cancel it — is a fact about every task in its subtree and is written into each of
+   them (see [Containment](/docs/spec/containment)), so every file tells the truth about its own task.
+   Conditions that follow from the *state* of other tasks — blocked, ready, closable, active — are
+   computed on every query and never stored. A task's own redundant facts are kept consistent at
+   write time and checked by validation.
+2. **State and history are separate.** Every file in a task directory except the log describes
+   the present and is edited in place. The log describes the past and is only appended.
+3. **Fail safe, never fail useful.** Any state an implementation cannot resolve confidently
+   counts as blocking. A gate is satisfied only on positive evidence.
+4. **The filesystem is authoritative.** No cache, index, or daemon holds truth. The only state
+   outside the committed tree is the transient `.locks/` directory, which holds no truth either.
+5. **Human-editable, diff-stable.** A person with a text editor can do anything the tooling can;
+   canonical serialization and atomic writes keep a file's diff equal to its change of meaning.
+6. **The exit protocol is part of the contract.** A task that is being worked has a resume
+   point on disk; leaving work without one is refused by the tooling, not merely discouraged.
+
+<Callout type="info" title="Non-normative">
+  v1 made statuses configurable and bound commands to "roles" because it had no
+  hierarchy: every workflow stage had to be a status. v2 has children for stages that are work,
+  `PAUSED` + `assignee` for stages that are waiting on a person, and `state.md` for narrative
+  sub-state, so the lifecycle can be fixed. A fixed vocabulary reads the same in every project,
+  greps without configuration, needs no foreign configuration to judge a cross-repository
+  dependency, and lets an agent skill skip reading configuration altogether.
+</Callout>

@@ -3,10 +3,19 @@
   "pages": [
     "index",
     "layout",
+    "identity",
     "task-file",
-    "configuration",
+    "lifecycle",
+    "containment",
     "dependencies",
+    "projects",
+    "workspace",
+    "sessions",
+    "configuration",
     "cli",
-    "conformance"
+    "agent-protocol",
+    "harness",
+    "conformance",
+    "migration"
   ]
 }

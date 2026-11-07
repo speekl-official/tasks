@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: From an empty repository to a working queue, in five commands.
+description: From an empty repository to a claimed, paused, resumed and finished task.
 icon: Rocket
 ---
 
@@ -63,40 +63,56 @@ Run this at the root of the repository whose work you want to track.
 tasks init
 ```
 
-That creates `.tasks/` with a config, a README describing the convention, and a
-`.gitignore` for the transient lock directory. It also installs an [agent
-skill](/docs/guides/agent-workflow) into `.claude/skills/tasks/` so agents in this repo
-reach for the CLI instead of inventing their own markdown convention.
-
 ```txt
 ✓ Initialized .tasks/ at /Users/you/acme-api/.tasks
+  actor: alice (heads every log entry you write; TASKS_ACTOR or --as changes it)
+  actors: none listed; uncomment actors: in config.yml to keep a roster
   .tasks/config.yml
   .tasks/README.md
   .tasks/.gitignore
-  .claude/skills/tasks/SKILL.md
+  .tasks/.locks/
   .claude/skills/tasks/reference/convention.md
+  .claude/skills/tasks/SKILL.md
+
+• Installed the tasks skill so agents in this repo find the CLI.
+• Create your first task: tasks new <path> <title…>
 ```
 
-Skip the skill with `tasks init --no-skill`. Re-running `init` on an existing tree is
-refused with exit `4` unless you pass `--force`, and even then an edited `config.yml`
-is left alone.
+`config.yml` declares `version: 2`; the `.gitignore` keeps the transient `.locks/`
+directory out of git. The **actor** is the name that will head every log entry you
+write — here the repository's `git config user.name`. An agent gets its own name through
+`TASKS_ACTOR`, so the log tells the two apart; see
+[configuration](/docs/reference/configuration#the-actor).
+
+`init` also installs the [agent skill](/docs/guides/agent-protocol#the-skill) into
+`.claude/skills/tasks/`, so agents in this repository reach for the CLI instead of
+inventing their own convention. Skip it with `--no-skill`. Running `init` on an existing
+tree is refused with exit `4`; `--force` adds the scaffold files it lacks and never
+overwrites one.
 
 </Step>
 
 <Step>
 
-### Create some tasks
+### Create tasks
 
-The first argument is the **phase** — a directory grouping one body of work. It is
-created on first use; there is no separate step.
+A task's id is its path under `.tasks/`. Create an epic, then the parts of its
+deliverable beneath it:
 
 ```sh
-tasks new auth-rework "Design token schema"
-tasks new auth-rework "Implement refresh endpoint"
+tasks new auth-rework "Rework authentication"
+tasks new auth-rework/token-schema "Design the token schema"
+tasks new auth-rework/wire-refresh "Wire the refresh endpoint"
 ```
 
-The id defaults to a kebab-case slug of the name (`design-token-schema`), and must be
-unique across the whole tree. Override it with `--id`.
+```txt
+✓ new auth-rework/token-schema
+  TODO · .tasks/auth-rework/token-schema
+```
+
+Each one is a directory holding a `task.md`. A task inside another task is its child,
+so `auth-rework` cannot be done until both children are resolved. Directories on the way
+are created on demand; one without a `task.md` is just a group.
 
 </Step>
 
@@ -105,11 +121,18 @@ unique across the whole tree. Override it with `--id`.
 ### Declare what waits on what
 
 ```sh
-tasks dep add implement-refresh design-token-schema
+tasks dep add wire-refresh token-schema
 ```
 
-`dep add` refuses a reference to a task that does not exist, and refuses to introduce a
-cycle — so a dependency you can add is one that can eventually resolve.
+```txt
+✓ dep add auth-rework/wire-refresh: auth-rework/token-schema
+  depends on: auth-rework/token-schema
+```
+
+Any unambiguous suffix of an id works on the command line; the full path is what gets
+stored. `dep add` refuses a task that does not exist, a task's own ancestor, and a
+reference that would close a cycle — so a dependency you can add is one that can
+eventually resolve.
 
 </Step>
 
@@ -117,11 +140,11 @@ cycle — so a dependency you can add is one that can eventually resolve.
 
 ### Fill in the body
 
-`tasks new` scaffolds `## Description`, `## Acceptance criteria`, and `## Notes`. Open
-the file and write them, with any editor.
+`tasks new` scaffolds `## Description`, `## Acceptance criteria` and `## Notes`. Open the
+file and write them, with any editor.
 
 ```sh
-$EDITOR .tasks/auth-rework/design-token-schema.md
+$EDITOR .tasks/auth-rework/token-schema/task.md
 ```
 
 A task whose body is empty is not a task, it is a reminder. Put enough in it that a
@@ -129,31 +152,196 @@ different agent arriving cold in a later session can do the work without asking.
 
 </Step>
 
+</Steps>
+
+## Work the loop
+
+<Steps>
+
 <Step>
 
-### Work the loop
+### See what is ready
 
 ```sh
 tasks ready
 ```
 
 ```txt
- ID                    STATUS    PHASE         DEPENDS ON   UPDATED
- design-token-schema   PENDING   auth-rework   —            2026-08-22 10:02
+ ID                         SITUATION   LABELS   TITLE
+ auth-rework/token-schema   ready                Design the token schema
 
- 1 ready
+1 task
 ```
 
-`implement-refresh` is absent — it is blocked on the schema task. Claim what is ready,
-do the work, then close it out:
+Overviews speak in **situations**, one word per task, rather than stored statuses.
+`wire-refresh` is absent because it is blocked by the schema, and the epic is absent
+because its work is its children's until they close. `tasks list` shows every open task
+with its situation:
+
+```txt
+ ID                         SITUATION                             LABELS   TITLE
+ auth-rework                open 0/2                                       Rework authentication
+ auth-rework/token-schema   ready                                          Design the token schema
+ auth-rework/wire-refresh   blocked by auth-rework/token-schema            Wire the refresh endpoint
+```
+
+</Step>
+
+<Step>
+
+### Claim before working
 
 ```sh
-tasks claim design-token-schema
-# ...do the actual work...
-tasks status design-token-schema DONE
+tasks claim --next --session s1
 ```
 
-Run `tasks ready` again and `implement-refresh` has appeared.
+```txt
+✓ claim auth-rework/token-schema: TODO → IN_PROGRESS
+```
+
+`--next` takes the first task of your ready set and claims it in one step, under the
+tree's lock, so two agents running it at once get different tasks. The **session token**
+names this run of work; the claim belongs to it, and `state`, `pause` and `done` on the
+task must carry the same token. Export it once instead of repeating the flag:
+
+```sh
+export TASKS_SESSION=s1
+```
+
+An agent's harness does this for it — see [harness hooks](/docs/guides/harness).
+
+</Step>
+
+<Step>
+
+### Save the resume point
+
+Before you stop, write `state.md`: where the work stands, for whoever continues it. A
+pause without one is refused:
+
+```txt
+✗ auth-rework/token-schema is IN_PROGRESS and has no state.md; write it before pausing (`tasks state auth-rework/token-schema` reads it from stdin).
+```
+
+`tasks state` replaces the file with standard input (or opens your editor with `--edit`):
+
+```sh
+tasks state token-schema < state.md
+```
+
+```markdown title="state.md"
+## Done
+
+- Drafted the claims table in design.md.
+
+## Verified
+
+- Nothing yet.
+
+## Open
+
+- design.md is uncommitted.
+
+## Next
+
+- Decide the refresh-token lifetime.
+```
+
+</Step>
+
+<Step>
+
+### Pause with a message
+
+```sh
+tasks pause token-schema -m "Claims table drafted; the token lifetime is still open."
+```
+
+```txt
+✓ pause auth-rework/token-schema: IN_PROGRESS → PAUSED
+```
+
+The message is the closing note: it lands in `log.md`, and the next reader sees it as
+the task's last entry without opening the log. A paused task comes first in `ready` —
+finishing beats starting.
+
+</Step>
+
+<Step>
+
+### Resume in a later session
+
+```sh
+export TASKS_SESSION=s2
+tasks resume token-schema
+```
+
+```txt
+Design the token schema  auth-rework/token-schema
+  status         PAUSED
+  situation      ready · started
+  priority       normal
+  referenced by  auth-rework/wire-refresh
+  path           /Users/you/acme-api/.tasks/auth-rework/token-schema
+
+Ancestors
+  auth-rework  TODO  Rework authentication  log.md
+
+Workspace
+  state.md, log.md
+
+state.md
+## Done
+
+- Drafted the claims table in design.md.
+…
+
+Last entry
+  2026-10-26T02:47:40Z alice s:s1
+  pause: IN_PROGRESS → PAUSED
+  Claims table drafted; the token lifetime is still open.
+```
+
+`resume` prints everything the next session needs: the task, its ancestors and their
+workspace files, its children, `state.md` in full and the last log entry.
+
+</Step>
+
+<Step>
+
+### Finish it
+
+```sh
+tasks claim token-schema
+tasks done token-schema -m "Schema agreed; design.md committed."
+tasks ready
+```
+
+```txt
+✓ claim auth-rework/token-schema: PAUSED → IN_PROGRESS
+✓ done auth-rework/token-schema: IN_PROGRESS → DONE
+ ID                         SITUATION   LABELS   TITLE
+ auth-rework/wire-refresh   ready                Wire the refresh endpoint
+```
+
+`wire-refresh` was waiting on the schema, so it is ready now.
+
+</Step>
+
+<Step>
+
+### Check the tree
+
+```sh
+tasks validate
+```
+
+```txt
+✓ no findings · 3 tasks checked
+```
+
+Errors exit `4`, so CI can gate on them; warnings alone exit `0`. See
+[validation](/docs/reference/validation) for every finding.
 
 </Step>
 
@@ -161,20 +349,21 @@ Run `tasks ready` again and `implement-refresh` has appeared.
 
 ## Commit it
 
-`.tasks/` is meant to be committed. Task state branches, merges, and reviews like the
-rest of the repo.
+`.tasks/` is meant to be committed. Task state branches, merges and reviews like the rest
+of the repository — mutate it on the integration branch, from one checkout.
 
 ```sh
 git add .tasks .claude/skills/tasks
 git commit -m "Track the auth rework in .tasks/"
 ```
 
-The one thing not to commit is `.tasks/.locks/`, and the scaffolded `.gitignore`
-already handles that.
+The one thing not to commit is `.tasks/.locks/`, and the scaffolded `.gitignore` already
+handles that.
 
-<Callout type="info" title="Keep the index fresh">
-  `_index.md` is a generated overview that only regenerates on demand. Run
-  `tasks reindex` before committing, or let `tasks validate --fix` catch it.
+<Callout type="info" title="An index for reviewers">
+  `tasks reindex` writes `.tasks/index.md`, a generated overview of the tree. Once it
+  exists, every command that changes the tree regenerates it, so the committed copy
+  follows the tasks. No command ever reads it.
 </Callout>
 
 ## Next
@@ -183,21 +372,21 @@ already handles that.
   <Card
     title="Core concepts"
     href="/docs/concepts"
-    description="What phases, statuses, roles, and dependencies actually buy you."
+    description="The lifecycle, situations, gates, containment, sessions."
   />
   <Card
-    title="Working with agents"
-    href="/docs/guides/agent-workflow"
-    description="The loop an agent should follow, and the rules that bite."
+    title="The agent protocol"
+    href="/docs/guides/agent-protocol"
+    description="The loop an agent follows, and the rules that bite."
   />
   <Card
-    title="Configuration"
-    href="/docs/reference/configuration"
-    description="Rename statuses, define your own transition graph, set a default phase."
+    title="Harness hooks"
+    href="/docs/guides/harness"
+    description="Make the protocol automatic in Claude Code."
   />
   <Card
     title="Command reference"
     href="/docs/reference/commands"
-    description="Every command, flag, and failure mode."
+    description="Every command, option, and failure mode."
   />
 </Cards>

@@ -1,0 +1,207 @@
+---
+title: Statuses and transitions
+description: The fixed lifecycle, derived conditions, situations, priority, the transition table, authorization, and force.
+icon: Workflow
+---
+
+## Statuses
+
+The lifecycle is a **fixed vocabulary**. Implementations MUST NOT rename it, extend it, or attach
+behaviour to any other value.
+
+| Status | Fact recorded | Open? |
+| --- | --- | --- |
+| `BACKLOG` | Not scheduled. | open |
+| `TODO` | Scheduled, not started; a parent's children carry their own status. | open |
+| `IN_PROGRESS` | Being worked right now; a claimant is recorded. | open |
+| `PAUSED` | Started, not being worked; waiting for a dependency, a person, or free hands. | open |
+| `DONE` | Finished. | resolved |
+| `CANCELLED` | Explicitly decided not to do. | resolved |
+
+- A reference in `depends_on` is satisfied by `DONE` only.
+- A child, or a reference in `finishes_after`, satisfies the finish gate when `DONE` or
+  `CANCELLED`.
+- The four open statuses are live work: they hold the parent open and are cancelled with it.
+- A parent's status records the parent's own facts — scheduled, its own work, resolved. What
+  happens among its children is computed (see [Situation](/docs/spec/lifecycle#situation)); what is decided about the
+  parent reaches its children (see [Containment](/docs/spec/containment)).
+
+## Derived conditions
+
+The following are computed on every query from current state, MUST be shown by overview commands,
+and MUST NOT be persisted to any file:
+
+| Condition | Definition |
+| --- | --- |
+| **blocked by** | An open task with at least one unsatisfied `depends_on` reference; the references and their reasons. |
+| **ready** (for an actor) | Status `TODO` or `PAUSED`; every `depends_on` reference satisfied; `assignee` null or equal to the actor; no live open child; no ancestor claimed or assigned. |
+| **waiting for** | `PAUSED` with an assignee: the task waits for that actor's decision or review. |
+| **assigned** | An assignee on an open task that is not `PAUSED`. |
+| **started** | A `state.md` exists on the task or on a descendant (meaningful for `BACKLOG`, where the status does not carry it). |
+| **parked** | `BACKLOG` and started: begun, then set aside. |
+| **held** | An open task with an ancestor that is claimed or assigned: that ancestor's work or decision comes first (see [Hold](/docs/spec/containment#hold)). |
+| **progress** | For a parent: live children resolved and open, and whether any descendant is `IN_PROGRESS` (**active**). |
+| **closable** | An open task with children or `finishes_after` references whose finish gate is satisfied: it can be closed either way without touching anything else. |
+| **claim liveness** | For `IN_PROGRESS`: live, orphaned, or unknown, see [Sessions and liveness](/docs/spec/sessions). |
+
+A ready set MUST be ordered by effective [priority](/docs/spec/lifecycle#priority) first, then `PAUSED` before `TODO`,
+then `created` ascending; aggregated output interleaves projects by the same keys.
+
+<Callout type="info" title="Non-normative">
+  "Blocked" is not a status because it is a fact about *other* tasks. Storing it
+  would either require a cascade write when the blocker completes or leave a stale label; computing
+  it costs one dependency walk and composes with any status: a blocked `TODO` and a blocked `PAUSED`
+  are both visible without a third value. "Finishing beats starting" is why `PAUSED` sorts first
+  among equal priorities, and the oldest task comes first because nothing else in the tree says
+  what matters more. A parent
+  with open children is not ready because its work is its children's until they close; it comes up
+  by itself once they have — to verify, to integrate, or simply to be closed. A task whose finish
+  gate waits only on `finishes_after` references stays ready: a join is worked beside its parts and
+  closed after them, so an epic that is nothing but a join is assigned to its owner or deferred
+  rather than left for `claim --next`. A `BACKLOG` parent
+  has only `BACKLOG` children ([Containment](/docs/spec/containment)), so nothing under it is ready either;
+  without these rules every epic created by `new` would be offered to every agent as free work. A
+  claimed or assigned ancestor holds its subtree for the mirror-image reason: its decomposition is
+  being written or awaits approval, and executing it early would build on a plan nobody confirmed.
+</Callout>
+
+## Situation
+
+An overview says exactly one word about a task, its **situation**, chosen as the first row below
+whose condition holds; every other condition that holds is shown after it as a secondary label
+(`started`, `blocked by X` — with the reason when the reference can never be satisfied, as in
+`blocked by A (cancelled)` — `active` for a parent with an `IN_PROGRESS` descendant, a
+[priority](/docs/spec/lifecycle#priority) other than `normal`, liveness, the assignee). Implementations MUST compute the
+situation by this table, so that two of them agree on what a tree looks like.
+
+| Situation | Condition | Statuses in which it can hold |
+| --- | --- | --- |
+| `done`, `cancelled` | resolved | one each |
+| `working by X` | a claimant X is recorded; shown with its liveness | `IN_PROGRESS` |
+| `parked` | `BACKLOG` with started work at the task or beneath it | `BACKLOG` |
+| `backlog` | `BACKLOG` without started work | `BACKLOG` |
+| `held by X` | an ancestor X is claimed or assigned ([Hold](/docs/spec/containment#hold)) | `TODO`, `PAUSED` |
+| `waiting for X` | `PAUSED` with an assignee | `PAUSED` |
+| `assigned X` | an assignee, not `PAUSED` | `TODO`, `BACKLOG`, `IN_PROGRESS` |
+| `blocked by X` | an unsatisfied `depends_on` reference | any open |
+| `closable` | a task with children or `finishes_after` references whose finish gate is satisfied: closable either way, no cascade | any open |
+| `open N/M` | a parent with open children | any open |
+| `ready` | free and unblocked, as defined above | `TODO`, `PAUSED` |
+
+`N/M` is the parent's progress: live children resolved out of live children. Overview commands
+(`ready`, `mine`, `list`, `tree`) MUST show the situation and the secondary labels and SHOULD NOT
+show the stored status, which `show`, `resume`, the JSON `status` field and the file itself carry.
+`list` MUST accept a filter by situation (`--parked`, `--blocked`, `--waiting`, …).
+
+<Callout type="info" title="Non-normative">
+  The status is what a task says about itself; the situation is what the tree
+  says about the task. Files and commands speak status — `pause`, `defer`, `done` name the fact
+  they write — and overviews speak situation, so a reader never sees two vocabularies competing on
+  one line: an epic whose child is being worked reads `open 2/5 · active`, not `TODO`, and a task paused
+  for review reads `waiting for alice`, not `PAUSED`. Some situations coincide with a status one to
+  one (`done`, `working`, `backlog`); most do not, which is the point.
+</Callout>
+
+## Priority
+
+`priority` is one of four fixed levels — `urgent`, `high`, `normal`, `low` — and defaults to
+`normal`. A task's **effective priority** is the highest level among its own and its ancestors':
+an urgent epic makes its parts urgent without a write to each of them. Effective priority is the
+first key of the ready order (see [Derived conditions](/docs/spec/lifecycle#derived-conditions)); among equals,
+finishing beats starting. Overviews show a level other than `normal` as a secondary label.
+
+<Callout type="info" title="Non-normative">
+  Nobody sets a priority by default, so the queue runs on the started-first rule
+  alone; a level set by a person is a deliberate jump of the queue and is treated as one. Four words
+  instead of a number scale for the same reason the statuses are words: they read the same in every
+  tree and need no legend.
+</Callout>
+
+## Transitions
+
+| Command | From | To | Preconditions | Effects |
+| --- | --- | --- | --- | --- |
+| `schedule` | `BACKLOG` | `PAUSED` when `state.md` exists, else `TODO` | authorization; no ancestor in `BACKLOG` | cascades to `BACKLOG` descendants ([Containment](/docs/spec/containment)) |
+| `defer` | `TODO`, `PAUSED` | `BACKLOG` | authorization; cascade liveness rule | `state.md` is kept; cascades to open descendants ([Containment](/docs/spec/containment)) |
+| `claim` | `BACKLOG`, `TODO`, `PAUSED` | `IN_PROGRESS` | authorization; start gate satisfied; the task's parent is open; no ancestor in `BACKLOG`; no ancestor claimed or assigned | sets `claimed_by`, `claimed_at`, `claimed_session` |
+| `pause` | `IN_PROGRESS` | `PAUSED` | claimant; `state.md` exists; message | clears the claim |
+| `release` | `IN_PROGRESS` | `TODO` | claimant; no `state.md` exists | clears the claim |
+| `done` | any open | `DONE` | authorization; start gate satisfied; finish gate satisfied; message | clears the claim |
+| `cancel` | any open | `CANCELLED` | authorization; cascade liveness rule; message | clears the claim; cascades to open descendants ([Containment](/docs/spec/containment)) |
+| `reopen` | `DONE`, `CANCELLED` | `BACKLOG` under a `BACKLOG` ancestor; else `PAUSED` when `state.md` exists, else `TODO` | authorization; the parent is open; message | |
+| `handoff <actor>` | `IN_PROGRESS` | `PAUSED` | a listed actor when the tree lists actors; as `pause` | `pause`, then `assign` |
+| `assign <actor>` / `unassign` | any open | unchanged | `assign` names a listed actor when the tree lists actors ([Actors](/docs/spec/sessions#actors)); authorization | sets or clears `assignee` |
+| `priority <level>` | any open | unchanged | authorization | sets `priority` |
+
+A status transition from a status to itself is never legal. `assign`, `unassign` and `priority`
+change one field each; they are not status transitions but follow the same authorization and
+logging rules. No other transitions exist.
+
+- **Messages.** `done`, `pause`, `cancel` and `reopen` REQUIRE a message; every other transition
+  MAY carry one. Every transition MUST append an entry to the task's log (see
+  [`log.md`](/docs/spec/workspace#logmd)).
+- **Creation.** A new task starts in `TODO`; an implementation MAY create it in `BACKLOG` on
+  request, MUST create it in `BACKLOG` under a `BACKLOG` parent, and MAY set `assignee` at
+  creation (a listed actor when the tree lists actors). A task MUST NOT be created under a
+  resolved parent.
+- **`release`** exists for a claim that produced nothing; the absence of `state.md` is the
+  evidence. Work that produced anything is paused, not released. A claim taken from `BACKLOG` and
+  released lands in `TODO`, which schedules the task; `defer` undoes that.
+- **`done` from `BACKLOG`** exists, like `cancel`, for a decision about unscheduled work: a task
+  found to be finished elsewhere is closed where it is, under the same gates. Neither needs the
+  task's ancestors scheduled: closing starts nothing.
+- **`reopen`** is an exception, not a flow: a task under a resolved parent MUST NOT be reopened
+  before the parent, and reopening a parent reopens none of its children. A resolved task keeps
+  its `assignee`, so a task a person closed is reopened by that person or by force.
+- **`pause` without a `state.md`** MUST be refused with a conflict that names the missing file;
+  this is the mechanism that guarantees a resume point.
+- **`claim --next`** takes, under the tree lock, the first task of the caller's ready set — in
+  ready order, within `--scope` when given — and claims it in the same operation, so that
+  several agents reading one list do not race for its head. It fails as *not found* when the set
+  is empty.
+
+<Callout type="info" title="Non-normative">
+  A single `PAUSED` covers every kind of waiting because *what* is waited for is
+  already recorded elsewhere: a task in `depends_on`, a person in `assignee`, or nothing (free
+  hands). The maintainer's inbox is therefore not a status but a query: tasks assigned to her,
+  whatever their status. Returning half-done work to `TODO` would be a lie, hence `PAUSED` is
+  stored, and `BACKLOG` keeps `state.md` so `schedule` can restore `PAUSED`.
+</Callout>
+
+## Authorization
+
+- An `IN_PROGRESS` task whose claim is **live** or **unknown** (see
+  [Liveness of a claim](/docs/spec/sessions#liveness-of-a-claim)) MUST be transitioned only by its claimant: the same
+  `claimed_by` and, when `claimed_session` is non-null, the same session. An **orphaned** claim
+  protects nothing: the task MAY be transitioned by any actor the remaining rules authorize, and
+  the log entry MUST record the superseded session and when it was last seen, as a takeover does.
+  Liveness protects live work; authority governs the rest.
+- An assigned task that is not claimed MUST be transitioned only by its assignee or by the
+  assignee of one of its ancestors: authority flows down the tree.
+- Any other task MAY be transitioned by anyone.
+- `claim` by an actor the rules above do not authorize MUST be refused like a claim on a claimed
+  task.
+- A cascade ([Containment](/docs/spec/containment)) is authorized on the task the command names; the
+  descendants' own assignees do not apply to it. Their live work is protected by the cascade
+  liveness rule, not by authority.
+- An explicit force overrides every rule above (see [Force](/docs/spec/lifecycle#force)).
+- An implementation MAY let an actor act **on behalf of** another (`--as`); the log entry MUST
+  record both, principal and operator.
+
+Authorization failures are state conflicts (exit `4` under the [CLI contract](/docs/spec/cli)).
+
+## Force
+
+An explicit force (`--force`) is the only override in this specification and MUST be recorded in
+the log entry of the transition it forced. It overrides exactly:
+
+- the [authorization](/docs/spec/lifecycle#authorization) rules, including the claimant rule for `move`;
+- the start gate on `claim` and `done`;
+- the refusal of a `claim` on a live or unknown claim ([Claims across sessions](/docs/spec/sessions#claims-across-sessions)),
+  and the refusal of a cascade over one ([Containment](/docs/spec/containment));
+- the hold of a subtree under a claimed or assigned ancestor ([Hold](/docs/spec/containment#hold));
+- the refusal to archive a task that open tasks reference ([Cancellation and deletion interaction](/docs/spec/dependencies#cancellation-and-deletion-interaction)).
+
+Nothing overrides the finish gate, the `state.md` preconditions of `pause`, `handoff` and
+`release`, the rules that protect a resolved parent, the `BACKLOG`-subtree invariant of
+[Containment](/docs/spec/containment), the cycle rules, the reserved-path rule, or a required message.

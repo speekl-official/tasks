@@ -1,0 +1,199 @@
+---
+title: Several repositories
+description: Where a task lives, the tracker repository that lists the product repositories, and working across trees.
+icon: GitFork
+---
+
+Work that spans repositories needs one place to be planned from, without making any
+product repository pretend to be the lead. The convention's answer is a small **tracker
+repository** whose `.tasks/` lists the product repositories as
+[projects](/docs/reference/projects).
+
+## Where a task lives
+
+**A task lives in the repository whose files it changes.** A change to the backend is a
+task in the backend's tree, reviewed with the backend's code. What belongs in the tracker
+is what has no single home: an epic that spans repositories, coordination work, and
+anything that touches two repositories and cannot be split.
+
+<Files>
+  <Folder name="src" defaultOpen>
+    <Folder name="tracker" defaultOpen>
+      <Folder name=".tasks" defaultOpen>
+        <File name="config.yml" />
+        <Folder name="public-api" defaultOpen>
+          <File name="task.md" />
+          <File name="design.md" />
+          <File name="plan.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <Folder name="backend" defaultOpen>
+      <Folder name=".tasks" defaultOpen>
+        <Folder name="kernel">
+          <Folder name="claims-api" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <Folder name="web" defaultOpen>
+      <Folder name=".tasks" defaultOpen>
+        <Folder name="session-ui" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+```yaml title="tracker/.tasks/config.yml"
+version: 2
+projects:
+  backend: ../backend
+  web: ../web
+```
+
+The product repositories list nothing, so each one stays local: its reviewers see
+exactly that repository's tasks, and its tree works the same whether or not the tracker
+is checked out beside it.
+
+## Setting it up
+
+<Steps>
+
+<Step>
+
+### One tree per repository
+
+```sh
+cd ~/src/backend && tasks init
+cd ~/src/web && tasks init
+mkdir ~/src/tracker && cd ~/src/tracker && git init && tasks init
+```
+
+Then add the `projects:` block above to the tracker's `config.yml`.
+
+</Step>
+
+<Step>
+
+### Create the parts where they live
+
+From the tracker, an alias addresses a listed tree, so the person planning never leaves
+the folder:
+
+```sh
+tasks new backend:kernel/claims-api "Expose the claims API"
+tasks new web:session-ui "Show the active session"
+tasks dep add web:session-ui backend:claims-api
+```
+
+Each write takes that tree's own lock. In the web repository the dependency is stored
+as `../backend:kernel/claims-api`, a path relative to its own root.
+
+</Step>
+
+<Step>
+
+### Join them under the epic
+
+```sh
+tasks new public-api "Launch the public API"
+tasks after add public-api backend:claims-api web:session-ui
+```
+
+The epic's `design.md` and `plan.md` live with it in the tracker. `finishes_after` holds
+it open until its parts are resolved, without making them its children: `cancel` on the
+epic does not reach into the product repositories.
+
+The epic has no children of its own, so the ready rule does not hold it back while its parts
+are open, and `claim --next` would offer it as free work. Assign it to its owner, or create
+it with `--backlog` until the parts are done:
+
+```sh
+tasks assign public-api alice
+```
+
+</Step>
+
+<Step>
+
+### Link back from the parts
+
+A tree that lists no projects cannot discover the tracker on its own —
+`referenced_by` reaches only listed trees. Link to the epic by relative path in each
+part's body, so an agent working inside the product repository finds the context:
+
+```markdown title="backend/.tasks/kernel/claims-api/task.md"
+## Description
+
+Part of the public API launch: see
+[../tracker/.tasks/public-api/](../../../../tracker/.tasks/public-api/) for the design.
+```
+
+</Step>
+
+</Steps>
+
+## Working from the tracker
+
+Overviews span every listed tree, foreign ids qualified by alias:
+
+```sh
+tasks ready             # the tracker's tasks and every listed project's, best first
+tasks ready --local     # the tracker's own
+tasks tree              # the epic, with its finishes_after joins under it
+tasks log --since 1d    # yesterday across all of them
+```
+
+```txt
+TASK                       SITUATION                             LABELS  TITLE
+public-api                 assigned alice                                Launch the public API
+  ↳ after backend:kernel/claims-api (not-done)
+  ↳ after web:session-ui (not-done)
+backend:kernel/claims-api  ready                                         Expose the claims API
+web:session-ui             blocked by backend:kernel/claims-api          Show the active session
+
+3 tasks · projects backend, web
+```
+
+A session rooted in the tracker can claim and work a product task by alias. Its heartbeat
+reaches every listed tree, so its claims there stay live, and `session-check` and
+`session-end` cover them too. `move` and `migrate` run from the tracker rewrite references
+in every listed tree, so that is where to run them.
+
+The agent's harness loads instructions from the working directory only. The tracker's
+own instructions should require reading each product repository's rules before editing
+its files.
+
+## Without a tracker
+
+Two repositories that only occasionally depend on each other need no tracker: list the
+one in the other's `projects:` and address it by alias.
+
+```yaml title="web/.tasks/config.yml"
+version: 2
+projects:
+  backend: ../backend
+```
+
+```sh
+cd ~/src/web
+tasks dep add session-ui backend:claims-api
+```
+
+Listing has a cost: the web repository's overviews now include the backend's tasks
+(`--local` leaves them out). The command line accepts only aliases; a project path such
+as `../backend` is not an alias.
+
+A reference whose tree is **not** listed — the web tree's
+`../backend:kernel/claims-api`, written there by the tracker — is resolved to judge the
+gate and nothing more: from the web repository, the backend is read-only. When the
+backend is not checked out beside it, the reference blocks with `unresolved-project`.
+Point references only at directories that own a `.tasks/`: resolution walks up from the
+path, like discovery does, and could otherwise land on a parent tree.
+
+## Monorepos
+
+Discovery is nearest-wins, so a monorepo can hold one tree at its root, with a group per
+package, or a tree per package, each its own scope. One tree is simpler and sees every
+dependency; a tree per package keeps each package's tasks with its code. With trees per
+package, list the packages from the root tree's `projects:` to get the tracker behaviour
+inside one repository.

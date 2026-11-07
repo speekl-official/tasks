@@ -1,119 +1,176 @@
-import { DEFAULT_STATUSES } from "./config.js";
+import { yamlScalar } from "./frontmatter.js";
+import { AGENT_ACTOR, AGENT_DESCRIPTION } from "./types.js";
 
 /**
- * Body scaffold for a new task: enough structure that an agent knows where to
- * write what, without forcing a rigid form onto freeform notes.
+ * The scaffolds the CLI writes: a new tree's `config.yml`, `README.md` and
+ * `.gitignore`, a new task's body, and the frame of `index.md`. Functions,
+ * not constants, so a caller always gets a fresh string.
  */
-export function taskBodyTemplate(title: string): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Description",
-    "",
-    "",
-    "",
-    "## Acceptance criteria",
-    "",
-    "- [ ] ",
-    "",
-    "## Notes",
-    "",
-  ].join("\n");
+
+export interface ConfigTemplateOptions {
+  /**
+   * The roster under `actors:`, in order: what `init` proposes (the resolved
+   * actor, then `agent`). The generic example when absent.
+   */
+  actors?: Record<string, string | null>;
+  /** Write the roster live, not as a commented example. */
+  live?: boolean;
 }
 
-export function configTemplate(): string {
-  return `# Task manager configuration. All fields are optional.
-# See \`tasks --help\` or .tasks/README.md for the full convention.
+/** The roster `init` proposes: the resolved actor, then `agent`. */
+export function defaultRoster(actor: string): Record<string, string | null> {
+  const roster = Object.create(null) as Record<string, string | null>;
+  roster[actor] = null;
+  roster[AGENT_ACTOR] = AGENT_DESCRIPTION;
+  return roster;
+}
 
-version: 1
+function exampleRoster(): Record<string, string | null> {
+  const roster = Object.create(null) as Record<string, string | null>;
+  roster.alice = "maintainer; approves plans and does releases";
+  roster[AGENT_ACTOR] = AGENT_DESCRIPTION;
+  return roster;
+}
 
-# Default phase scope for \`tasks list\` and \`tasks ready\` (--all overrides).
-# active_phase: my-phase
+/**
+ * Every key commented out, so the defaults apply until someone opts in; the
+ * `actors:` block alone can be written live, which switches the roster on
+ * from the first command. A name is quoted when YAML would read it as
+ * something else (`007`, `true`); the descriptions are the CLI's own words,
+ * safe as they are.
+ */
+export function configTemplate(options: ConfigTemplateOptions = {}): string {
+  const prefix = options.live === true ? "" : "# ";
+  const roster = Object.entries(options.actors ?? exampleRoster())
+    .map(
+      ([actor, description]) =>
+        `${prefix}  ${yamlScalar(actor)}:${description === null ? "" : ` ${description}`}`,
+    )
+    .join("\n");
+  return `# .tasks convention v2. See \`tasks --help\` or .tasks/README.md.
+version: 2
 
-# Ordered status list. Commands bind to roles (below), never to these literals,
-# so renaming them here is safe.
-statuses:
-${DEFAULT_STATUSES.map((s) => `  - ${s}`).join("\n")}
+# Default scope for \`list\`, \`ready\` and \`tree\`: a group or task path.
+# scope: auth-rework
 
-# Roles default to the first / second / last entries of \`statuses\`.
-# roles:
-#   ready: ${DEFAULT_STATUSES[0]}
-#   claimed: ${DEFAULT_STATUSES[1]}
-#   done: ${DEFAULT_STATUSES[2]}
+# Minutes without a heartbeat after which a claim counts as orphaned.
+# session_timeout_minutes: 30
 
-# Explicit transition pairs. Omit to use the default rule: step forward or back
-# by exactly one status. Providing this REPLACES the default rule entirely.
-# transitions:
-#   - [${DEFAULT_STATUSES[0]}, ${DEFAULT_STATUSES[1]}]
-#   - [${DEFAULT_STATUSES[1]}, ${DEFAULT_STATUSES[0]}]
-#   - [${DEFAULT_STATUSES[1]}, ${DEFAULT_STATUSES[2]}]
-#   - [${DEFAULT_STATUSES[2]}, ${DEFAULT_STATUSES[1]}]
+# Days after which a resolved task is expected to be archived: validate reports
+# older ones, and tasks archive --resolved-before without a value uses it.
+# archive_resolved_after_days: 30
+
+# The actors tasks may be assigned to, each with a line on who they are. Once
+# any is listed, assign, handoff, new --assign and --as refuse other names.
+${prefix}actors:
+${roster}
+
+# Sibling trees by alias, as paths relative to this project's root.
+# projects:
+#   backend: ../backend
 `;
 }
 
+/** Locks and session heartbeats are private to one working copy. */
 export function gitignoreTemplate(): string {
-  return `# Transient lock files — never committed.
+  return `# Transient lock and session files; never committed.
 .locks/
 `;
 }
 
-/** Agent-facing convention doc: where a cold agent learns the tool exists. */
+/** Agent-facing description: where a cold agent learns the tool exists. */
 export function readmeTemplate(): string {
   return `# Tasks
 
-This directory is a local, git-versioned task tracker. It is managed by the
-\`tasks\` CLI. Task files are plain markdown and safe to read directly; prefer
-the CLI for any change, because it enforces the rules below.
+This directory is a git-versioned task tree in the \`.tasks\` convention v2,
+managed by the \`tasks\` CLI. Every file is plain markdown and safe to read;
+make changes through the CLI, which enforces the rules below.
 
 ## Layout
 
-\`\`\`
+\`\`\`txt
 .tasks/
-  config.yml      project config (statuses, roles, active_phase)
-  README.md       this file
-  _index.md       generated overview — regenerate with \`tasks reindex\`
-  <phase>/        a phase directory, e.g. auth-rework/ or 2026-q1/
-    <id>.md       one task
-  .archive/       soft-deleted tasks, excluded from all default queries
+  config.yml        version: 2, plus optional scope, session timeout, actors, projects
+  README.md         this file
+  .gitignore        keeps .locks/ out of version control
+  index.md          optional generated overview; refresh with \`tasks reindex\`
+  <group>/          a directory without task.md: organizational only
+    <task>/         a directory with task.md is a task; its id is its path
+      task.md       the definition: frontmatter and body
+      state.md      where the work stands: the resume point
+      design.md     decisions and why
+      plan.md       steps, files, verification
+      log.md        what happened; appended by the CLI
+      <child>/      a child task: a part of the parent's deliverable
+  .archive/         archived tasks, excluded from every query
+  .locks/           transient lock and session files
 \`\`\`
 
 ## For an agent starting work
 
 \`\`\`sh
-tasks ready --json       # what is unblocked right now
-tasks claim <id>         # take it (fails if someone already has it)
-# ...do the work...
-tasks status <id> DONE   # complete it
+tasks mine                                # your claims and your inbox
+tasks resume <task>                       # everything needed to continue one
+tasks ready --json                        # what is free to take, best first
+tasks claim --next --session <token>      # take the first ready task
+tasks state <task> < state.md             # save the resume point
+tasks pause <task> -m "where it stands"   # stop; the resume point stays
+tasks done <task> -m "what was delivered" # finish
 \`\`\`
 
-Every read command accepts \`--json\`. Errors are JSON on stderr under
-\`--json\`, and exit codes are meaningful: 0 success, 2 usage, 3 not found,
-4 state conflict. Branch on the exit code, not on message text.
+Use one session token for every command of a session (\`--session\`, or
+\`TASKS_SESSION\`), and name yourself with \`TASKS_ACTOR\`.
 
 ## Rules the CLI enforces
 
-- **Status transitions.** By default a task moves forward or back exactly one
-  status at a time, so nothing jumps straight to done without being worked.
-- **Dependencies.** \`depends_on\` lists task ids. A task is only "ready" when
-  every dependency is done. Missing, archived, and cyclic dependencies all
-  count as blocking, never as satisfied.
-- **Ids are globally unique** across this directory, including \`.archive/\`.
-- **The directory owns a task's phase**; use \`tasks move\` rather than \`mv\`.
+- **A fixed lifecycle.** \`BACKLOG\`, \`TODO\`, \`IN_PROGRESS\`, \`PAUSED\`, \`DONE\`,
+  \`CANCELLED\`, changed only by transition commands; overviews show a computed
+  situation instead (\`ready\`, \`blocked by X\`, \`waiting for X\`, …).
+- **Gates.** A task is claimed only when every \`depends_on\` task is \`DONE\`, and
+  done only when its children and \`finishes_after\` tasks are resolved; anything
+  missing, archived or unreadable blocks.
+- **Containment.** \`defer\`, \`schedule\` and \`cancel\` reach the whole subtree,
+  and a claimed or assigned task holds everything beneath it.
+- **A resume point.** \`pause\` and \`handoff\` need a \`state.md\`; \`release\` is
+  for a claim that produced none.
+- **Claims.** A claim is protected while its session is live; an orphaned one
+  can be taken over. \`--force\` overrides authorization, holds and the start
+  gate, never the finish gate, and the log records it.
+
+Exit codes: 0 success, 1 internal, 2 usage, 3 not found, 4 conflict. Every
+command accepts \`--json\`; errors then arrive as JSON on stderr. Branch on the
+exit code, never on message text.
 
 ## Frontmatter
 
-The YAML block at the top of each task is machine-owned — the CLI rewrites it
-in canonical form and does not preserve comments there. The markdown body below
-it is yours: edit it freely. If frontmatter is hand-edited into an inconsistent
-state, \`tasks validate\` reports it and \`tasks validate --fix\` repairs the
-mechanically safe parts.
+The YAML block at the top of \`task.md\` is machine-owned: the CLI rewrites it in
+canonical form and does not keep comments there. The markdown body below it is
+yours. \`tasks validate\` reports anything inconsistent.
 `;
 }
 
+/**
+ * Body scaffold for a new task: the definition (Description, Acceptance
+ * criteria) apart from inputs received after the start (Notes).
+ */
+export function taskBodyTemplate(title: string): string {
+  return `# ${title}
+
+## Description
+
+## Acceptance criteria
+
+- [ ]
+
+## Notes
+`;
+}
+
+/** The frame of `index.md` around the rendered tree. */
 export function indexTemplate(sections: string): string {
-  return `<!-- Generated by \`tasks reindex\`. Do not edit by hand. -->
+  return `<!-- Generated by \`tasks reindex\` from the task directories. Do not edit by hand. -->
 
 # Task index
 
-${sections}`;
+${sections.replace(/\n*$/, "\n")}`;
 }

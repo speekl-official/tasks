@@ -1,72 +1,27 @@
 ---
 title: CLI contract
-description: Exit codes, stream discipline, and JSON shapes for implementations that expose a command line.
+description: Streams, exit codes, the error envelope, JSON shapes, and commands, for implementations that expose a command line.
 icon: Terminal
 ---
 
-This page is **conditional**: it applies to an implementation that exposes a command-line
-interface. An implementation that is a library, an editor plugin, or an MCP server MUST
-still satisfy every other page, and MAY ignore this one.
+This section applies to an implementation that exposes a command line. A library, an editor
+plugin or an MCP server MUST satisfy every other section and MAY ignore this one; an
+implementation that exposes a command line and claims conformance MUST satisfy it in full.
 
-An implementation that exposes a command line and claims conformance MUST satisfy this
-page in full. Half-implementing it is worse than not claiming it: the entire value is
-that a caller can branch on the contract without knowing which tool it is talking to.
+## Streams, structured output, exit codes
 
-## Streams
+Unchanged from v1: stdout carries successful output only, stderr errors and diagnostics only;
+every command that produces output MUST accept `--json`, under which success is one JSON document
+on stdout and an error is one JSON document on stderr in the envelope below; without `--json`,
+output is unspecified and MUST NOT be parsed.
 
-| Stream | Content                      |
-| ------ | ---------------------------- |
-| stdout | Successful output only.      |
-| stderr | Errors and diagnostics only. |
-
-The separation MUST be absolute. An implementation MUST NOT write a diagnostic,
-progress indicator, or warning to stdout when structured output was requested, because a
-caller is piping that stream into a parser.
-
-## Structured output
-
-Every command that produces output MUST accept a `--json` flag.
-
-Under `--json`:
-
-- Successful output MUST be a single JSON document on stdout.
-- Errors MUST be a single JSON document on stderr, in the [error envelope](#errors).
-- Nothing else may appear on either stream.
-
-Without `--json`, output is unspecified and intended for humans. Callers MUST NOT parse
-it, and implementations are free to change it at any time.
-
-## Exit codes
-
-| Code | Name      | Meaning                                                                         |
-| ---- | --------- | ------------------------------------------------------------------------------- |
-| `0`  | success   | The operation completed.                                                        |
-| `1`  | internal  | An unexpected failure in the implementation.                                    |
-| `2`  | usage     | Invalid invocation, unknown status, malformed reference, invalid configuration. |
-| `3`  | not found | No `.tasks/` discovered, or no task with the given id.                          |
-| `4`  | conflict  | The tree's state forbids the operation.                                         |
-
-An implementation MUST exit with these codes, and callers MUST branch on them rather than
-on message text.
-
-Requests for help or version information MUST exit `0`.
-
-### Which code applies
-
-**`2` usage** covers anything wrong with the request or with configuration, before the
-tree's state is consulted: an unknown flag, a status name not in `statuses`, a reference
-that does not parse, an absolute path in a reference, an invalid `config.yml`.
-
-**`3` not found** covers a referent that does not exist: no project, no such task id. An
-id that exists only in `.archive/` MUST be reported as not found, and the error SHOULD
-say that it is archived.
-
-**`4` conflict** covers a well-formed request the current state forbids: an illegal
-status transition, a task already claimed, a claim blocked by an unsatisfied dependency,
-a deletion refused because of dependents, initializing over an existing tree, adding a
-dependency that would cycle.
-
-An empty result set is **`0`**. "Nothing is ready" is an answer, not a failure.
+| Code | Name | Meaning |
+| --- | --- | --- |
+| `0` | success | The command completed. An empty result set is success. |
+| `1` | internal | An unexpected failure in the implementation. |
+| `2` | usage | Invalid invocation or configuration: unknown flag, malformed reference, ambiguous suffix, missing required message, invalid `config.yml`, unsupported `version`, a v1 tree for any command but `migrate`, an actor or session that does not match its pattern, an actor the tree's roster does not list. |
+| `3` | not found | No tree discovered, no task at the given path, a path that exists only under `.archive/`, nothing to take for `claim --next`. |
+| `4` | conflict | The tree's state forbids the command: an illegal transition, an authorization failure, an unsatisfied gate, a missing or present `state.md`, a claim that is live or unknown, an archive with dependents, a cycle, a reserved path, a session check that fails. |
 
 ## Errors
 
@@ -74,118 +29,147 @@ An empty result set is **`0`**. "Nothing is ready" is an answer, not a failure.
 {
   "error": {
     "code": "CONFLICT",
-    "message": "Illegal transition PENDING -> DONE. Allowed from PENDING: IN_PROGRESS.",
-    "details": {
-      "id": "wire-refresh",
-      "from": "PENDING",
-      "to": "DONE",
-      "allowed": ["IN_PROGRESS"]
-    }
+    "message": "auth-rework/token-schema is IN_PROGRESS and has no state.md; write it before pausing.",
+    "details": { "id": "auth-rework/token-schema", "kind": "missing-state" }
   }
 }
 ```
 
-`error.code` MUST be one of `USAGE`, `NOT_FOUND`, `CONFLICT`, `INTERNAL`, corresponding
-to exit codes `2`, `3`, `4`, `1`.
+`error.code` is `USAGE`, `NOT_FOUND`, `CONFLICT` or `INTERNAL`. `error.message` MUST NOT be
+parsed. `error.details` is OPTIONAL and SHOULD carry the structured facts:
 
-`error.message` is human-readable and MUST NOT be parsed by callers.
-
-`error.details` is OPTIONAL and carries structured facts about the specific failure.
-When an implementation has a machine-usable fact about a failure, it SHOULD put it here
-rather than only in the message. In particular:
-
-| Failure                  | SHOULD include             |
-| ------------------------ | -------------------------- |
-| Illegal transition       | `from`, `to`, `allowed`    |
-| Unknown status           | `status`, `statuses`       |
-| Already claimed          | `claimed_by`, `claimed_at` |
-| Blocked claim            | `blocked_by`               |
-| Deletion with dependents | `dependents`               |
+| Failure | SHOULD include |
+| --- | --- |
+| Illegal transition | `from`, `to`, `allowed` |
+| Authorization | `claimed_by`, `claimed_session`, `assignee`, `liveness` |
+| Unsatisfied start gate | `blocked_by` with reasons |
+| Unsatisfied finish gate | `open_children`, `finishes_after` with reasons |
+| Cascade over a live or unknown claim | `claims` (id, claimant, session, liveness) |
+| Ancestor in `BACKLOG`, or claimed or assigned | `ancestor` |
+| Missing or present `state.md` | `kind` |
+| Ambiguous suffix | `candidates` |
+| Archive with dependents | `dependents` |
+| An actor the roster does not list | `field`, `value`, `actors`, `file` |
 
 ## Task object
 
-An operation returning a single task MUST emit at least:
+A command returning a single task MUST emit at least:
 
 ```json
 {
-  "id": "wire-refresh",
-  "phase": "auth-rework",
-  "status": "IN_PROGRESS",
-  "depends_on": ["token-schema"],
-  "created": "2026-08-21T09:14:00Z",
-  "updated": "2026-08-22T11:02:41Z",
-  "claimed_by": "agent-7",
-  "claimed_at": "2026-08-22T11:02:41Z",
-  "path": "/abs/path/.tasks/auth-rework/wire-refresh.md"
+  "id": "auth-rework/token-schema",
+  "name": "token-schema",
+  "parent": "auth-rework",
+  "project": null,
+  "title": "Design the token schema",
+  "status": "PAUSED",
+  "priority": "normal",
+  "depends_on": ["auth-rework/audit-claims"],
+  "finishes_after": [],
+  "assignee": "alice",
+  "claimed_by": null,
+  "claimed_at": null,
+  "claimed_session": null,
+  "created": "2026-09-21T09:14:00Z",
+  "updated": "2026-09-21T16:40:12Z",
+  "path": "/abs/path/.tasks/auth-rework/token-schema"
 }
 ```
 
-`path` MUST be absolute. It is what a caller opens to edit the body, so a relative path
-would be ambiguous against the caller's working directory.
+`path` MUST be the absolute path of the task **directory**. `project` is the alias of the tree the
+task belongs to, or `null` for the local tree; ids of foreign tasks in aggregated output MUST be
+qualified as `alias:path`.
 
-An operation MAY add fields describing what it did — for example the prior status of a
-transition, or the prior phase of a move.
+Commands that report state (`show`, `resume`, `ready`, `list`, `tree`, `mine`) MUST add the
+derived conditions: `situation` (the word of the [Situation](/docs/spec/lifecycle#situation) table), `blocked_by` (a
+list of `{ref, reason, status}`), `ready` (for the calling actor), `effective_priority`, `held_by` (the nearest claimed or assigned ancestor, or `null`), `started`, `children`
+(`{open, resolved}`), `active` (an `IN_PROGRESS` descendant exists), `waiting_for`, for
+`IN_PROGRESS` tasks `liveness` and `last_seen`, and `last_entry`: the task's most recent log entry
+in the shape of [log entries](/docs/spec/cli#log-entries) without `task`, or `null`. `mine` MUST render
+`last_entry`: it is where a handoff's note is read. `cancel` adds `dependents`: the open tasks,
+qualified by alias where foreign, whose `depends_on` names a task it cancelled (see
+[Cancellation and deletion interaction](/docs/spec/dependencies#cancellation-and-deletion-interaction)). `show` and `resume` SHOULD add `referenced_by`: the live tasks, in
+the local tree and in the trees reachable through `projects:`, whose `depends_on` or
+`finishes_after` name this task — how a task learns which epic holds it.
 
 ## Collection object
 
-An operation returning multiple tasks MUST emit:
-
 ```json
-{
-  "phase": "auth-rework",
-  "count": 1,
-  "tasks": [{ "id": "wire-refresh", "…": "…" }]
-}
+{ "scope": "auth-rework", "projects": ["backend", "cli"], "count": 2, "tasks": [ … ], "malformed": [], "unavailable": [] }
 ```
 
-`phase` MUST be the resolved query scope, or `null` when the query spanned the whole
-tree. `count` MUST equal `tasks.length`.
+`scope` is the resolved local scope or `null`; `projects` lists the aliases spanned; `count`
+equals `tasks.length`; `malformed` lists `{ "path", "message" }` for every task directory whose
+manifest could not be parsed (see [Structure](/docs/spec/task-file#structure)); `unavailable` lists
+`{ "alias", "reason" }` for every listed project the query could not read — `not-checked-out`,
+`unresolved-project` or `unsupported-version` — so an empty project is told from an unread one.
+`tree` emits this same object: a flat
+list in which every task carries `parent`; nesting is how the human-readable rendering presents
+it, not a property of the JSON.
 
-## Dependency reporting
-
-Where an operation reports dependency state, each entry MUST carry the reference, whether
-it is satisfied, and — when it is not — the reason:
-
-```json
-{
-  "ref": "token-schema",
-  "satisfied": false,
-  "status": "PENDING",
-  "reason": "not-done"
-}
-```
-
-`reason` MUST be one of the values defined in
-[dependency resolution](/docs/spec/dependencies#resolution), and MUST be absent or `null`
-when `satisfied` is true. `status` MAY be `null` when the target could not be read.
-
-## Validation output
-
-An operation reporting validation MUST emit:
+## Log entries
 
 ```json
-{
-  "ok": true,
-  "checked": 17,
-  "fixed": [],
-  "findings": []
-}
+{ "count": 1, "entries": [ { "task": "auth-rework/token-schema", "time": "2026-09-22T08:02:41Z", "actor": "alice", "via": "agent", "session": null, "text": "done: PAUSED → DONE\nAPPLY. Committed as abc123." } ] }
 ```
 
-`ok` MUST be `false` if and only if at least one finding has error severity. Warnings
-alone MUST leave it `true`.
+`log --since` emits entries across the tree(s) in time order, oldest first; `task` is qualified
+with its alias for a foreign tree, `via` and `session` are `null` when the heading has none, and
+`text` is the entry's body below the heading.
 
-Each finding MUST carry `severity` (`error` or `warning`), a stable `kind` identifier,
-and a `message`, and SHOULD carry the `task` and `file` it concerns.
+## Actors object
 
-An implementation MUST exit `4` when validation produced errors, and MUST exit `0` when
-it produced only warnings — so that a build can gate on integrity without failing over a
-stale generated index.
+```json
+{ "actor": "agent", "via": null, "projects": ["backend"], "actors": [ { "actor": "alice", "description": "maintainer; approves plans and does releases", "listed": true, "claimed": 1, "assigned": 2 } ], "unavailable": [] }
+```
 
-## Forward compatibility
+`actor` and `via` are the caller's identity as `init` reports it. `actors` lists the roster in its
+configured order, then by name every other actor an open task of the spanned trees names, and the
+caller; each row carries `description` (the roster's line, or `null`), `listed`, and the open
+tasks the actor is `claimed` on and `assigned` to. `projects` and `unavailable` are as in the
+[collection object](/docs/spec/cli#collection-object).
 
-An implementation MAY add fields to any object defined here. A caller MUST tolerate
-fields it does not recognize.
+## Commands
 
-An implementation MUST NOT remove a defined field, repurpose one, or change an exit code
-within a major version of the convention.
+Command names are not contract — only the JSON shapes and exit codes are — but an implementation
+SHOULD use these names, and MUST provide each behaviour unless marked OPTIONAL. Every command MUST
+accept `--as <actor>` and `--session <token>` as the overrides defined under
+[Sessions and liveness](/docs/spec/sessions), and SHOULD accept `-C <dir>` as the starting
+directory for [discovery](/docs/spec/layout#discovery).
+
+| Command | Behaviour |
+| --- | --- |
+| `init` | Scaffold a tree: `config.yml` with `version: 2`, `README.md`, `.gitignore`. Ask before creating; print the resolved actor; MAY write the roster on request (`--actors`). |
+| `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]` | Create a task; groups on demand; an existing group at the path becomes the task; refuse an existing task, a resolved parent, a reserved path; `--assign` names a listed actor when the tree lists actors. |
+| `show <task>` | The task object with derived conditions and the body. |
+| `resume <task>` | The task object; one line per ancestor (id, title, status, workspace files); children with statuses and conditions; the workspace file list; `state.md` in full; the last log entry. |
+| `ready [--scope <path>] [--all] [--local]` | The ready set for the calling actor in ready order: effective priority, `PAUSED` first, oldest first. |
+| `mine [--as <actor>] [--local]` | Open tasks whose assignee or claimant is the actor, each with its situation, liveness and last log entry. |
+| `actors [--local]` | OPTIONAL, RECOMMENDED: the actors `config.yml` lists, each with its description and its open tasks, then every other actor an open task names, and the caller: the [actors object](/docs/spec/cli#actors-object). |
+| `list [--<situation>]`, `tree` | Overviews by [situation](/docs/spec/lifecycle#situation); `list` filters by situation (`--parked`, `--blocked`, `--waiting`, …); `tree` nests by containment in its human output and renders `finishes_after` entries under their task, tagged with their project; its JSON is the flat [collection object](/docs/spec/cli#collection-object). |
+| `schedule`, `defer`, `claim [--next [--scope <path>]]`, `pause -m`, `release`, `done -m`, `cancel -m`, `reopen -m`, `handoff <actor> -m`, `assign <actor>`, `unassign`, `priority <level>` | The [transitions](/docs/spec/lifecycle#transitions); `--force` as defined under [Force](/docs/spec/lifecycle#force). |
+| `dep add\|rm\|list <task> [<ref>…]` and `after add\|rm\|list <task> [<ref>…]` | Edit and inspect `depends_on` and `finishes_after` with the [mutation constraints](/docs/spec/dependencies#cycles); `<ref>` resolves like `<task>` ([addressing](/docs/spec/identity#command-line-addressing)) and is stored in full. |
+| `move <task\|group> <destination>` | Relocate with reference rewriting in this tree and in listed trees; list the trees it could not write and the references it could not rewrite. |
+| `archive <task> [--force]`, `archive --resolved-before <when> \| --all-resolved`, `restore <path>`, `purge <path>` | Archive a resolved subtree, or every resolved subtree of this tree whose root was resolved before a time (a timestamp, a date or a duration back from now), skipping and naming the roots open tasks reference; restore one to a free path, never under a resolved parent; purge an archive entry (see [`.archive/`](/docs/spec/layout#archive)). |
+| `delete <task>` | OPTIONAL: remove a never-worked task without archiving it, under the conditions in [`.archive/`](/docs/spec/layout#archive). |
+| `log <task> "<text>"`, `log --since <duration\|timestamp> [--local]` | Append a narrative entry; list entries across the tree(s) by time as [log entries](/docs/spec/cli#log-entries). |
+| `state <task> [--edit]` | OPTIONAL, RECOMMENDED: replace `state.md` with standard input, or open it in the caller's editor with `--edit`; no transition, no log entry (see [`state.md`](/docs/spec/workspace#statemd)). |
+| `heartbeat` | Touch the current session's registry file; usage error without a session. |
+| `session-end` | Mark the current session ended, orphaning its claims at once, and report them; usage error without a session (see [Heartbeats](/docs/spec/sessions#heartbeats)). |
+| `session-check [--as <actor>]` | The [exit invariant](/docs/spec/sessions#session-check); exit `4` on violations. |
+| `validate [--fix]` | The [validation](/docs/spec/task-file#validation) findings; `--fix` regenerates `index.md` only. |
+| `reindex` | Regenerate `index.md`. |
+| `migrate [<alias>] [--map OLD=NEW …] [--map-phase OLD=NEW …]` | The one-time [upgrade from v1](/docs/spec/migration) of this tree, or of a listed project. |
+
+## Validation, session-check and session-end output
+
+```json
+{ "ok": false, "checked": 41, "fixed": [], "findings": [ { "severity": "error", "kind": "cycle", "task": "a/b", "message": "…" } ] }
+{ "ok": false, "session": "7f3a", "violations": [ { "id": "auth-rework/token-schema", "kind": "missing-state" } ], "warnings": [] }
+{ "session": "7f3a", "ended": "2026-09-22T08:02:41Z", "claims": ["auth-rework/token-schema"] }
+```
+
+`ok` MUST be `false` if and only if at least one finding or violation has error severity;
+`validate` exits `4` on errors and `0` on warnings alone; `session-check` exits `4` on any
+violation. `session-end` lists the tasks whose claims it orphaned and exits `0` even when there
+are none.

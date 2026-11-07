@@ -29,14 +29,16 @@ Exercise the real bin, not just the sandbox: `node packages/tasks/dist/index.js 
 Agents branch on these, so they are contract, not implementation:
 
 - **Exit codes** (`src/errors.ts`): 0 success, 1 internal, 2 usage, 3 not found, 4 conflict.
-- **`--json` shapes** — every read command accepts `--json`; errors go to stderr as JSON.
-- **`.tasks/` on-disk conventions** — frontmatter fields, directory-as-phase, id/filename mirroring.
+- **`--json` shapes** — every command that produces output accepts `--json`; errors go to stderr
+  as JSON.
+- **`.tasks/` on-disk conventions** — frontmatter fields, directories as tasks, ids as paths,
+  the workspace files.
 
 Changing any of the three is a `major` changeset, never a `patch`.
 
 ## Code conventions
 
-- ESM with `verbatimModuleSyntax`: relative imports carry the `.js` extension (`../core/repo.js`),
+- ESM with `verbatimModuleSyntax`: relative imports carry the `.js` extension (`../core/tree.js`),
   and type-only imports are separate (`import type { Task } from ...`) — eslint enforces both.
 - `no-console` is an eslint error. All output goes through `src/output.ts` (`writeOut`, `writeErr`,
   `emitJson`) so the stdout/stderr split and the `--json` contract stay in one place.
@@ -66,8 +68,10 @@ Never hand-edit `packages/tasks/CHANGELOG.md` or a `version` field — Changeset
   `.claude/skills/tasks/` is an installed copy in this repo. Edit the source. The installed copy
   refreshes via `tasks skill install --force`.
 - **This repo dogfoods its own tracker.** Work is tracked in `.tasks/`. Use the CLI: `tasks ready`,
-  `tasks claim <id>`, `tasks status <id> DONE`. Run `tasks reindex` afterward — `_index.md` is
-  committed and only regenerates on demand.
+  `tasks claim <task>`, `tasks done <task> -m "<note>"`. `index.md` is committed; a mutation
+  regenerates it when it exists and `tasks reindex` creates it. The tree is still a v1 tree until
+  the maintainer runs `tasks migrate` once after the v2 merge; until then the v2 CLI refuses every
+  other command on it.
 - **Commit only when asked.** Otherwise leave the working tree with the changes in it, and never push.
 
 ## Commit messages

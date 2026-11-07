@@ -1,0 +1,28 @@
+# Task manager configuration. All fields are optional.
+# See `tasks --help` or .tasks/README.md for the full convention.
+
+version: 1
+
+# Default phase scope for `tasks list` and `tasks ready` (--all overrides).
+# active_phase: my-phase
+
+# Ordered status list. Commands bind to roles (below), never to these literals,
+# so renaming them here is safe.
+statuses:
+  - PENDING
+  - IN_PROGRESS
+  - DONE
+
+# Roles default to the first / second / last entries of `statuses`.
+# roles:
+#   ready: PENDING
+#   claimed: IN_PROGRESS
+#   done: DONE
+
+# Explicit transition pairs. Omit to use the default rule: step forward or back
+# by exactly one status. Providing this REPLACES the default rule entirely.
+# transitions:
+#   - [PENDING, IN_PROGRESS]
+#   - [IN_PROGRESS, PENDING]
+#   - [IN_PROGRESS, DONE]
+#   - [DONE, IN_PROGRESS]

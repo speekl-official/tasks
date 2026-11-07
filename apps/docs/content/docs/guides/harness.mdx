@@ -1,0 +1,201 @@
+---
+title: Harness hooks
+description: A paste-ready Claude Code hooks block that exports the session, injects your tasks, keeps claims live, and enforces the resume point.
+icon: Plug
+---
+
+<Callout type="info" title="Non-normative">
+  The specification describes [harness integration](/docs/spec/harness) as
+  advice. This page is one concrete way to do it, with Claude Code hooks as the
+  example; any harness with session start, after-tool, end-of-turn and session
+  end events can do the same.
+</Callout>
+
+The [agent protocol](/docs/guides/agent-protocol) becomes automatic when the harness
+enforces it. Four hooks are enough:
+
+| Hook           | Runs                              | So that                                                                 |
+| -------------- | --------------------------------- | ----------------------------------------------------------------------- |
+| `SessionStart` | exports the session, `tasks mine` | every shell command carries the session token, and entry needs no kickoff phrase |
+| `PostToolUse`  | `tasks heartbeat`                 | liveness reflects activity                                              |
+| `Stop`         | `tasks session-check`             | a turn cannot end with a claimed task that has no `state.md`            |
+| `SessionEnd`   | `tasks session-end`               | a session that ends without `pause` hands its claims over at once       |
+
+## The hooks block
+
+`tasks hooks install` writes this block into `.claude/settings.json` at the root of the
+repository, merged with any `hooks` you already have: everything else in the file stays
+as it is. `--actor <name>` puts another actor in all four commands, and `--force` replaces
+the tasks hooks the file already has, which are otherwise kept as they are.
+
+```sh
+tasks hooks install                  # the block below, for the actor agent
+tasks hooks install --actor claude   # the same block for another actor
+tasks hooks install --force          # replace tasks hooks already in the file
+```
+
+When `config.yml` lists [actors](/docs/reference/configuration#actors), the hooks' name
+must be among them: pass `--actor` with a listed one, or add `agent` to the roster.
+
+Or paste it yourself, merged the same way. Either way, commit the file. It needs `tasks`
+on `PATH` and [`jq`](https://jqlang.org) to read the hook input.
+
+```json title=".claude/settings.json"
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sid=$(jq -r .session_id); [ -n \"$CLAUDE_ENV_FILE\" ] && printf 'export TASKS_SESSION=%s\\nexport TASKS_ACTOR=agent\\n' \"$sid\" >> \"$CLAUDE_ENV_FILE\"; mine=$(TASKS_ACTOR=agent tasks mine --json --session \"$sid\" 2>/dev/null) && printf 'Your tasks (tasks mine --json). Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.\\n%s\\n' \"$mine\"; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TASKS_ACTOR=agent tasks heartbeat --session \"$(jq -r .session_id)\" >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "out=$(TASKS_ACTOR=agent tasks session-check --json --session \"$(jq -r .session_id)\" 2>/dev/null); code=$?; if [ \"$code\" -eq 4 ]; then printf 'A claimed task has no state.md. Write its resume point (tasks state <task>), or pause, hand off or finish it, before ending the turn:\\n%s\\n' \"$out\" >&2; exit 2; fi; [ \"$code\" -eq 0 ] && printf '%s' \"$out\" | jq -c 'select(.warnings | length > 0) | {systemMessage: ([.warnings[].message] | join(\"\\n\"))}'; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TASKS_ACTOR=agent tasks session-end --session \"$(jq -r .session_id)\" >/dev/null 2>&1; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The agent's actor is `agent`. `--actor` puts another name in all four commands; when
+pasting, replace it yourself with the name the agent's log entries should carry.
+
+## What each hook does
+
+Claude Code puts no session id in the environment by itself. Every hook receives it as
+the `session_id` field of the JSON on its standard input, which is where each command
+reads it with `jq -r .session_id`.
+
+### `SessionStart`
+
+Runs when a session starts, resumes, is cleared or compacted. It appends two lines to the
+file named by `CLAUDE_ENV_FILE`, which Claude Code sources before every later shell
+command of the session:
+
+```sh
+export TASKS_SESSION=00893aaf-19fa-41d2-8238-13269b9b3ca0
+export TASKS_ACTOR=agent
+```
+
+So the agent passes no `--session`: every `tasks` command it runs carries the token.
+Then it prints `tasks mine --json`, and a SessionStart hook's standard output becomes
+context the agent sees before the first prompt: the tasks claimed by this actor, with the
+instruction to resume them, and the tasks merely assigned to it as its inbox. Without a
+`.tasks/` tree it prints nothing.
+
+Whether a resumed session keeps its id does not matter: the hook runs on resume too and
+exports what it is given, and a later line in the file overrides an earlier one.
+
+### `PostToolUse`
+
+Runs `tasks heartbeat --session <id>` after every tool call, in this tree and every
+listed project, so a claim stays live while the session works. It fires only when a tool
+returns, so a ten-minute test run produces no heartbeat while it runs — which is why
+`session_timeout_minutes` must stay well above the longest tool call, and the default of
+30 is not to be lowered.
+
+### `Stop`
+
+Runs at the end of every turn. `tasks session-check --json` exits `4` when a task claimed
+by this session has no `state.md`; the hook then exits `2`, and Claude Code hands its
+standard error — the instruction and the violations — back to the agent as the reason it
+cannot stop yet:
+
+```txt
+A claimed task has no state.md. Write its resume point (tasks state <task>), or pause, hand off or finish it, before ending the turn:
+{
+  "ok": false,
+  "session": "00893aaf-19fa-41d2-8238-13269b9b3ca0",
+  "violations": [{ "id": "api/rate-limit", "kind": "missing-state" }],
+  "warnings": []
+}
+```
+
+Warnings — a `state.md` older than the claim or the last log entry — are shown to the
+person as a `systemMessage`, not enforced, so a turn without progress is not forced to
+touch the file. Any other exit code of `tasks` (no tree, no `tasks` on `PATH`) lets the
+turn end. Claude Code stops honouring a Stop hook's block after eight consecutive
+continuations, which bounds a loop the agent cannot resolve.
+
+### `SessionEnd`
+
+Runs `tasks session-end --session <id>` when the session ends — the person quit, ran
+`/clear`, the harness exited after an error. The session's claims are orphaned at once,
+and the actor's next session takes them over with an ordinary `claim`. SessionEnd hooks
+get 1.5 seconds by default; the block gives this one a `timeout` of 10 seconds, which
+raises the budget. The session timeout then matters only for a hard kill that gives the
+hook no chance to run.
+
+## The crash case
+
+A session that dies mid-turn is covered by the combination: the `Stop` hook guaranteed a
+`state.md` existed at the end of the previous turn, the freshness rule kept it current,
+`SessionEnd` orphans the claim at once when the harness gets to run it and the timeout
+does when it does not, and the next session takes over from the resume point.
+
+## Adjusting it
+
+`tasks hooks install` knows an edited hook by the `tasks` subcommand it runs, and keeps it
+unless `--force`.
+
+- **No global install.** Replace `tasks` with the path of a local install, for instance
+  `./node_modules/.bin/tasks`. `npx @speekl/tasks` works but starts slowly, which matters
+  inside the SessionEnd budget.
+- **No `jq`.** Any JSON reader works; with Node, which `tasks` needs anyway:
+  `node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).session_id'`.
+- **The actor in hooks.** Hooks do not read `CLAUDE_ENV_FILE`, so each command sets
+  `TASKS_ACTOR` itself: `mine` answers for that actor, and the other three act on the
+  session alone.
+- **Compaction.** A `PreCompact` hook may warn, but no hook can write the content of a
+  resume point; that stays the agent's job under the freshness rule.
+- **Sibling repositories.** A session rooted in a [tracker repository](/docs/guides/projects)
+  edits files in the product repositories it lists. Claude Code loads instructions from
+  the working directory only, so the tracker's own instructions should require reading
+  each repository's rules before editing its files.
+
+## Checking it
+
+Feed a hook its input by hand from the repository root:
+
+```sh
+echo '{"session_id":"test-1","hook_event_name":"Stop"}' \
+  | sh -c "$(jq -r '[.hooks.Stop[].hooks[].command | select(test("tasks session-check"))][0]' .claude/settings.json)"
+echo "exit $?"
+```
+
+The `select` picks the tasks hook wherever it sits in `Stop`: `tasks hooks install` appends it
+after the entries already there.
+
+Exit `0` means no task claimed by session `test-1` lacks a resume point; claim one with
+`--session test-1` and the same command exits `2` with the violation on stderr.

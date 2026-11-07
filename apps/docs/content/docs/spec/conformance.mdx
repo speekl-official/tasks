@@ -1,171 +1,74 @@
 ---
 title: Conformance
-description: The roles an implementation can claim, what each requires, and how to state it.
+description: The Reader, Writer, Manager, and Agent roles, what each requires, and what an implementation tests.
 icon: BadgeCheck
 ---
 
-An implementation claims conformance in one of three **roles**. Each is cumulative: a
-Writer is also a Reader, and a Manager is also a Writer.
-
-<Cards>
-  <Card
-    title="Reader"
-    description="Parses a tree and answers questions about it. Never writes. The bar for a status line, a dashboard, or a CI check."
-  />
-  <Card
-    title="Writer"
-    description="Creates and modifies tasks while preserving every invariant. The bar for an agent that manages its own work."
-  />
-  <Card
-    title="Manager"
-    description="Writer, plus the full lifecycle: claims, validation, repair, archival. The bar for a tool other tools defer to."
-  />
-</Cards>
-
-An implementation SHOULD state its role and the convention version it targets, for
-example: _"conforms to `.tasks` v1 (Writer)"_.
+Roles are cumulative: a Writer is also a Reader, a Manager is also a Writer. **Agent** is
+orthogonal: it describes an actor's behaviour and presumes a Manager to act through.
 
 ## Reader
 
-A Reader MUST:
-
-- Discover the project by walking upward for `.tasks/`, nearest wins, no merging.
-- Enumerate live tasks as `<phase>/<id>.md`, exactly one directory deep, ignoring
-  `.archive/`, `.locks/`, non-`.md` files, and files at the root of `.tasks/`.
-- Parse frontmatter without coercing timestamp-shaped scalars into dates.
-- Tolerate unrecognized frontmatter keys.
-- Derive a live task's phase from its containing directory, and an archived task's from
-  its frontmatter.
-- Load `config.yml` when present, apply every default when absent, and reject unknown
-  top-level keys.
-- Resolve roles through configuration rather than assuming any status name.
-- Resolve dependencies per [dependency resolution](/docs/spec/dependencies), including
-  judging an external reference against **that** project's `done` role.
-- Treat every unsatisfied or unresolvable state as blocking.
-- Compute readiness from current state, never from a stored field.
-- Report a malformed task file rather than skipping it silently.
-- Refuse to operate on a tree whose `version` it does not support.
-
-A Reader MUST NOT:
-
-- Read `_index.md` to answer any query.
-- Treat an archived task as satisfying a dependency.
-- Write anything, including lock files.
+A Reader MUST: discover the tree nearest-wins; enumerate tasks as directories containing
+`task.md` at any depth under matching segments, ignoring dot-directories; derive parenthood from
+the nearest task ancestor; parse frontmatter without date coercion and tolerate unknown keys;
+resolve gates per [Dependencies and gates](/docs/spec/dependencies), treating every unsatisfied
+or unresolvable state as blocking; compute derived conditions from current state only; report a
+malformed manifest rather than skip it, completing the query with that task blocking what
+references it; refuse an unsupported `version` and a v1 tree; read
+`projects:` without following them transitively and qualify foreign ids. A Reader MUST NOT read
+`index.md` to answer any query, treat an archived or cancelled task as satisfying a start gate,
+or write anything.
 
 ## Writer
 
-A Writer MUST additionally:
-
-- Write every file atomically, via a temporary file and a rename.
-- Emit frontmatter in [canonical form](/docs/spec/task-file#serialization).
-- Set `created` once, and `updated` on every mutation.
-- Enforce id uniqueness across live **and** archived tasks.
-- Keep the filename `<id>.md` in step with the `id` field.
-- Create a phase directory on demand when placing a task into it.
-- Validate a status transition against the configured rules before applying it.
-- Set and clear `claimed_by` and `claimed_at` together, and clear both whenever a task
-  leaves the `claimed` role.
-- Perform a phase change as write-destination-then-remove-source.
-- Refuse a dependency that is a self-reference, points at a nonexistent local task, or
-  would create a local cycle.
-- Leave the task body untouched apart from surrounding whitespace normalization.
-
-A Writer MUST NOT:
-
-- Modify anything in an external project reached by a dependency reference.
-- Repair drift automatically as a side effect of an unrelated operation.
-- Persist derived state — readiness, blocked-ness, counts — into a task file.
+A Writer MUST additionally: write atomically and canonically, preserving unknown frontmatter
+keys; set `created` once and `updated` on every mutation; keep claim fields consistent with
+status; enforce every transition precondition,
+including messages, the `state.md` rules and the cascades of [Containment](/docs/spec/containment) with
+their order and logging; refuse creation under a resolved parent; refuse an actor named for
+someone else that the roster lacks ([Actors](/docs/spec/sessions#actors)); refuse the
+dependency edits listed under [Cycles](/docs/spec/dependencies#cycles); relocate with reference rewriting in this tree and in the trees it lists; append a log
+entry for every transition in the defined heading shape; write only under the tree lock; write
+into another tree only when it is listed in `projects:`. A Writer MUST NOT rewrite the body,
+`design.md` or `plan.md`; write `state.md` other than through the explicit `state` command;
+persist derived conditions; or repair drift as a side effect.
 
 ## Manager
 
-A Manager MUST additionally:
-
-- Serialize state-dependent mutation under an exclusive per-task lock in `.locks/`,
-  re-reading the task inside the lock before deciding, with a documented staleness
-  threshold.
-- Implement claiming as a single operation that checks the transition, checks
-  dependencies, and records identity and time together.
-- Provide claiming from any status that can legally reach the `claimed` role — not only
-  from `ready` — so that completed work can be reopened.
-- Detect at least the conditions listed under
-  [validation](/docs/spec/task-file#validation), at the severities given there.
-- Confine automatic repair to filename mismatch, phase drift, and regenerating
-  `_index.md`.
-- Archive by default when deleting, preserving the originating phase in frontmatter, and
-  refuse by default to delete a task that live tasks depend on.
-
-A Manager that exposes a command line MUST also satisfy the
+A Manager MUST additionally: implement claiming with authorization, including ancestors'
+assignees, the start gate, session recording, the liveness rules and the cascade liveness rule;
+implement `handoff`, `session-check`, `heartbeat` and `session-end`; detect at
+least the [validation](/docs/spec/task-file#validation) findings at the given severities and confine repair to
+`index.md`; archive subtrees with path reservation, merge and dependent checks, and purge them;
+migrate v1 trees. A Manager that exposes a command line MUST satisfy the
 [CLI contract](/docs/spec/cli) in full.
 
-## Deliberate non-requirements
+## Agent
 
-An implementation is free to differ on all of the following, and doing so does not affect
-conformance:
-
-| Area                     | Notes                                                                                                     |
-| ------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Human-readable output    | Entirely unspecified. Tables, colors, and layout are yours.                                               |
-| Command names and flags  | Only the JSON shapes and exit codes are contract, not the surface that produces them.                     |
-| `_index.md` content      | Whether to generate it at all, and in what form.                                                          |
-| Body scaffolding         | The headings a new task starts with.                                                                      |
-| Identity resolution      | How `claimed_by` is determined when not supplied.                                                         |
-| Lock staleness threshold | Must exist and be documented; the value is yours.                                                         |
-| Storage of derived views | Caches are fine, provided the files remain authoritative and a cache is never consulted in place of them. |
+An Agent MUST follow the [agent protocol](/docs/spec/agent-protocol): a session token on every command;
+entry through `mine` and `resume` with the reading order; claim before work; the freshness rule,
+with `state.md` written through `state` where offered; `--as` only on instruction; exit through
+`pause`, `handoff` or `done` with a message; no frontmatter edits and no manual moves; project
+state only in the tree.
 
 ## Self-checking
 
-An implementation can verify most of its conformance against a tree it did not write.
-The properties worth testing directly:
-
-<Steps>
-
-<Step>
-
-### Round-trip stability
-
-Read a tree, write every task back unchanged, and diff. A conforming implementation
-produces no changes on the second pass — the first pass may canonicalize.
-
-</Step>
-
-<Step>
-
-### Cross-implementation agreement
-
-Have two implementations answer "what is ready" on the same tree. They MUST agree
-exactly. Disagreement means one of them has a role, resolution, or transition bug.
-
-</Step>
-
-<Step>
-
-### Fail-safe under damage
-
-Point a dependency at a nonexistent id, an archived id, and an unreachable project. In
-all three cases the dependent task MUST be absent from the ready set, and no operation
-may crash.
-
-</Step>
-
-<Step>
-
-### Concurrency
-
-Claim the same task from two processes simultaneously, repeatedly. Exactly one MUST
-succeed each time, and the loser MUST report a conflict rather than a crash or a silent
-overwrite.
-
-</Step>
-
-</Steps>
-
-## Reference implementation
-
-[`@speekl/tasks`](/docs/reference/commands) conforms as a **Manager**, including the CLI
-contract. Its test suite exercises the properties above and is a reasonable starting
-point for anyone building a second implementation.
-
-Where this specification and the reference implementation disagree, that is a defect in
-one of them — please
-[open an issue](https://github.com/speekl-official/tasks/issues) rather than encoding the
-discrepancy.
+Beyond v1's round-trip stability, cross-implementation agreement on the ready set and on
+situations, fail-safe under damaged references and concurrent-claim exclusivity, a v2
+implementation SHOULD test: that `done` on a parent with an open child is refused and succeeds
+once the child is resolved; that `cancel` on a parent cancels its open children, `defer` parks
+them, `schedule` brings them back to `PAUSED` where a `state.md` exists, a cascade over a live
+claim is refused and one over an orphaned claim supersedes it; that a `pause` without `state.md`
+and a `release` with one are refused; that a takeover succeeds
+only on an orphaned claim and the superseded session's next transition conflicts; that
+`session-check` passes for a claim taken from `PAUSED` without a new write and fails for one taken
+from `TODO`; that `session-end` makes a fresh claim orphaned and a takeover of it succeeds at
+once; that a parent with an open child and a child of a `BACKLOG` epic are both absent from
+`ready`; that a child of a claimed or assigned ancestor is absent from `ready` and its `claim` is refused;
+that `claim --next` under contention hands every agent a different task; that a `state` write by a
+superseded session is refused; that a heartbeat written in a
+listing tree keeps a claim in a listed tree live; that `cancel` lists the dependents it stranded;
+that an unknown frontmatter key survives a round trip; and that a move rewrites
+every reference in the local tree and in listed trees and reports the ones in trees it cannot
+write.

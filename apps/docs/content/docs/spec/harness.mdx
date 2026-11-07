@@ -1,0 +1,42 @@
+---
+title: Harness integration (non-normative)
+description: How harness hooks make the agent protocol automatic, including when a session crashes.
+icon: Plug
+---
+
+The protocol above becomes automatic when the agent's harness enforces it. With Claude Code hooks
+as the example:
+
+- **Environment.** Export `TASKS_ACTOR` for the agent (`agent`, the conventional name). Claude Code puts no
+  session id in the environment by itself; every hook receives it as the `session_id` field of its
+  JSON input, and the `SessionStart` hook writes `export TASKS_SESSION=<id>` (and `TASKS_ACTOR`) to
+  the file named by `CLAUDE_ENV_FILE`, which Claude Code sources for every later shell command of
+  the session. The agent therefore passes no `--session`; the hooks that run `heartbeat`,
+  `session-check` and `session-end` pass `--session <id>` from their own input. Whether a resumed
+  session keeps its id does not matter: `SessionStart` runs on resume too and exports what it is
+  given.
+- **SessionStart** runs `tasks mine --json` and injects the tasks claimed by this actor with the
+  instruction to `resume` them, and the tasks merely assigned to it as its inbox. Entry needs no
+  kickoff phrase.
+- **PostToolUse** runs `tasks heartbeat --session <id>`, so liveness reflects activity. It fires
+  only when a tool returns, so a long-running command — a ten-minute test run — produces no
+  heartbeat while it runs; this is why `session_timeout_minutes` must stay well above the longest
+  tool call and the default of 30 is not to be lowered.
+- **SessionEnd** runs `tasks session-end --session <id>`, so a session that ends without a
+  `pause` — the person quit, the harness exited after an error — hands its claims to the actor's
+  next session at once; the timeout then matters only for a hard kill that gives the hook no
+  chance to run.
+- **Stop** fires at the end of every turn and runs `tasks session-check --json`; on exit `4` it
+  blocks the stop (exit `2`, or a JSON `decision: block` whose `reason` carries the violations):
+  a turn cannot end with a claimed task that has no resume point. Warnings about an ageing
+  `state.md` are shown, not enforced, so turns without progress are not forced to touch the file.
+- **PreCompact** may warn; a hook cannot write the content of a state.
+- **Sibling repositories.** A session rooted in a tracker repository edits files in the product
+  repositories it lists; the tracker's own instructions should require reading each repository's
+  rules before editing its files, since a harness loads instructions from the working directory
+  only.
+
+The crash case — a session that dies mid-turn — is covered by the combination: the `Stop` hook
+guarantees a `state.md` existed at the end of the previous turn, the freshness rule keeps it
+current, `SessionEnd` orphans the claim at once when the harness gets to run it and the timeout
+does when it does not, and the orphaned-claim rule lets the next session take over.

@@ -78,12 +78,42 @@ export function Ok({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The fixed lifecycle, as files and `tasks show` spell it. `PAUSED` shares
+ * the in-progress colour: it is started work, whether or not anyone is on it.
+ */
 const STATUS_CLASS = {
-  PENDING: "status-pending",
+  BACKLOG: "status-pending",
+  TODO: "status-pending",
   IN_PROGRESS: "status-progress",
+  PAUSED: "status-progress",
   DONE: "status-done",
+  CANCELLED: "status-pending",
 } as const;
 
 export function Status({ value }: { value: keyof typeof STATUS_CLASS }) {
   return <span className={STATUS_CLASS[value]}>{value}</span>;
+}
+
+/** Overviews speak in situations, coloured the way the CLI colours them. */
+const SITUATION_CLASS = {
+  ready: "text-term-cyan",
+  working: "status-progress",
+  blocked: "text-red-400",
+  done: "status-done",
+  cancelled: "text-term-dim",
+} as const;
+
+/**
+ * The situation word an overview prints. `children` carries the full text
+ * when the word takes an object, as in `blocked by auth-rework/token-schema`.
+ */
+export function Situation({
+  value,
+  children,
+}: {
+  value: keyof typeof SITUATION_CLASS;
+  children?: ReactNode;
+}) {
+  return <span className={SITUATION_CLASS[value]}>{children ?? value}</span>;
 }

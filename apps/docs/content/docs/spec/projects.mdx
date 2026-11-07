@@ -1,0 +1,55 @@
+---
+title: Projects
+description: Trees in other repositories — aliases, aggregation, and writes across trees.
+icon: Boxes
+---
+
+A tree MAY declare the other trees it works with:
+
+```yaml
+projects:
+  backend: ../backend
+  cli: ../arkveil-cli
+  sdk: ../arkveil-js
+```
+
+- Keys are **aliases** and MUST match the segment pattern. Values are paths relative to the
+  project root; absolute paths MUST be rejected.
+- On the command line, `alias:path` addresses a task in that project. In files, references MUST be
+  stored with the configured relative path (see [Reference grammar](/docs/spec/identity#reference-grammar)).
+- **Writes.** A tree MAY write into a project it lists — transitions, dependency edits, workspace
+  files — addressing the task by alias. Every such write takes **that** tree's lock. A `move` or a
+  `migrate` run from this tree also rewrites references in every tree it lists, one tree at a time
+  under each tree's lock (see [Relocation](/docs/spec/identity#relocation-and-renaming)). A tree that is reached by a
+  bare relative path without being listed is read-only, as in v1.
+- **Aggregation.** When `projects:` is non-empty, overview queries (`ready`, `mine`, `list`,
+  `tree`, and log queries by time) MUST span the local tree and every listed project by default,
+  MUST qualify every foreign id with its alias, and MUST offer a way to restrict to the local
+  tree. A `scope` applies to the local tree only.
+- **Not checked out.** A listed project whose directory is absent on this machine is a validation
+  warning; references into it are unsatisfied with reason `not-checked-out`.
+- Any tree MAY list projects; a product repository that lists nothing stays local, so a reviewer
+  of that repository sees only its own tasks.
+- **Not transitive.** The `projects:` of a listed tree extend nothing here: they are read only to
+  resolve that tree's own references. An alias whose path resolves to the local tree MUST be
+  rejected as a usage error.
+- **Foreign versions.** A listed tree that is v1, or whose `version` is unsupported, is a
+  validation warning; references into it are unsatisfied with reason `unsupported-version`.
+  `migrate <alias>` upgrades a listed v1 tree from here.
+- **Foreign configuration.** The liveness of a claim is judged by the `session_timeout_minutes`
+  and the session registry of the tree that holds the task — which is why a session's commands
+  touch the registries of every listed tree (see [Heartbeats](/docs/spec/sessions#heartbeats)) — and a task is
+  addressed, scoped and validated by its own tree's configuration.
+
+<Callout type="info" title="Non-normative — where a task lives">
+  A task lives in the repository whose files it changes.
+  An epic that spans repositories, coordination work, and anything that touches two repositories
+  and cannot be split live in a dedicated **tracker repository** whose `.tasks/` lists the product
+  repositories as projects; the maintainer works from its folder. The epic holds on its
+  cross-repository parts through `finishes_after`, and its `design.md` lives with it; it is assigned
+  to its owner, so the ready set does not offer it while its parts are open; tasks in the
+  product repositories link to it by relative path in their body, because a tree that lists no
+  projects cannot discover the tracker on its own (`referenced_by` reaches only listed trees). No
+  product repository has to pretend to be the lead, and each repository's reviewer sees exactly
+  that repository's tasks.
+</Callout>

@@ -1,0 +1,212 @@
+---
+title: Migrating from v1
+description: Upgrade a v1 tree once with tasks migrate — what it changes, what it refuses, the two consequences, and what to commit.
+icon: ArrowUpFromLine
+---
+
+<Callout type="info" title="The normative version">
+  [Specification › migration from v1](/docs/spec/migration) defines the upgrade
+  and summarizes [what changed](/docs/spec/migration#changes-from-v1). This page
+  is the walkthrough.
+</Callout>
+
+A v1 tree — one whose `config.yml` is missing, has no `version`, or says `version: 1` —
+is refused by every v2 command except one:
+
+```txt
+✗ /Users/you/acme-api/.tasks is a .tasks v1 tree. Run `tasks migrate` once to upgrade it to v2; every other command refuses a v1 tree.
+```
+
+`tasks migrate` upgrades it in place, once. There is no way back except git, which is
+the point: run it on a clean working tree and review the result as a diff.
+
+## Before you start
+
+- Commit or stash everything else, so the migration is one reviewable change.
+- Run it in the checkout and on the branch where task state lives — the integration
+  branch — with no other session working the tree.
+- Install the v2 CLI. The v1 CLI cannot read the result.
+
+## Run it
+
+```sh
+tasks migrate
+```
+
+```txt
+✓ Migrated /Users/you/acme-api/.tasks to .tasks v2: 3 tasks
+  phases      auth, release_1.2 → release-1-2
+  statuses    PENDING → TODO, IN_PROGRESS → IN_PROGRESS, REVIEW → PAUSED, DONE → DONE
+  scope       auth
+  references  2 rewritten, 0 kept as written
+  README.md   none
+  index.md    generated
+! IN_PROGRESS with claimed_session: null, so the liveness of each claim is unknown and a claimant that runs with a session token recovers it only with --force: auth/token-schema
+! PAUSED without a state.md, which validation reports until one is written (`tasks state <task>`): auth/wire-refresh
+```
+
+Run it from the repository root, or with `-C <dir>`. It works under the tree's lock,
+reads and checks everything first, and writes nothing until every check has passed. A
+second run is refused: the tree is already v2. `--json` prints the same result as one
+document — see [the JSON contract](/docs/reference/json-contract#migrate).
+
+## What it changes
+
+<Files>
+  <Folder name="before: v1" defaultOpen>
+    <File name="config.yml" />
+    <File name="_index.md" />
+    <Folder name="auth-rework" defaultOpen>
+      <File name="token-schema.md" />
+      <File name="wire-refresh.md" />
+    </Folder>
+    <Folder name=".archive" defaultOpen>
+      <File name="old-login.md" />
+    </Folder>
+  </Folder>
+  <Folder name="after: v2" defaultOpen>
+    <File name="config.yml" />
+    <File name="index.md" />
+    <Folder name="auth-rework" defaultOpen>
+      <Folder name="token-schema" defaultOpen>
+        <File name="task.md" />
+      </Folder>
+      <Folder name="wire-refresh" defaultOpen>
+        <File name="task.md" />
+      </Folder>
+    </Folder>
+    <Folder name=".archive" defaultOpen>
+      <Folder name="auth-rework" defaultOpen>
+        <Folder name="old-login">
+          <File name="task.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+1. **Phases become groups.** Every phase name is checked against the v2 segment pattern,
+   `^[a-z0-9][a-z0-9-]*$`; v1 also allowed `.` and `_`.
+2. **Files become directories.** Each `<phase>/<id>.md` moves to `<phase>/<id>/task.md`;
+   each `.archive/<id>.md` to `.archive/<phase>/<id>/task.md`, using its `phase` field.
+3. **Fields.** `id` and `phase` are dropped — identity is the path now — and
+   `priority: normal`, `finishes_after: []`, `assignee: null` and
+   `claimed_session: null` are added. The body is kept as it is.
+4. **Statuses** are mapped through the v1 roles: the `ready` role's status becomes
+   `TODO`, the `claimed` role's `IN_PROGRESS`, the `done` role's `DONE`. With v1's
+   defaults that is `PENDING` → `TODO`, `IN_PROGRESS` → `IN_PROGRESS`, `DONE` → `DONE`.
+5. **References.** Every `depends_on` bare id becomes its path, `<phase>/<id>`. An
+   external reference is rewritten when its tree is reachable and holds the id, and is
+   otherwise kept as it was and listed.
+6. **`config.yml`** becomes `version: 2`; `active_phase` becomes `scope`; `statuses`,
+   `roles` and `transitions` are removed — the lifecycle is fixed.
+7. **The index.** v1's `_index.md` is removed and `index.md` is generated.
+
+```diff title=".tasks/auth-rework/wire-refresh.md → .tasks/auth-rework/wire-refresh/task.md"
+ ---
+-id: wire-refresh
+-phase: auth-rework
+-status: PENDING
+-depends_on: [token-schema]
++status: TODO
++priority: normal
++depends_on: [auth-rework/token-schema]
++finishes_after: []
++assignee: null
++claimed_by: null
++claimed_at: null
++claimed_session: null
+ created: "2026-08-21T09:14:00Z"
+ updated: "2026-08-21T09:14:00Z"
+-claimed_by: null
+-claimed_at: null
+ ---
+```
+
+`.tasks/README.md` is replaced with the v2 scaffold when it is exactly v1's scaffold; an
+edited one is kept — it still describes v1 — and the migration says so. Nothing is
+appended to any log: a v1 task's history is the `## Notes` of its body, which travels
+with it unchanged.
+
+## What it refuses
+
+Nothing is written while a problem remains. The refusal is one usage error (exit `2`)
+that lists every problem at once, each with a `kind` in `details.problems`, so one run
+tells you everything to fix:
+
+```txt
+✗ Cannot migrate /Users/you/acme-api/.tasks to .tasks v2; nothing was written. Fix these first:
+  - phase "release_1.2" is not a v2 directory name (^[a-z0-9][a-z0-9-]*$); v1 allowed . and _ in a phase name, v2 does not: rename it with --map-phase release_1.2=<name>
+  - status "REVIEW" of .tasks/auth/wire-refresh.md is outside the roles mapping (ready PENDING → TODO, claimed IN_PROGRESS → IN_PROGRESS, done DONE → DONE): map it with --map REVIEW=<status>, one of BACKLOG, TODO, IN_PROGRESS, PAUSED, DONE, CANCELLED
+  - .tasks/auth/token-schema.md: claimed_by "build bot" does not match the actor pattern ^[A-Za-z0-9][A-Za-z0-9._@+-]*$; correct it in the v1 file
+```
+
+| `kind`            | Problem                                                                 | Fix                                                                   |
+| ----------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `unmapped-phase`  | A phase name with `.` or `_`, or otherwise not a v2 segment             | `--map-phase OLD=NEW`, once per phase: `--map-phase release_1.2=release-1-2` |
+| `unmapped-status` | A status outside the v1 roles, or one status carrying two roles         | `--map OLD=NEW` to one of the six v2 statuses: `--map REVIEW=PAUSED`   |
+| `unknown-mapping` | A `--map` or `--map-phase` naming a status or phase the tree does not have | Drop it, or fix the spelling                                       |
+| `invalid-value`   | A value v2 cannot hold: a `claimed_by` with a space, a timestamp that is not ISO 8601, an id that is not a v2 segment, a v2 key in a v1 file | Correct it in the v1 file — `"build bot"` → `build-bot` — then run again |
+| `claim-fields`    | A task mapped to `IN_PROGRESS` nobody claimed, or claim fields on a task mapped to anything else | Map its status elsewhere, or fix the claim fields in the v1 file |
+| `malformed`       | A v1 file that does not parse, or a phase directory that is a symbolic link | Repair it by hand; nothing is migrated around a broken file      |
+| `duplicate-id`    | Two live, or two archived, v1 tasks with one id                         | Keep one                                                              |
+| `collision`       | Two phases mapped to one name, a destination that already exists, an archived task landing on a live task's path, an existing `index.md` | Rename one side first; merging phases is `tasks move`'s job afterwards |
+
+```sh
+tasks migrate --map REVIEW=PAUSED --map BLOCKED=TODO --map-phase release_1.2=release-1-2
+```
+
+A custom status usually maps to `PAUSED` (started, waiting) or `TODO` (not started).
+What a status like `BLOCKED` meant is now computed from `depends_on`, so it maps to the
+status the task is otherwise in. `--map` can also override what a role's status maps to,
+and `--map-phase` can rename a phase whose name is already valid.
+
+## The two consequences
+
+The migration prints these, as `!` lines naming the tasks, when they apply — together
+with the references it kept as written, an edited `README.md` it kept, and an
+`active_phase` that named no phase and so became no scope:
+
+- **A task migrated to `IN_PROGRESS` carries `claimed_session: null`.** Its liveness is
+  _unknown_, so it cannot be taken over. Its claimant can still `pause` it after writing a
+  `state.md` — or `release` it if nothing was done — and an agent running with a session
+  recovers it only with `tasks claim <task> --force`, on a person's say-so.
+- **A task mapped to `PAUSED` has no `state.md`.** `validate` reports it
+  (`paused-without-state`) until one is written with `tasks state <task>`.
+
+## References from other trees
+
+Other trees that depended on this one still carry bare ids, `../acme-api:token-schema`.
+The migration rewrites them — to `../acme-api:auth-rework/token-schema` — in the tree the
+command runs in and in every tree that tree lists under `projects:`, one tree at a time
+under each tree's lock. References it finds in trees it can read but not write are
+listed; they resolve as `missing` until someone edits them.
+
+## Migrating a listed project
+
+From a v2 tree that lists a v1 project — a tracker that lists a product repository not
+yet upgraded — migrate it by alias:
+
+```sh
+tasks migrate backend
+```
+
+The listed tree is upgraded under its own lock, and the tracker's references into it —
+`../backend:claims-api` — become paths, `../backend:kernel/claims-api`, in the same run.
+Until then, overviews leave the project out with a line saying so, and references into
+it block with `unsupported-version`.
+
+## What to commit
+
+```sh
+tasks validate                      # clean except the predicted warnings
+tasks skill install --force         # the v1 skill describes v1 commands
+git add -A .tasks .claude/skills/tasks
+git commit -m "Migrate .tasks to v2"
+```
+
+The commit holds the renames, the rewritten manifests and `config.yml`, the removed
+`_index.md` and the new `index.md`. Refresh the installed skill in the same commit: an
+agent that reads the v1 skill would reach for `tasks status`, which no longer exists.
+Tell the people and agents who work the tree that the vocabulary changed; the
+[concepts](/docs/concepts) page is the short version.

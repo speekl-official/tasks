@@ -1,155 +1,181 @@
 ---
 title: Directory layout
-description: Where .tasks/ lives, how an implementation finds it, and what it may contain.
+description: How a tree is discovered, what it contains, and how writes, locking, and working copies are handled.
 icon: FolderTree
 ---
 
 ## Discovery
 
-An implementation MUST locate the project by walking from a starting directory toward
-the filesystem root, testing each ancestor for a directory named `.tasks`. The **first**
-match is the project; the search MUST stop there.
-
-- The directory containing `.tasks/` is the **project root**.
-- An implementation MUST NOT merge a discovered tree with any tree found further up.
-- If no ancestor contains `.tasks/`, the operation MUST fail as _not found_.
-
-<Callout type="info" title="Non-normative">
-  Nearest-wins with no merging is what makes a monorepo package with its own
-  `.tasks/` an independent scope. It matches how git finds `.git/`, so the
-  behavior is already familiar and needs no explanation to users.
-</Callout>
+An implementation MUST locate the tree by walking from a starting directory toward the filesystem
+root, testing each ancestor for a directory named `.tasks`. The first match is the tree; the
+search MUST stop there. An implementation MUST NOT merge a discovered tree with any tree found
+further up. If no ancestor contains `.tasks/`, the operation MUST fail as *not found*. An
+implementation SHOULD let the caller name the starting directory (`-C <dir>`), so a session
+working in a secondary worktree can address the tree of the main checkout.
 
 ## Contents
 
 ```txt
 .tasks/
-  config.yml        OPTIONAL project configuration
-  README.md         OPTIONAL human-facing description
-  .gitignore        OPTIONAL
-  _index.md         OPTIONAL generated overview
-  <phase>/          zero or more phase directories
-    <id>.md         one task
-  .archive/         OPTIONAL archived tasks, flat
-  .locks/           OPTIONAL transient lock files
+  config.yml            REQUIRED, carries `version: 2`
+  README.md             OPTIONAL human-facing description
+  .gitignore            OPTIONAL, SHOULD ignore .locks/
+  index.md              OPTIONAL derived overview
+  <segment>/            a group or a task, at any depth
+    task.md             present ⇒ this directory is a task
+    state.md            OPTIONAL workspace files, see Workspace files
+    design.md
+    plan.md
+    log.md
+    <anything else>     workspace content, ignored by the scanner
+    <segment>/          a child task, or a group, or workspace content
+  .archive/             OPTIONAL archived tasks, mirroring live paths
+  .locks/               OPTIONAL transient lock and session files
 ```
 
-A `.tasks/` directory containing nothing but phase directories is valid. Every file
-above is OPTIONAL.
+## Segments, groups and tasks
 
-### Phase directories
-
-A phase directory name MUST match:
+A directory name that participates in the tree — a group or a task — MUST match:
 
 ```txt
-^[a-z0-9][a-z0-9._-]*$
+^[a-z0-9][a-z0-9-]*$
 ```
 
-Every entry in `.tasks/` that is a directory, is not `.archive` or `.locks`, and whose
-name matches that pattern is a phase. Its name is the **phase** of every task inside it.
+When enumerating, an implementation MUST descend into every directory whose name matches that
+pattern, except `.archive/`, `.locks/` and any other name beginning with a dot, and MUST NOT
+descend into directories whose name does not match.
 
-An implementation MUST create a phase directory on demand when a task is placed in it,
-and SHOULD remove a phase directory that it empties.
+- A directory that contains a file named `task.md` is a **task**. `task.md` is a reserved
+  filename anywhere under `.tasks/`; a file with that name MUST be parsed as a task manifest, and
+  one that cannot be parsed MUST be reported as malformed rather than skipped.
+- A matching directory without `task.md` is a **group**. Groups carry no manifest and no status;
+  they MAY appear at any depth, including inside a task. A group that contains no tasks is
+  ordinary workspace content and needs no special treatment.
+- The **parent** of a task is the nearest ancestor directory that is a task; a task with no task
+  ancestor has the root as its parent. Intermediate groups do not break parenthood.
+- Every other file in a task directory is **workspace content**. An implementation MUST NOT parse
+  it as a task and MUST NOT rewrite it, except for the files the
+  [workspace vocabulary](/docs/spec/workspace) assigns to the tooling.
 
-Nested phase directories are not defined by v1. An implementation MUST NOT descend into
-subdirectories of a phase when enumerating tasks.
+An implementation MUST create a group directory on demand when placing a task under it, and
+SHOULD remove a group directory it empties.
 
-### Tasks
+Creating a task at the path of an existing group turns the group into a task: the tasks beneath
+it become its children and its finish gate applies to them from then on. An implementation MUST
+allow this (the new task is open, so no invariant can break) and MUST refuse to create a task at
+the path of an existing task as a conflict.
 
-Each task is one file, directly inside a phase directory, named `<id>.md` where `<id>`
-is that task's `id`. See [task file](/docs/spec/task-file).
+<Callout type="info" title="Non-normative">
+  Reserving one filename is what makes the rule uniform: any directory can be a
+  group, any task can hold sub-groups of children, and a `screenshots/` folder inside a task is
+  harmless because it holds no `task.md`. There is no need for a separate "phase" concept: a v1
+  phase is just a top-level group.
+</Callout>
 
-A file inside a phase directory that does not end in `.md` MUST be ignored. A `.md` file
-that cannot be parsed as a task MUST be reported as malformed rather than silently
-skipped.
+## `.archive/`
 
-### `.archive/`
-
-Archived tasks live directly in `.tasks/.archive/`, named `<id>.md`. The archive is
-**flat** — it has no phase subdirectories — so an archived task's originating phase is
-carried only by its frontmatter `phase` field.
+An archived task lives at `.tasks/.archive/<its former path>/`, with its whole directory —
+manifest, workspace files, and any archived descendants — moved as a subtree. When the
+destination already exists because a descendant was archived earlier, the subtree is merged into
+it; a `task.md` present on both sides is the duplicate error of [Writes](/docs/spec/layout#writes), never a silent
+choice. A directory under `.archive/` without a `task.md` is not an archived task; it only carries
+a former path.
 
 An implementation:
 
 - MUST exclude archived tasks from every default query.
-- MUST treat an archived task as **not satisfying** a dependency.
-- MUST treat an archived id as **reserved**: creating a new task with that id MUST fail.
+- MUST treat an archived task as **not satisfying** any gate.
+- MUST treat an archived **task's** path as reserved: creating or moving a live task to a path at
+  which `.archive/` holds a `task.md` MUST fail until that entry is purged. A directory under
+  `.archive/` without `task.md` reserves nothing.
+- MUST refuse to archive a task that is not resolved, or that has live open descendants, or that
+  open tasks reference through `depends_on` or `finishes_after` — in the local tree and in the
+  trees reachable through `projects:` — naming the dependents, unless explicitly overridden.
+- MAY archive in one command every resolved subtree whose root was resolved before a given time,
+  applying the refusals above to each root and naming the roots it skipped.
+- MUST offer a way to **purge** an archive entry: remove it permanently and release its path. A
+  purge MUST name the live tasks that still reference the entry; it is the explicit decision that
+  a task recreated at that path may be reached by those references.
+- MAY offer a **delete** that removes a live task without archiving it, only when the task has no
+  log entry other than its creation, no `state.md`, no children, and no live task references it.
+  Everything else is archived.
 
-<Callout type="info" title="Non-normative">
-  Reserving archived ids is what stops a new task from silently inheriting a
-  deleted task's inbound dependencies. Without it, `depends_on: [old-id]`
-  elsewhere in the tree would quietly re-point at unrelated work.
-</Callout>
+## `.locks/`
 
-### `.locks/`
+`.tasks/.locks/` holds the tree lock and the session registry (see
+[Concurrency](/docs/spec/layout#concurrency) and [Sessions and liveness](/docs/spec/sessions)). It MUST NOT be
+committed to version control; an implementation that scaffolds a tree SHOULD write a
+`.tasks/.gitignore` containing `.locks/`.
 
-`.tasks/.locks/` holds transient lock files used to serialize concurrent mutation. See
-[concurrency](#concurrency).
+## `index.md`
 
-It MUST NOT be committed to version control. An implementation that scaffolds a project
-SHOULD write a `.tasks/.gitignore` containing `.locks/`.
-
-### `_index.md`
-
-`_index.md` is a **derived** view of the tree, regenerated on demand.
-
-- An implementation MUST NOT treat it as a source of truth, and MUST NOT read it to
-  answer any query.
-- An implementation MAY generate it. Its content and formatting are not specified.
-- An implementation that detects it is out of date MUST report that as a **warning**,
-  never an error.
-
-<Callout type="info" title="Non-normative">
-  It exists because `.tasks/` is committed and browsed on the web, where a
-  directory of markdown files is hard to skim. Since it is committed, a stale
-  one misleads reviewers in a diff — hence the warning. Since it holds no truth,
-  failing a build over it would be absurd — hence never an error.
-</Callout>
+`index.md` at the root of `.tasks/` is a derived view of the tree; the name is reserved there and
+nowhere else. An implementation MUST NOT treat it as a source of truth and MUST NOT read it to
+answer any query. A Writer SHOULD regenerate it after every mutation
+when the file exists, so the committed rendering follows the tree without a separate step. Its
+content is not specified; an implementation that detects it is out of date MUST report that as a
+warning, never an error.
 
 ## Writes
 
-Every write of a task file, `config.yml`, or `_index.md` MUST be **atomic**: the
-implementation writes to a temporary file in the same directory and renames it into
-place. A reader MUST never be able to observe a partially written file.
+Every write of a manifest, a tool-owned workspace file, `config.yml` or `index.md` MUST be
+atomic: write a temporary file in the same directory, then rename it into place. Serialization
+MUST be canonical (see [Serialization](/docs/spec/task-file#serialization)).
 
-Serialization MUST be canonical — see [task file](/docs/spec/task-file#serialization) —
-so that repeated writes of unchanged state produce identical bytes and a file's diff
-shows only what actually changed. An implementation MAY additionally skip a write whose
-result would be byte-identical, but is not required to.
-
-### Relocation
-
-Moving a task between phases MUST be performed as **write destination, then remove
-source** — never the reverse, and never a bare rename that could leave neither.
-
-Interrupted between the two steps, this leaves the same task present in two phases. That
-is a detectable, repairable state; losing the task is not.
+Relocating a task or a group MUST be performed as a single atomic directory rename when source and
+destination are on the same filesystem. Across filesystems an implementation MAY copy the subtree
+and then remove the source; interrupted, this leaves the task present twice, which validation
+MUST report as a duplicate rather than silently choosing one.
 
 ## Concurrency
 
-An implementation that mutates a task in a way that depends on that task's current state
-MUST do so under an exclusive lock, and MUST re-read the task's state from disk **inside**
-the lock before deciding.
+Every mutation of a tree MUST be performed under one **tree-wide exclusive lock**,
+`.tasks/.locks/tree.lock`, acquired with an operation that atomically fails if the file exists
+(`O_EXCL` or equivalent). The implementation MUST re-read every task whose state the mutation
+depends on **inside** the lock before deciding. A lock older than a documented staleness
+threshold MUST be reclaimable; the reference threshold is 10 seconds. A holder SHOULD keep a lock
+it holds younger than that threshold while it works, so a long write is not reclaimed under it; the
+reference implementation touches its lock every 2.5 seconds.
 
-- The lock MUST be acquired by an operation that atomically fails if the lock already
-  exists (`O_EXCL` or equivalent).
-- A lock MUST be scoped to a single task id, not to the tree.
-- A lock older than a defined staleness threshold MUST be reclaimable. The reference
-  implementation uses **10 seconds**; an implementation MAY choose another value and
-  SHOULD document it.
+Each tree has its own lock. A command that writes several trees MUST write them one at a time,
+each under its own lock; there are no cross-tree transactions, and every intermediate state is one
+that gates treat as blocking and validation reports.
 
-<Callout type="warn" title="Scope of the guarantee">
-  This serializes processes sharing one filesystem. It does **not** coordinate
-  across separate clones of a repository. Two agents working in two checkouts
-  can both claim the same task and will discover the conflict only at merge. An
-  implementation MUST NOT present claims as a distributed lock.
+<Callout type="info" title="Non-normative">
+  v1 locked per task. v2's gates read other tasks (children, dependencies)
+  while deciding a transition, so per-task locks would either need ordered multi-lock acquisition
+  or accept races between a parent closing and a child reopening. Writes to a local tracker are
+  rare and short; one lock is simpler and correct. The lock serializes processes on one
+  filesystem only — two clones of a repository still discover conflicting claims at merge.
 </Callout>
 
-## Version control
+## Working copies and branches
 
-`.tasks/` is intended to be committed. An implementation MUST NOT require any state
-outside the project directory — no database, no cache directory, no user-level
-configuration — to interpret a tree correctly.
+The tree is versioned with the code, so a task's state is the state in **one checkout on one
+branch**: a claim, a transition or a `state.md` written in one working copy is invisible to every
+other until merged, and `.locks/` is private to each working copy, so sessions in two checkouts
+never see each other's heartbeats. This specification assumes that task state is mutated in a
+single working copy on the project's integration branch. Changing `.tasks/` on a feature branch
+is a merge hazard: `log.md` merges mechanically (see [`log.md`](/docs/spec/workspace#logmd)), the frontmatter of
+`task.md` does not — which status survives is a person's decision — and `validate` MUST be run
+after any merge that touched the tree.
 
-A fresh clone of a repository MUST yield identical query results to the checkout it was
-cloned from, given the same implementation.
+<Callout type="info" title="Non-normative">
+  Code may live on branches and in worktrees; the tasks about it should not.
+  A session working in a secondary worktree runs its `tasks` commands against the main checkout
+  (`-C`), records the branch under *Open* in `state.md`, and the transitions land on the
+  integration branch as the work does. A tree carried along in a pull request still works, but its
+  reviewer sees every `state.md` rewrite and log entry in the diff.
+</Callout>
+
+<Callout type="info" title="Non-normative — several machines">
+  Claims, heartbeats and the tree lock are atomic within one
+  filesystem only. Agents on several machines that share a repository through git share no
+  `.locks/` and no tree state until they push and pull; two clones can claim the same task and
+  discover it at merge. v2 does not arbitrate between machines. The direction that keeps the
+  filesystem authoritative is to make the integration branch the arbiter: a claim is a commit
+  pushed to it, a rejected push is the conflict, and liveness is the age of the last pushed
+  heartbeat. That is a possible later revision, not part of this one; until then a swarm runs on
+  one machine against one checkout per repository, each agent in its own worktree addressing the
+  trees with `-C`.
+</Callout>

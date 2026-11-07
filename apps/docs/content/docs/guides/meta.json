@@ -1,4 +1,10 @@
 {
   "title": "Guides",
-  "pages": ["agent-workflow", "custom-statuses", "cross-repo", "troubleshooting"]
+  "pages": [
+    "agent-protocol",
+    "harness",
+    "projects",
+    "migration",
+    "troubleshooting"
+  ]
 }

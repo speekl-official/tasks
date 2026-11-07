@@ -1,133 +1,254 @@
 ---
 title: Troubleshooting
-description: Reading validate findings, and what each common failure actually means.
+description: What each common refusal means, how to get past it, and how to recover from a bad state.
 icon: Wrench
 ---
 
 <Callout title="Start here, always">
-  Run `tasks validate` before hand-repairing anything. It reports id/filename
-  mismatches, phase drift, unknown statuses, broken or cyclic dependencies, and
-  a stale `_index.md` — and `--fix` repairs the mechanically safe subset.
+  Run `tasks validate` before hand-repairing anything. It reports malformed
+  manifests, broken or cyclic references, containment that disagrees with its
+  parent, orphaned claims and a stale `index.md` — and changes nothing unless
+  you pass `--fix`, which only regenerates `index.md`.
 </Callout>
 
-```sh
-tasks validate --fix
-```
+Every refusal below exits with a code and, under `--json`, carries `error.details` —
+usually with a `kind` — so a script can tell them apart without reading the message.
 
-Errors exit `4`, so CI can gate on them. Warnings do not.
-
-## Common failures
+## Common refusals
 
 <Accordions>
+
+<Accordion title="… is a .tasks v1 tree. Run `tasks migrate` once (exit 2)">
+
+The tree predates v2: its `config.yml` is missing, has no `version`, or says
+`version: 1`. Every command but `migrate` refuses it. Upgrade it once — see
+[migrating from v1](/docs/guides/migration):
+
+```sh
+tasks migrate
+```
+
+A listed project in that state is left out of overviews and blocks references into it
+with `unsupported-version`; `tasks migrate <alias>` upgrades it from here.
+
+</Accordion>
 
 <Accordion title="No .tasks/ directory found (exit 3)">
 
 Nothing in this directory or any parent has a `.tasks/`. Either you are in the wrong
-repository, or the project is not set up.
+place — a secondary worktree, a sibling repository — or the project is not set up. Point
+the CLI at the right checkout with `-C <dir>`, or create a tree:
 
 ```sh
 tasks init
 ```
 
-Creating `.tasks/` is a project-level decision — an agent should ask before running this
-rather than doing it as a side effect of a question about work.
+Creating `.tasks/` is a project-level decision: an agent asks before running `init`.
 
 </Accordion>
 
-<Accordion title="Illegal transition PENDING -> DONE (exit 4)">
+<Accordion title="… is IN_PROGRESS and has no state.md; write it before pausing (exit 4)">
 
-Status skipping. By default a task steps forward or back exactly one status, so nothing
-reaches done unworked.
-
-The error's `details.allowed` lists what _is_ legal from here:
-
-```json
-{ "from": "PENDING", "to": "DONE", "allowed": ["IN_PROGRESS"] }
-```
-
-Claim it first, then complete it:
+`pause` and `handoff` need a resume point — this refusal is what guarantees the next
+session finds one (`details.kind`: `missing-state`). Write it, then pause:
 
 ```sh
-tasks claim token-schema
-tasks status token-schema DONE
+tasks state token-schema < state.md
+tasks pause token-schema -m "…"
 ```
 
-</Accordion>
-
-<Accordion title="Use `tasks claim <id>` to move a task to IN_PROGRESS (exit 2)">
-
-`tasks status <id> <claimed-role>` is deliberately refused. Routing claims through
-`tasks claim` is what guarantees `claimed_by` and `claimed_at` are always recorded.
+If the claim produced nothing at all, `release` it instead.
 
 </Accordion>
 
-<Accordion title="Task is already claimed (exit 4)">
+<Accordion title="… has a state.md, so the claim produced work; pause it instead (exit 4)">
 
-Someone — or something — else has it. The error carries `claimed_by` and `claimed_at`.
+`release` is for a claim that produced nothing, and a `state.md` is the evidence that it
+did (`present-state`). Pause the task with a message instead; the resume point stays
+for whoever continues.
 
-Pick a different task from `tasks ready`. Do **not** reach for `--force`; it overrides
-_dependencies_, not other people's claims.
+</Accordion>
 
-If the claim is genuinely stale — an agent that died, a colleague who moved on — release
-it explicitly:
+<Accordion title="… is claimed by … (live); a claim on live work is refused (exit 4)">
+
+Someone else is working on it right now: another agent, another session, a person at a
+terminal. `details` carries `claimed_by`, `claimed_session` and `liveness`. Pick another
+task from `tasks ready` — `tasks claim --next` does this for you. Do not reach for
+`--force`: it would take the task from under live work.
+
+If the claim is your own older session's, it becomes **orphaned** once that session ends
+(`tasks session-end`) or stays silent past `session_timeout_minutes`; then an ordinary
+`claim` takes it over.
+
+</Accordion>
+
+<Accordion title="A task shows `working by agent · orphaned since …`">
+
+Its claimant's session ended or went silent, so the claim protects nothing. The actor's
+next session takes it over with an ordinary claim, which records the superseded session
+and when it was last seen:
 
 ```sh
-tasks release token-schema
+tasks resume wire-refresh
+tasks claim wire-refresh
 ```
+
+```txt
+✓ claim auth-rework/wire-refresh: IN_PROGRESS → IN_PROGRESS
+  superseded agent s:s1 on auth-rework/wire-refresh (orphaned, last seen 2026-10-26T02:36:33Z)
+```
+
+Another actor's orphaned claim is taken over only when a person says so. Should the
+superseded session come back, its next transition or `state` write is refused — it reads
+`claimed by agent in session s2 (live); only its claimant may …` — and it stops instead
+of overwriting the new claimant's work.
 
 </Accordion>
 
-<Accordion title="Task is blocked by: … (exit 4)">
+<Accordion title="… a claim whose liveness cannot be judged is refused (exit 4)">
 
-A dependency is unsatisfied. `details.blocked_by` lists the refs; `tasks dep list <id>`
-explains each one.
+The claim's liveness is **unknown**: it was taken without a session — by a person at a
+terminal, or migrated from v1 — or its session's heartbeat never reached this machine.
+Nobody can take it over without `--force`. Ask the person. The claimant, acting as the
+same actor, can still `state`, `pause`, `release` or `done` it.
+
+</Accordion>
+
+<Accordion title="… is held by …, which is claimed by … / assigned to … (exit 4)">
+
+An ancestor is claimed or assigned (`held`): its plan is being written or awaits
+approval, and executing it early would build on a plan nobody confirmed. It ends when the
+ancestor is neither claimed nor assigned — usually the approver's
+`tasks unassign <epic> -m "APPLY"`. `--force` overrides the hold, on a person's say-so.
+
+</Accordion>
+
+<Accordion title="… cannot be claimed under …, which is BACKLOG (exit 4)">
+
+Nothing beneath an unscheduled task can be scheduled or claimed (`backlog-ancestor`).
+Schedule the ancestor the error names; its cascade brings this task back with it:
 
 ```sh
-tasks dep list wire-refresh
+tasks schedule search
 ```
 
-Finish the dependency, remove it if it no longer applies (`tasks dep rm`), or — only when
-a human has said the dependency does not apply — `tasks claim <id> --force`.
+Nothing overrides this: the remedy is one command.
 
 </Accordion>
 
-<Accordion title="Task id is reserved by an archived task (exit 4)">
+<Accordion title="… cannot be done: open children … (exit 4)">
 
-Ids stay unique across the whole tree including `.archive/`, so a new task can never
-silently inherit a deleted task's inbound dependencies.
+The finish gate (`finish-gate`): every live child, and every `finishes_after` task, must
+be `DONE` or `CANCELLED` first. `details.open_children` and `details.finishes_after`
+list what is open. Finish or cancel each child — finishing an epic is one decision per
+child — or cancel the parent, which cancels its open children with it. Nothing forces
+the finish gate.
 
-Choose another id with `--id`, or purge the archived one first if you really mean to
-reuse it:
+</Accordion>
+
+<Accordion title="… its start gate is not satisfied, blocked by … (exit 4)">
+
+A `depends_on` reference is not `DONE` (`start-gate`, with `details.blocked_by`).
+`tasks dep list <task>` explains each one. Finish the dependency, remove it if it no
+longer applies (`tasks dep rm`), or — only when a person has said it does not apply —
+`tasks claim <task> --force`.
+
+A reference shown as `blocked by X (cancelled)` is **stranded**: waiting cannot open it.
+Cancel the dependent too, remove the reference, or point it at whatever now does the
+work; see [gates](/docs/reference/gates#cancelled-dependencies-are-stranded).
+
+</Accordion>
+
+<Accordion title="… is ambiguous: it matches a/tests, b/tests (exit 2)">
+
+A suffix matched several tasks; `details.candidates` lists them. Use a longer suffix or
+the full path:
 
 ```sh
-tasks delete old-id --purge
+tasks show search/tests
 ```
 
 </Accordion>
 
-<Accordion title="A task I expect is missing from `list` or `ready`">
+<Accordion title="The task tree is locked. Another command is writing it; try again (exit 4)">
 
-Almost always **scope**. Without `-p` or `-a`, both commands scope to `active_phase` from
-`.tasks/config.yml` when it is set.
+Another command holds `.tasks/.locks/tree.lock`. Writes are short, and every command waits
+up to two seconds before reporting this, so it usually means a burst of agents — retry.
+A holder touches its lock while it works, so a long write is never mistaken for a dead
+one; a lock older than ten seconds belongs to a dead process and is reclaimed
+automatically. A write into a listed tree whose own lock was free succeeds even while
+this tree's lock is busy: it then warns that `index.md` was not refreshed.
+If it persists, check for a hung `tasks` process; only when none runs is deleting the
+file safe — `.locks/` holds no state.
+
+</Accordion>
+
+<Accordion title="… is reserved by an archived task (exit 4)">
+
+An archived task keeps its path, so a new task there cannot silently inherit the old
+one's references (`reserved`). Choose another path, bring the old task back with
+`tasks restore <path>`, or release the path for good with `tasks purge <path>` — which
+names the live tasks whose references a new task there would then satisfy.
+
+</Accordion>
+
+<Accordion title="… is archived. Restore it with `tasks restore …` first (exit 3)">
+
+Archived tasks are excluded from every query and every command but `restore` and `purge`,
+which take the full path under `.archive/`.
+
+</Accordion>
+
+<Accordion title="… has a malformed task.md … Fix it by hand first (exit 4)">
+
+The manifest does not parse, so no command can safely act on the task, and it blocks
+everything that references it. This is the one time to edit the frontmatter by hand:
+compare it with the [file format](/docs/reference/file-format#taskmd) — usually an
+unquoted timestamp, a stray tab, an unclosed `---`, or a v1 field left behind — then run
+`tasks validate`.
+
+</Accordion>
+
+<Accordion title="config.yml: unknown key … (exit 2)">
+
+`config.yml` accepts `version`, `scope`, `session_timeout_minutes` and `projects` only.
+`active_phase` is `scope` in v2; `statuses`, `roles` and `transitions` are gone because
+the lifecycle is fixed. A key from a newer revision of the convention means this CLI is
+older than the tree: upgrade it.
+
+</Accordion>
+
+<Accordion title="git user.name … does not match …; skipped">
+
+A diagnostic, not an error: your git name has a space, which an actor cannot, so the CLI
+fell back to `user.email` or the operating-system user. Set the name you want explicitly:
 
 ```sh
-tasks list --all
+export TASKS_ACTOR=alice
 ```
-
-If it appears under `--all`, set or clear `active_phase` to match how you actually work.
-If it still does not appear, it may be claimed (not ready), blocked (not ready), or
-archived (excluded from every default query).
 
 </Accordion>
 
-<Accordion title="config.yml: … is not in `statuses` (exit 2)">
+<Accordion title="heartbeat needs a session (exit 2)">
 
-The config is validated on load, so a bad one fails the command you ran rather than
-surfacing later as a mysterious conflict. Roles and transitions must name real statuses,
-and `roles.ready → roles.claimed` must be legal — otherwise `tasks claim` could never
-succeed.
+`heartbeat` and `session-end` act for a session and refuse without one. Pass
+`--session <token>` or set `TASKS_SESSION`; a harness hook passes the `session_id` of its
+input.
 
-See [configuration](/docs/reference/configuration).
+</Accordion>
+
+<Accordion title="A task I expect is missing from `ready` or `list`">
+
+`ready` shows only what **you** may take now. A task is absent when it is:
+
+- outside the configured `scope` — retry with `--all`;
+- assigned to someone else, or held by a claimed or assigned ancestor;
+- a parent whose children are still open — its work is theirs until they close;
+- blocked by a dependency, `BACKLOG`, or already claimed;
+- archived — excluded from every query.
+
+`tasks list --all` shows every open task with its situation, which says which of these
+applies. `--done`, `--cancelled` and `--resolved` add closed tasks.
 
 </Accordion>
 
@@ -135,53 +256,31 @@ See [configuration](/docs/reference/configuration).
 
 ## Reading validate findings
 
-| Kind                                                                           | Severity | `--fix` | What happened                                                                                                  |
-| ------------------------------------------------------------------------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `filename-mismatch`                                                            | error    | yes     | The file is named `x.md` but declares `id: y`. Fix renames the file to match the id.                           |
-| `phase-drift`                                                                  | error    | yes     | Frontmatter's `phase` disagrees with the containing directory. The **directory wins**; fix rewrites the field. |
-| `stale-index`                                                                  | warning  | yes     | `_index.md` no longer matches the tasks on disk. Fix regenerates it.                                           |
-| `malformed`                                                                    | error    | no      | The file could not be parsed as a task at all.                                                                 |
-| `duplicate-id`                                                                 | error    | no      | Two live files declare the same `id`.                                                                          |
-| `unknown-status`                                                               | error    | no      | A status not in the configured list.                                                                           |
-| `malformed-ref`                                                                | error    | no      | A `depends_on` entry that will not parse.                                                                      |
-| `cycle`                                                                        | error    | no      | A dependency cycle.                                                                                            |
-| `dependency-missing` / `dependency-archived` / `dependency-unresolved-project` | warning  | no      | A dependency that will never be satisfied, so the task can never become ready.                                 |
-
-`--fix` applies only the mechanically safe repairs and reports the rest for a human. Exit
-`0` with `{"ok": true, "findings": []}` means the tree is clean.
-
-### Fixing the ones `--fix` cannot
-
-**`duplicate-id`** — usually a bad merge, or a `mv` that should have been `tasks move`.
-Decide which file is real, delete or re-id the other, then re-run `validate`.
-
-**`malformed`** — open the file. It is almost always a YAML error in the frontmatter: an
-unquoted timestamp, a stray tab, an unclosed `---`. Compare against the
-[file format](/docs/reference/file-format).
-
-**`unknown-status`** — a status was renamed in `config.yml` without migrating the tasks.
-See [migrating an existing tree](/docs/guides/custom-statuses#migrating-an-existing-tree).
-
-**`cycle`** — break it with `tasks dep rm`. This is worth fixing promptly: a cycle
-silently drops every task in it out of `tasks ready` forever, which is the worst failure
-mode for an agent that trusts the query.
-
-**`dependency-*`** — the reference points at something that will never be done. Either
-recreate the missing task, or drop the edge:
-
 ```sh
-tasks dep rm wire-refresh token-schema
+tasks validate --json | jq -e .ok
 ```
+
+Errors exit `4`, so CI can gate on them; warnings do not. Every finding, what it means and
+how to fix it is on the [validation](/docs/reference/validation) page.
 
 ## Recovering from a bad state
 
-**A crashed `tasks move`.** The move writes the destination before unlinking the source,
-so a crash leaves a duplicate rather than losing the task. `tasks validate` reports it as
-`duplicate-id`; delete whichever copy is in the wrong place.
+**An interrupted cascade.** `defer`, `schedule` and `cancel` write the descendants first
+and the named task last, so repeating the command completes it: what is already in place
+is skipped. Until then, `validate` may report `backlog-invariant` or
+`resolved-with-open-descendant`.
 
-**A stale lock.** Locks live in `.tasks/.locks/` and go stale after 10 seconds, so a
-crashed process does not block claims for long. If one somehow persists, deleting the
-file is safe — `.locks/` is git-ignored and holds no state.
+**An interrupted move across filesystems.** The move copies first and removes the
+source last, leaving a `.moving` marker in the destination meanwhile. `validate` reports
+the task as present twice (`duplicate-id`), and moving the marked copy again is refused
+(`interrupted-move`): keep one copy, then delete the marker.
+
+**A merge that touched `.tasks/`.** Task state belongs on one branch, but when it merges
+anyway: `log.md` conflicts are resolved by keeping both entries in time order; which
+status survives in a `task.md` is a person's decision. Run `tasks validate` afterwards.
+
+**A stale `index.md`.** It is derived and never read, so it is cosmetic — but committed.
+`tasks reindex` or `tasks validate --fix` regenerates it.
 
 **Anything else.** `.tasks/` is committed, so the ordinary answer applies:
 
@@ -190,5 +289,5 @@ git diff .tasks
 git checkout -- .tasks
 ```
 
-That is the real reason task state lives in the repo: recovery is the same recovery you
-already know.
+That is the real reason task state lives in the repository: recovery is the same recovery
+you already know.

@@ -1,4 +1,12 @@
 {
   "title": "CLI reference",
-  "pages": ["commands", "file-format", "configuration", "dependencies", "json-contract"]
+  "pages": [
+    "commands",
+    "file-format",
+    "configuration",
+    "gates",
+    "projects",
+    "json-contract",
+    "validation"
+  ]
 }

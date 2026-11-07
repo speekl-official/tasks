@@ -1,0 +1,116 @@
+---
+title: Projects
+description: Aliases for sibling trees, aggregated overviews, writes into listed trees, read-only trees, and --local.
+icon: Boxes
+---
+
+<Callout type="info" title="Explanatory, not normative">
+  The authoritative definition is [specification › projects](/docs/spec/projects).
+  For the repository layout this enables, see the [projects
+  guide](/docs/guides/projects).
+</Callout>
+
+Every repository has its own tree, discovered nearest-wins. A tree may declare the other
+trees it works with, by alias, in `config.yml`:
+
+```yaml title=".tasks/config.yml"
+version: 2
+projects:
+  backend: ../backend
+  cli: ../tasks-cli
+```
+
+Aliases match the segment pattern; paths are relative to the project root and never
+absolute. An alias that leads back to this tree is rejected.
+
+## Addressing
+
+On the command line, `alias:path` addresses a task in a listed project, with the same
+suffix rule as local tasks: `backend:claims-api` finds `kernel/claims-api` there. A bare
+path searches the local tree only, even when `projects:` is set.
+
+```sh
+tasks show backend:claims-api
+tasks claim backend:kernel/claims-api --session s1
+tasks new backend:kernel/rate-limit "Rate-limit the claims API"
+```
+
+In files, a reference into another tree is stored with the project path, not the alias,
+so it means the same thing to anyone reading the file: `tasks dep add launch
+backend:claims-api` stores `../backend:kernel/claims-api`. An alias exists only in the
+tree that configured it.
+
+## Aggregated overviews
+
+When `projects:` is non-empty, `ready`, `mine`, `list`, `tree` and `log --since` span the
+local tree and every listed project, and every foreign id carries its alias:
+
+```txt
+ ID                      SITUATION   LABELS             TITLE
+ api:search/index-docs   ready       high (inherited)   Index documents
+ api:scratch/try-it      ready                          Try it
+ launch                  ready                          Launch the public API
+
+3 tasks · projects api
+```
+
+The ready set interleaves the trees by the same keys as within one: effective priority,
+`PAUSED` first, oldest first. In JSON, `project` on each task is its alias (`null` for
+the local tree), `id` and `parent` are qualified, and the collection's `projects` lists
+the aliases spanned.
+
+| Option    | Effect                                                                    |
+| --------- | ------------------------------------------------------------------------- |
+| `--local` | Restrict the overview to the local tree.                                  |
+| `--scope` | Applies to the local tree only; listed trees are never scoped.            |
+
+A listed project that is not checked out, or is a v1 tree, is left out of the overview
+with a line saying so — under `--json`, the collection's `unavailable` names it with the
+reason — and `validate` reports it as `project-unavailable`.
+
+## Writes into listed trees
+
+A tree may write into a project it lists — transitions, `new`, dependency edits,
+`state`, `log`, archive commands — addressing the task by alias. Every such write takes
+**that** tree's lock; there are no cross-tree transactions. A `move` or a `migrate` run
+from here also rewrites references in every listed tree, one tree at a time under each
+tree's lock. After a write into a listed tree, this tree's `index.md` is regenerated under
+its own lock, since what changed there may show here. When that lock stays busy the write
+stands, and a warning on stderr says the index was not refreshed; `tasks reindex` or the
+next local write regenerates it. A write made from inside a listed tree's own folder does
+not reach this tree's `index.md` at all; `validate` reports it as `index-stale`.
+
+`show` and `resume` list as `referenced_by` the tasks here and in listed trees whose
+gates name the task, and `cancel` reports `dependents` across them, so a decision about a
+task is taken while every tree that depends on it is in view.
+
+## Read-only trees
+
+A reference may point into a tree by a bare relative path without that tree being
+listed — `depends_on: ["../upstream:publish-endpoint"]`. The CLI resolves it to judge the
+gate, and nothing more: a tree reached that way is **read-only** from here, and it cannot
+be addressed on the command line. A project that lists nothing stays local, so a
+reviewer of that repository sees only its own tasks.
+
+Listing is **not transitive**: the `projects:` of a listed tree are read only to resolve
+that tree's own references.
+
+## Liveness across trees
+
+Every command run with a session touches the session's heartbeat in this tree and in
+every listed tree, so a claim on a task in a listed tree is kept live by a session
+working from here. The liveness of a claim is judged by the registry and the
+`session_timeout_minutes` of the tree that holds the task; `session-end` and
+`session-check` cover every listed tree too.
+
+## When a project is absent
+
+| Situation                                           | Reference reason      |
+| --------------------------------------------------- | --------------------- |
+| listed, but its directory is absent on this machine | `not-checked-out`     |
+| a path that leads to no `.tasks/` tree              | `unresolved-project`  |
+| a v1 tree, or a version this CLI does not support    | `unsupported-version` |
+
+All three block, fail safe. `validate` reports each reference into such a tree as
+`unsatisfiable-ref`, and each listed project in that state as `project-unavailable`. A
+listed v1 tree is upgraded from here with `tasks migrate <alias>`.
