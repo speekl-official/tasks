@@ -11,6 +11,7 @@ import {
   situationText,
 } from "./core/derive.js";
 import { ancestorPaths, compareIds, qualifyId } from "./core/ids.js";
+import type { UnavailableTree } from "./core/projects.js";
 import type {
   ActorsJson,
   BlockedByJson,
@@ -736,13 +737,29 @@ function foreignRows(tasks: readonly unknown[]): number {
   ).length;
 }
 
+/** Why a listed project is left out, in a word or two; `validate` says the rest. */
+function unavailableWord(load: UnavailableTree): string {
+  switch (load.kind) {
+    case "not-checked-out":
+      return "not checked out";
+    case "unsupported-version":
+      return load.version === 1 ? "v1" : `v${load.version} unsupported`;
+    case "unresolved":
+      return load.cause === null ? "no tree" : "unreadable";
+  }
+}
+
 /**
  * The line under an overview: the count, the scope, the depth and, when
- * projects were spanned, how many rows came from them; then malformed.
+ * projects were spanned, how many rows came from them and which listed
+ * projects could not be shown, each with the reason in a word (the full
+ * sentence, with the remedy, is `validate`'s `project-unavailable`); then
+ * malformed.
  */
 export function renderCollectionFooter(
   collection: CollectionJson<unknown>,
   depth: number | null = null,
+  unavailable: readonly UnavailableTree[] = [],
 ): string {
   const parts = [plural(collection.count, "task")];
   if (collection.scope !== null) parts.push(`scope ${collection.scope}`);
@@ -750,6 +767,15 @@ export function renderCollectionFooter(
   if (collection.projects.length > 0) {
     parts.push(
       `${foreignRows(collection.tasks)} from projects ${collection.projects.join(", ")}`,
+    );
+  }
+  if (unavailable.length > 0) {
+    parts.push(
+      `not shown: ${unavailable
+        .map(
+          (load) => `${load.alias ?? load.relPath} (${unavailableWord(load)})`,
+        )
+        .join(", ")}`,
     );
   }
   return [

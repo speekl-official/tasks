@@ -949,9 +949,7 @@ describe("show", () => {
     });
     const listed = await sandbox.run("list");
     expect(listed.code).toBe(ExitCode.Success);
-    expect(plain(listed.stdout)).toContain(
-      "old not shown: a .tasks v1 tree; upgrade it with `tasks migrate old`",
-    );
+    expect(plain(listed.stdout)).toContain("not shown: old (v1)");
   });
 
   it("refuses a malformed manifest as a conflict naming the file", async () => {
@@ -1549,7 +1547,7 @@ describe("list", () => {
       collection(await sandbox.run("list", "--local", "--json")).unavailable,
     ).toEqual([]);
     const out = plain((await sandbox.run("list")).stdout);
-    expect(out).toContain("gone not shown: not checked out");
+    expect(out).toContain("1 task · not shown: gone (not checked out)");
     expect(plain((await sandbox.run("list", "--local")).stdout)).not.toContain(
       "not shown",
     );

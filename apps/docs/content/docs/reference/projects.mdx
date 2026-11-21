@@ -67,9 +67,11 @@ the aliases spanned.
 | `--local` | Restrict the overview to the local tree.                                  |
 | `--scope` | A path of the local tree. While a scope is in force, given or configured, `ready`, `list`, `tree` and `claim --next` keep to the local tree; `--all` lifts a configured scope and spans again. `mine` and `log --since` are not scoped. |
 
-A listed project that is not checked out, or is a v1 tree, is left out of the overview
-with a line saying so — under `--json`, the collection's `unavailable` names it with the
-reason — and `validate` reports it as `project-unavailable`.
+A listed project that is not checked out, or is a v1 tree, is left out of the overview,
+and the footer names it with the reason in a word (`3 tasks · 2 from projects api · not
+shown: legacy (v1), mobile (not checked out)`); under `--json`, the collection's
+`unavailable` names it with the reason, and `validate` reports it as `project-unavailable`
+with the full sentence and the remedy.
 
 ## Writes into listed trees
 

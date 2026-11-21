@@ -14,7 +14,7 @@ import { taskDepth, toMalformedJson } from "../core/tree.js";
 import type { CollectionJson, UnavailableProjectJson } from "../core/types.js";
 import { CONVENTION_VERSION } from "../core/types.js";
 import { TaskError } from "../errors.js";
-import { emitJson, renderCollectionFooter, ui, writeOut } from "../output.js";
+import { emitJson, renderCollectionFooter, writeOut } from "../output.js";
 
 /**
  * What the overview commands (`ready`, `mine`, `list`, `tree`) share, so
@@ -197,6 +197,7 @@ export function collectionOf(
 }
 
 /** Why a listed project is missing from the overview, in a few words. */
+/** The full sentence `actors` prints for a listed project it cannot read. */
 export function unavailableText(load: UnavailableTree): string {
   const name = load.alias ?? load.relPath;
   switch (load.kind) {
@@ -213,8 +214,8 @@ export function unavailableText(load: UnavailableTree): string {
 
 /**
  * Print the rows: the collection object under `--json`; otherwise the
- * rendering, then the footer (count, scope, depth, projects, malformed
- * manifests) and a line for each listed project that could not be shown.
+ * rendering, then the footer (count, scope, depth, projects, the listed
+ * projects that could not be shown, malformed manifests).
  */
 export function emitOverview(
   span: Span,
@@ -228,8 +229,5 @@ export function emitOverview(
   }
   writeOut(render([...rows]));
   writeOut("");
-  writeOut(renderCollectionFooter(collection, span.depth));
-  for (const load of span.unavailable) {
-    writeOut(ui.warn(unavailableText(load)));
-  }
+  writeOut(renderCollectionFooter(collection, span.depth, span.unavailable));
 }

@@ -91,9 +91,9 @@ again. Subagents use the same name and token.
    epic. **Never read `log.md` on entry**; its last entry, the last activity, is
    already in the `resume` output. A person's text that reached you only there
    goes under `## Notes` (`tasks note`).
-4. **Listed projects you cannot see** — `not shown` on stderr, `unavailable` in
-   the JSON: a v1 tree, a repository not checked out here — are a person's to
-   migrate or check out. Say so once in your report and go on.
+4. **Listed projects you cannot see** — `not shown` in an overview's footer,
+   `unavailable` in the JSON: a v1 tree, a repository not checked out here — are
+   a person's to migrate or check out. Say so once in your report and go on.
 
 ## During work
 
