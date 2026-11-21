@@ -153,7 +153,10 @@ tasks show <task> [--archived] [--json]
 The task: its fields, its derived conditions (situation, blocked by, held by, liveness, …;
 the JSON carries every one, `ready` and `last_entry` included), the workspace files present, the live tasks that
 reference it through `depends_on` or `finishes_after` — here and in listed projects —
-and its body. **Fails** with exit `3` for an unknown or archived task, and with exit `4`
+and its body. References print as the command line takes them: `alias:path` for a task in
+a listed project, the bare id for a task of this tree, and the stored path only for a tree
+that is not listed; the JSON carries `depends_on`, `finishes_after` and `blocked_by[].ref`
+as stored. **Fails** with exit `3` for an unknown or archived task, and with exit `4`
 when its `task.md` is malformed.
 
 `--archived` reads a task under `.archive/` without restoring it: `<task>` is then its former
@@ -310,9 +313,10 @@ tasks dep list <task> [--json]
 tasks after list <task> [--json]
 ```
 
-Each reference in `depends_on` (or `finishes_after`), whether it is satisfied, and why
-not. Each list is judged by its own gate: a `CANCELLED` task satisfies `finishes_after`,
-never `depends_on`. See [`tasks dep`](#tasks-dep-and-tasks-after).
+Each reference in `depends_on` (or `finishes_after`), named as the command line takes it
+(the JSON carries it as stored), whether it is satisfied, and why not. Each list is judged
+by its own gate: a `CANCELLED` task satisfies `finishes_after`, never `depends_on`. See
+[`tasks dep`](#tasks-dep-and-tasks-after).
 
 ## Transitions
 

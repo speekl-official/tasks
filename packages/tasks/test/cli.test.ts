@@ -27,6 +27,7 @@ import type {
 import { SITUATIONS } from "../src/core/types.js";
 import { ExitCode } from "../src/errors.js";
 import type { TreeSpec } from "./fixtures.js";
+import { writeTree } from "./fixtures.js";
 import type { CliResult, Sandbox } from "./helpers.js";
 import { makeSandbox, treeSandbox } from "./helpers.js";
 
@@ -829,6 +830,39 @@ describe("show", () => {
     expect(out).toMatch(/status\s+PAUSED/);
     expect(out).toMatch(/situation\s+blocked by b/);
     expect(out).toContain("# a");
+  });
+
+  it("prints references as the command line takes them and keeps the JSON as stored", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        a: { depends_on: ["../backend:x"], finishes_after: ["../bare:q"] },
+        b: {},
+      },
+    });
+    await sandbox.project("backend", "../backend", {
+      tasks: { x: { depends_on: ["../repo:b", "y"] }, y: {} },
+    });
+    // A sibling tree nothing lists: reached by its path, read-only, and named
+    // by that path.
+    await writeTree(path.join(sandbox.root, "bare", ".tasks"), {
+      tasks: { q: {} },
+    });
+
+    const shown = plain((await sandbox.run("show", "a")).stdout);
+    expect(shown).toMatch(/depends on\s+backend:x/);
+    expect(shown).toMatch(/finishes after\s+\.\.\/bare:q/);
+    expect(plain((await sandbox.run("resume", "a")).stdout)).toMatch(
+      /depends on\s+backend:x/,
+    );
+    expect(plain((await sandbox.run("dep", "list", "a")).stdout)).toContain(
+      "backend:x",
+    );
+    // A foreign task's references, from here: ours bare, its own by alias.
+    const foreign = plain((await sandbox.run("show", "backend:x")).stdout);
+    expect(foreign).toMatch(/depends on\s+b, backend:y/);
+    expect(
+      (await sandbox.run("show", "a", "--json")).json<ShowJson>().depends_on,
+    ).toEqual(["../backend:x"]);
   });
 
   it("resolves a unique suffix and names the candidates of an ambiguous one", async () => {

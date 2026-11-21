@@ -452,18 +452,19 @@ export function progressText(children: ChildrenProgress): string {
 }
 
 /**
- * A reference as an overview shows it, qualified like the ids around it: a
- * target in a project carries that project; one in the task's own tree
- * carries the task's alias when that tree is foreign.
+ * A reference as a person reads it: the form the command line takes. A
+ * resolved reference is named by its target from the caller's point of view,
+ * whatever tree stores it — the alias of a listed project, the bare id of a
+ * task in the local tree, the stored path of a tree that is not listed. One
+ * that did not resolve is shown as stored, qualified with the task's own
+ * alias when the task is foreign and the reference local.
  */
 export function referenceText(
   ref: ResolvedRef | null,
   raw: string,
   taskProject: string | null,
 ): string {
-  if (ref !== null && ref.project !== null) {
-    return qualifyId(ref.project, ref.id);
-  }
+  if (ref !== null) return qualifyId(ref.project, ref.id);
   return taskProject !== null && !raw.includes(":")
     ? qualifyId(taskProject, raw)
     : raw;

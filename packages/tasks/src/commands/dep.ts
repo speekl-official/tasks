@@ -119,8 +119,8 @@ async function literalForm(
 
 /**
  * The entry of `stored` that `arg` names for removal: the argument exactly as
- * stored (how `list` prints it), else what it resolves to like `add`, else —
- * when its target no longer resolves — the argument taken as a full id.
+ * stored, else what it resolves to like `add` (the form `list` prints), else
+ * — when its target no longer resolves — the argument taken as a full id.
  */
 async function storedEntry(
   context: CommandContext,

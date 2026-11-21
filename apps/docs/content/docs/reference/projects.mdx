@@ -38,7 +38,9 @@ tasks new backend:kernel/rate-limit "Rate-limit the claims API"
 In files, a reference into another tree is stored with the project path, not the alias,
 so it means the same thing to anyone reading the file: `tasks dep add launch
 backend:claims-api` stores `../backend:kernel/claims-api`. An alias exists only in the
-tree that configured it.
+tree that configured it. `show`, `resume` and `dep list` print the reference back as
+`backend:kernel/claims-api`, the form the command line takes; a reference into a tree that
+is not listed prints as stored, and the JSON always carries the stored form.
 
 ## Aggregated overviews
 

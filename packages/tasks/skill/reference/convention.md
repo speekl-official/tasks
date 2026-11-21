@@ -250,8 +250,8 @@ Split on the **last** colon. `project-path` is relative to the project root of
 the tree that stores the reference, never absolute. On the command line a
 reference is a full id, an unambiguous suffix, or `alias:path` for a project
 listed in `config.yml`; it is stored in full, with the alias translated into the
-relative path. Writes reach only listed trees; a tree reached by a bare path is
-read-only.
+relative path, and `show`, `resume` and `dep list` print it back in the alias
+form. Writes reach only listed trees; a tree reached by a bare path is read-only.
 
 ## Gate reasons
 

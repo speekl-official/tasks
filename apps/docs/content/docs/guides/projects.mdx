@@ -86,7 +86,8 @@ tasks dep add web:session-ui backend:claims-api
 ```
 
 Each write takes that tree's own lock. In the web repository the dependency is stored
-as `../backend:kernel/claims-api`, a path relative to its own root.
+as `../backend:kernel/claims-api`, a path relative to its own root, and `show` prints it
+as `backend:kernel/claims-api` again.
 
 </Step>
 

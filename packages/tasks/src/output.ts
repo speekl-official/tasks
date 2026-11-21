@@ -387,6 +387,20 @@ function listOrNull(values: readonly string[]): string | null {
   return values.length === 0 ? null : values.join(", ");
 }
 
+/** A gate's stored references, each as the command line takes it. */
+function referenceList(
+  d: DerivedTask,
+  raws: readonly string[],
+  refs: readonly ResolvedRef[],
+): string | null {
+  const byRef = new Map(refs.map((ref) => [ref.ref, ref]));
+  return listOrNull(
+    raws.map((raw) =>
+      referenceText(byRef.get(raw) ?? null, raw, d.snapshot.project),
+    ),
+  );
+}
+
 function headerLine(d: DerivedTask): string {
   return `${pc.bold(d.snapshot.task.title)}  ${pc.dim(d.json.id)}`;
 }
@@ -451,8 +465,11 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
       ["priority", priorityField(d)],
       ["assignee", json.assignee],
       ["claimed by", claimField(d)],
-      ["depends on", listOrNull(json.depends_on)],
-      ["finishes after", listOrNull(json.finishes_after)],
+      ["depends on", referenceList(d, json.depends_on, d.snapshot.start.refs)],
+      [
+        "finishes after",
+        referenceList(d, json.finishes_after, d.snapshot.finish.refs),
+      ],
       ["children", childrenField(d)],
       ["referenced by", listOrNull(extras.referenced_by)],
       ["workspace", listOrNull(extras.workspace)],
@@ -507,8 +524,14 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
         ["priority", priorityField(d)],
         ["assignee", json.assignee],
         ["claimed by", claimField(d)],
-        ["depends on", listOrNull(json.depends_on)],
-        ["finishes after", listOrNull(json.finishes_after)],
+        [
+          "depends on",
+          referenceList(d, json.depends_on, d.snapshot.start.refs),
+        ],
+        [
+          "finishes after",
+          referenceList(d, json.finishes_after, d.snapshot.finish.refs),
+        ],
         ["referenced by", listOrNull(extras.referenced_by)],
         ["path", json.path],
       ]),
@@ -680,13 +703,16 @@ export function renderSessionEnd(result: SessionEndJson): string {
     : `${head}\n  orphaned claims: ${result.claims.join(", ")}`;
 }
 
-/** `dep list` and `after list`: each reference and whether it is satisfied. */
+/**
+ * `dep list` and `after list`: each reference, named as the command line
+ * takes it, and whether it is satisfied.
+ */
 export function renderDepList(refs: ResolvedRef[]): string {
   if (refs.length === 0) return ui.dim("No references.");
   const out = table(["REFERENCE", "SATISFIED", "DETAIL"]);
   for (const ref of refs) {
     out.push([
-      ref.ref,
+      qualifyId(ref.project, ref.id),
       ref.satisfied ? pc.green("yes") : pc.red("no"),
       ref.satisfied
         ? pc.dim(ref.status ?? "")
