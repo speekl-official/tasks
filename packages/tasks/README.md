@@ -92,7 +92,7 @@ path, an unambiguous suffix of one, or `alias:path` in a listed project.
 | `tasks session-check`                                                                              | Exit `4` when a task claimed by this session has no `state.md`.                                                                                        |
 | `tasks validate [--fix]`                                                                           | Check the tree; exit `4` on errors; `--fix` regenerates `index.md` only.                                                                               |
 | `tasks reindex`                                                                                    | Regenerate `.tasks/index.md`.                                                                                                                          |
-| `tasks migrate [<alias>] [--map OLD=NEW…] [--map-phase OLD=NEW…]`                                  | Upgrade a v1 tree, once.                                                                                                                               |
+| `tasks migrate [<alias>] [--dry-run] [--map OLD=NEW…] [--map-phase OLD=NEW…]`                      | Upgrade a v1 tree, once; `--dry-run` previews it.                                                                                                      |
 
 Transitions take `-m, --message <text>` — required by `pause`, `handoff`, `done`,
 `cancel` and `reopen` — and `--force`, which overrides authorization and, where

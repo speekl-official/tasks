@@ -19,7 +19,7 @@ import {
 import { writeIndex } from "../index-md.js";
 import { withTreeLock } from "../lock.js";
 import { withMutation } from "../mutate.js";
-import type { LoadedTree } from "../projects.js";
+import type { LoadedTree, ProjectLoad } from "../projects.js";
 import { Projects } from "../projects.js";
 import { snapshotTree } from "../snapshot.js";
 import type { Task } from "../task.js";
@@ -92,6 +92,12 @@ export interface MigrateTreeOptions extends MigrateOptions {
    * command runs in, its alias when it is a listed project.
    */
   qualifier: string | null;
+  /**
+   * Plan and report without writing anything: not the tree, and not its
+   * lock, which would leave `.locks/` in a tree the run promises to leave
+   * as it is.
+   */
+  dryRun?: boolean;
 }
 
 /** NEW contains no `=` in either option, so the last one separates. */
@@ -167,6 +173,8 @@ export type ReadmeOutcome = "replaced" | "kept" | "absent";
 
 /** What `migrate --json` prints. */
 export interface MigrateJson {
+  /** Present, and true, under `--dry-run`: nothing was written. */
+  dry_run?: true;
   /** The `.tasks/` directory of the migrated tree. */
   tree: string;
   /** Live tasks migrated. */
@@ -1015,10 +1023,22 @@ async function generateIndex(project: Project): Promise<void> {
   await writeIndex(tree, derived);
 }
 
+/** The plan for a tree, read as it is now. */
+async function planFrom(
+  project: Project,
+  options: MigrateTreeOptions,
+): Promise<Plan> {
+  const config = await readV1Config(project.tasksDir);
+  const v1 = await readV1Tasks(project.tasksDir);
+  return plan({ project, config, v1, options });
+}
+
 /**
  * Migrate the v1 tree of `target`, once: plan everything from the tree as
  * read inside its lock, refuse with every problem listed before anything is
- * written, then perform the seven steps.
+ * written, then perform the seven steps. A dry run stops after the plan,
+ * and reads without the lock: taking it would create `.locks/` in a tree
+ * the run promises not to touch.
  */
 export async function migrateTree(
   target: Project,
@@ -1029,12 +1049,13 @@ export async function migrateTree(
   const root = await realpathOr(target.root);
   const project: Project = { root, tasksDir: path.join(root, TASKS_DIRNAME) };
 
+  if (options.dryRun === true) {
+    return (await planFrom(project, options)).migration;
+  }
   return withTreeLock(project.tasksDir, async () => {
     // Another migrate may have finished between the check and the lock.
     await assertV1Tree(project);
-    const config = await readV1Config(project.tasksDir);
-    const v1 = await readV1Tasks(project.tasksDir);
-    const planned = await plan({ project, config, v1, options });
+    const planned = await planFrom(project, options);
     await perform(project, planned);
     return planned.migration;
   });
@@ -1050,6 +1071,24 @@ interface IntoSite {
   index: number;
   ref: string;
   to: string;
+}
+
+/**
+ * Whether a project path leads to the migrated tree: loaded as v2 once the
+ * migration is done, or still the v1 tree a dry run previews.
+ */
+async function pointsAtMigrated(
+  target: ProjectLoad,
+  migration: Migration,
+): Promise<boolean> {
+  if (target.kind === "ok") return target.key === migration.project.root;
+  if (target.kind !== "unsupported-version" || target.version !== 1) {
+    return false;
+  }
+  const found = await findProject(target.dir);
+  return (
+    found !== null && (await realpathOr(found.root)) === migration.project.root
+  );
 }
 
 /**
@@ -1080,9 +1119,7 @@ async function referencesInto(
           if (isTaskError(err)) continue;
           throw err;
         }
-        if (target.kind !== "ok" || target.key !== migration.project.root) {
-          continue;
-        }
+        if (!(await pointsAtMigrated(target, migration))) continue;
         out.push({
           task,
           field,
@@ -1154,6 +1191,18 @@ export async function rewriteReferencesInto(
     rewritten.push(...(await rewriteIn(context, load, migration)));
   }
 
+  return { rewritten, unrewritten: await unrewrittenInto(projects, migration) };
+}
+
+/**
+ * References into the migrated tree held by trees the command can read but
+ * not write — reached by a bare path from a tree it can see — listed, never
+ * rewritten.
+ */
+async function unrewrittenInto(
+  projects: Projects,
+  migration: Migration,
+): Promise<UnrewrittenRefJson[]> {
   const holders = await projects.writableTrees();
   const readOnly = new Map<string, LoadedTree>();
   for (const holder of holders) {
@@ -1192,7 +1241,34 @@ export async function rewriteReferencesInto(
       });
     }
   }
-  return { rewritten, unrewritten };
+  return unrewritten;
+}
+
+/**
+ * A dry run's view of `rewriteReferencesInto`: what it would rewrite in the
+ * trees the command can write and what it would list, read from the trees
+ * as they are, nothing written.
+ */
+export async function previewReferencesInto(
+  context: CommandContext,
+  migration: Migration,
+): Promise<ReferencesInto> {
+  const { projects } = context;
+  const rewritten: RewrittenRefJson[] = [];
+  for (const load of await projects.writableTrees()) {
+    if (load.key === migration.project.root) continue;
+    const project = projects.qualifier(load);
+    for (const site of await referencesInto(projects, load, migration)) {
+      rewritten.push({
+        project,
+        task: site.task.id,
+        field: site.field,
+        from: site.ref,
+        to: site.to,
+      });
+    }
+  }
+  return { rewritten, unrewritten: await unrewrittenInto(projects, migration) };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1203,6 +1279,7 @@ export async function rewriteReferencesInto(
 function consequencesOf(
   migration: Migration,
   unrewritten: readonly UnrewrittenRefJson[],
+  dryRun: boolean,
 ): string[] {
   const qualify = (id: string) => qualifyId(migration.qualifier, id);
   const out: string[] = [];
@@ -1234,15 +1311,22 @@ function consequencesOf(
       `no scope: active_phase "${migration.droppedScope}" names no phase directory of the tree`,
     );
   }
+  if (dryRun && migration.qualifier === null) {
+    out.push(
+      "not previewed: the references other trees hold into this tree; the real run rewrites them in every tree it can write and lists the rest",
+    );
+  }
   return out;
 }
 
 export function migrateJson(
   migration: Migration,
   into: ReferencesInto,
+  dryRun = false,
 ): MigrateJson {
   const unrewritten = [...migration.unrewritten, ...into.unrewritten];
   return {
+    ...(dryRun ? { dry_run: true as const } : {}),
     tree: migration.project.tasksDir,
     tasks: migration.tasks,
     archived: migration.archived,
@@ -1252,6 +1336,6 @@ export function migrateJson(
     unrewritten,
     readme: migration.readme,
     scope: migration.scope,
-    consequences: consequencesOf(migration, unrewritten),
+    consequences: consequencesOf(migration, unrewritten, dryRun),
   };
 }

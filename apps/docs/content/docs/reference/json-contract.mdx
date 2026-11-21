@@ -529,6 +529,7 @@ recreated at that path. `delete` confirms the removal.
 
 | Field                  | Notes                                                                                   |
 | ---------------------- | --------------------------------------------------------------------------------------- |
+| `dry_run`              | Present, and `true`, under `--dry-run`: nothing was written, and the fields below say what the migration would do. |
 | `tree`                 | The migrated `.tasks/` directory.                                                       |
 | `tasks`, `archived`    | How many live and archived tasks were migrated.                                         |
 | `phases`               | Every v1 phase and its v2 directory name.                                               |

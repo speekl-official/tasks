@@ -213,7 +213,7 @@ projects: # sibling trees by alias, relative to the project root
 `version` is required; every other key is optional. Unknown keys are rejected
 (exit `2`): v1's `active_phase` is `scope` now, and `statuses`, `roles` and
 `transitions` are gone. A tree without `version: 2` is a v1 tree, refused by
-every command that opens it; `tasks migrate` upgrades it, and `skill install` and
+every command that opens it; `tasks migrate` upgrades it (`--dry-run` previews), and `skill install` and
 `hooks install` only write beside it.
 
 Once `actors` lists anyone, `assign`, `handoff`, `new --assign` and `--as` (on a

@@ -33,6 +33,12 @@ rewrite them in the tree the command runs in and in every tree that tree lists u
 one tree at a time under each tree's lock, and MUST list the ones it finds in trees it can read but
 not write; those resolve as `missing` until edited.
 
+An implementation SHOULD offer a dry run (`--dry-run`) that performs every check above, refuses
+exactly as the migration would, and reports what it would do — the counts, the mappings, the
+references it would rewrite and the ones it would keep — without writing anything, the lock
+included. The references other trees hold into the tree MAY be left out of the preview when that
+tree is the one the command runs in, and the report then says so.
+
 Two consequences the migration SHOULD print: a task migrated to `IN_PROGRESS` carries
 `claimed_session: null`, so its liveness is unknown and a claimant that runs with a session token
 recovers it only by force; a task mapped to `PAUSED` has no `state.md` and is reported by

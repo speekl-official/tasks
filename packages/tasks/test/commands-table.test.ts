@@ -198,10 +198,10 @@ const TABLE: Entry[] = [
   { row: "validate [--fix]", path: ["validate"], args: [], options: ["--fix"] },
   { row: "reindex", path: ["reindex"], args: [], options: [] },
   {
-    row: "migrate [<alias>] [--map OLD=NEW …] [--map-phase OLD=NEW …]",
+    row: "migrate [<alias>] [--dry-run] [--map OLD=NEW …] [--map-phase OLD=NEW …]",
     path: ["migrate"],
     args: ["[alias]"],
-    options: ["--map <mapping>", "--map-phase <mapping>"],
+    options: ["--map <mapping>", "--map-phase <mapping>", "--dry-run"],
   },
 ];
 

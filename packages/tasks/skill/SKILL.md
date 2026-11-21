@@ -34,7 +34,7 @@ tasks mine --json
   `git config --global tasks.actor <name>`; with a roster on, a write under a
   name it lacks is refused.
 - Exit `2` with `details.version` `1`, a v1 tree: tell the person; the one-time
-  `tasks migrate` is theirs to run.
+  `tasks migrate` is theirs to run (`tasks migrate --dry-run` previews it).
 - If `tasks` is not on PATH, use `npx @speekl/tasks` in its place everywhere.
 - In a git worktree your commands reach the main checkout's tree by themselves;
   `-C <dir>` only when a person points you at a tree elsewhere.

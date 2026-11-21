@@ -189,7 +189,7 @@ directory for [discovery](/docs/spec/layout#discovery).
 | `session-check [--as <actor>]` | The [exit invariant](/docs/spec/sessions#session-check); exit `4` on violations. |
 | `validate [--fix]` | The [validation](/docs/spec/task-file#validation) findings; `--fix` regenerates `index.md` only. |
 | `reindex` | Regenerate `index.md`. |
-| `migrate [<alias>] [--map OLD=NEW …] [--map-phase OLD=NEW …]` | The one-time [upgrade from v1](/docs/spec/migration) of this tree, or of a listed project. |
+| `migrate [<alias>] [--dry-run] [--map OLD=NEW …] [--map-phase OLD=NEW …]` | The one-time [upgrade from v1](/docs/spec/migration) of this tree, or of a listed project; `--dry-run` performs every check and reports the plan without writing. |
 
 ## Validation, session-check and session-end output
 

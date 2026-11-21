@@ -861,7 +861,7 @@ exists, every write regenerates it, so this is needed once, or after a hand edit
 ### `tasks migrate`
 
 ```sh
-tasks migrate [<alias>] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
+tasks migrate [<alias>] [--dry-run] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
 ```
 
 | Argument / option       | Effect                                                                                  |
@@ -869,6 +869,7 @@ tasks migrate [<alias>] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
 | `<alias>`               | Migrate the v1 tree of a project this v2 tree lists, instead of this tree.              |
 | `--map <OLD=NEW>`       | The v2 status of a v1 status: needed for a status outside the v1 roles; may also override a role's. Repeatable. |
 | `--map-phase <OLD=NEW>` | The v2 directory name of a v1 phase: needed when its name has a `.` or `_`; may also rename a valid one. Repeatable. |
+| `--dry-run`             | Check everything and report what the migration would do, writing nothing: not the tree, not its lock. A refusal is the same refusal. |
 
 The one-time upgrade of a v1 tree, and the only command that opens a v1 tree (`skill install`
 and `hooks install` write beside one without reading it). Under the
@@ -887,6 +888,12 @@ in trees it can read but not write are reported. The output names the consequenc
 person must know about: `IN_PROGRESS` tasks whose claims now have no session, `PAUSED`
 tasks without a `state.md`, references kept as written, an edited `README.md` kept, an
 `active_phase` that named no phase directory and became no scope.
+
+`--dry-run` prints the same report about what would happen — `Dry run: migrating … would move
+3 tasks; nothing was written`, `2 to rewrite` — and `dry_run: true` in the JSON. From a v2
+tracker migrating a listed project, the references the tracker and its other projects hold into
+it are previewed too; from the v1 tree itself they are not, since nothing can open that tree
+yet, and the last `!` line says so.
 
 ```txt
 ✓ Migrated /Users/you/acme-api/.tasks to .tasks v2: 3 tasks
