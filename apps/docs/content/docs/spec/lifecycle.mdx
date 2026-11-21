@@ -92,7 +92,8 @@ situation by this table, so that two of them agree on what a tree looks like.
 
 `N/M` is the parent's progress: live children resolved out of live children. Overview commands
 (`ready`, `mine`, `list`, `tree`) MUST show the situation, the effective
-[priority](/docs/spec/lifecycle#priority) when it is not `normal`, and the secondary labels, and
+[priority](/docs/spec/lifecycle#priority) when it is not `normal`, and the secondary labels, SHOULD
+show the time since `updated` as a compact age (`3h`, `2d`, `5w`, `4mo`, `1y`), and
 SHOULD NOT show the stored status, which `show`, `resume`, the JSON `status` field and the file
 itself carry. `list` MUST accept a filter by situation (`--parked`, `--blocked`, `--waiting`, …)
 and by the `active` label (`--active`).

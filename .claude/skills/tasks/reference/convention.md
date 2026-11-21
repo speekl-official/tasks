@@ -114,7 +114,9 @@ descendants in those situations, which `--top` would otherwise hide), liveness,
 the assignee, `held by X` and `closable` — the last three only when they are not
 the situation itself. The
 effective priority has a column of its own: blank for `normal`,
-`high (inherited)` when it is an ancestor's.
+`high (inherited)` when it is an ancestor's. UPDATED, after the situation, is the
+time since the manifest was last written by the tool, as a compact age (`3h`,
+`2d`, `5w`, `4mo`, `1y`); `state` and a narrative `log` entry do not move it.
 
 A task is **ready** for an actor when it is `TODO` or `PAUSED`, every
 `depends_on` reference is `DONE`, it is assigned to nobody or to that actor, it

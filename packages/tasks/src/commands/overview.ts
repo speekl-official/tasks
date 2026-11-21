@@ -2,8 +2,16 @@ import type { Command } from "commander";
 
 import type { CommandContext } from "../context.js";
 import { openContext, resolveScope } from "../context.js";
-import type { DerivedTask } from "../core/derive.js";
-import { inScope, priorityAtLeast } from "../core/derive.js";
+import type { DerivedTask, TimeKey } from "../core/derive.js";
+import {
+  TIME_KEYS,
+  createdSince,
+  inScope,
+  isTimeKey,
+  priorityAtLeast,
+  timeComparator,
+  updatedBefore,
+} from "../core/derive.js";
 import { unavailableReason } from "../core/gates.js";
 import { compareIds } from "../core/ids.js";
 import type { UnavailableTree } from "../core/projects.js";
@@ -17,7 +25,9 @@ import type {
   UnavailableProjectJson,
 } from "../core/types.js";
 import { CONVENTION_VERSION, PRIORITIES, isPriority } from "../core/types.js";
+import { parseSince } from "../core/time.js";
 import { TaskError } from "../errors.js";
+import type { OverviewOptions } from "../output.js";
 import { emitJson, renderCollectionFooter, writeOut } from "../output.js";
 
 /**
@@ -44,6 +54,30 @@ export interface PriorityOptions {
   priority?: string;
 }
 
+/** The options of `list` and `tree` that order by a time: `--sort`, `--reverse`. */
+export interface SortOptions {
+  sort?: string;
+  reverse?: boolean;
+}
+
+/** The options of `list` that filter by a time: `--updated-before`, `--created-since`. */
+export interface TimeFilterOptions {
+  updatedBefore?: string;
+  createdSince?: string;
+}
+
+/** What the time options resolve to, once, when the span opens. */
+export interface TimeSelection {
+  /** The key `--sort` names, or `null` for the tree order. */
+  sort: TimeKey | null;
+  /** Oldest first instead of newest first. */
+  reverse: boolean;
+  /** The bound of `--updated-before`, canonical, or `null`. */
+  updatedBefore: string | null;
+  /** The bound of `--created-since`, canonical, or `null`. */
+  createdSince: string | null;
+}
+
 /** The trees one overview spans, derived for the calling actor. */
 export interface Span {
   context: CommandContext;
@@ -53,6 +87,10 @@ export interface Span {
   depth: number | null;
   /** The lowest effective priority shown, or `null` for every level. */
   priority: Priority | null;
+  /** The order and the time filters asked for. */
+  time: TimeSelection;
+  /** The instant the command started: ages and durations count from it. */
+  now: Date;
   /** The local tree first, then every listed tree that loaded. */
   trees: TreeDerivation[];
   /** Listed projects left out because they could not be read. */
@@ -89,6 +127,67 @@ export function priorityOption(command: Command): Command {
     "--priority <level>",
     `only tasks whose effective priority is at least this level: ${PRIORITIES.join(", ")}`,
   );
+}
+
+/** Declare `--sort <key>` and `--reverse` on an overview that orders by a time. */
+export function sortOptions(command: Command): Command {
+  return command
+    .option(
+      "--sort <key>",
+      `order by a time, newest first: ${TIME_KEYS.join(" or ")} (default: tree order)`,
+    )
+    .option("--reverse", "with --sort: oldest first");
+}
+
+/** Declare `--updated-before <when>` and `--created-since <when>` on `list`. */
+export function timeFilterOptions(command: Command): Command {
+  return command
+    .option(
+      "--updated-before <when>",
+      "only tasks last written before a timestamp, a date, or a duration back from now (30m, 12h, 7d, 2w)",
+    )
+    .option(
+      "--created-since <when>",
+      "only tasks created at or after a timestamp, a date, or a duration back from now",
+    );
+}
+
+/**
+ * The time options, checked: `--sort` names `created` or `updated`,
+ * `--reverse` needs it, and each bound follows the grammar of `--since`.
+ */
+export function resolveTime(
+  options: SortOptions & TimeFilterOptions,
+  now: Date,
+): TimeSelection {
+  let sort: TimeKey | null = null;
+  if (options.sort !== undefined) {
+    if (!isTimeKey(options.sort)) {
+      throw TaskError.usage(
+        `Invalid --sort "${options.sort}": expected ${TIME_KEYS.join(" or ")}.`,
+        { sort: options.sort, allowed: [...TIME_KEYS] },
+      );
+    }
+    sort = options.sort;
+  }
+  if (options.reverse === true && sort === null) {
+    throw TaskError.usage(
+      "--reverse without --sort: the tree order has no direction to reverse; give --sort created or --sort updated.",
+      { reverse: true },
+    );
+  }
+  return {
+    sort,
+    reverse: options.reverse === true,
+    updatedBefore:
+      options.updatedBefore === undefined
+        ? null
+        : parseSince(options.updatedBefore, now, "--updated-before"),
+    createdSince:
+      options.createdSince === undefined
+        ? null
+        : parseSince(options.createdSince, now, "--created-since"),
+  };
 }
 
 /** The level `--priority` names, or `null`; a level outside the four is refused. */
@@ -137,13 +236,19 @@ export function resolveDepth(options: DepthOptions): number | null {
  */
 export async function openSpan(
   command: Command,
-  options: SpanOptions & DepthOptions & PriorityOptions,
+  options: SpanOptions &
+    DepthOptions &
+    PriorityOptions &
+    SortOptions &
+    TimeFilterOptions,
   scoped: boolean,
 ): Promise<Span> {
+  const now = new Date();
   const context = await openContext(command);
   const scope = scoped ? resolveScope(context, options) : null;
   const depth = resolveDepth(options);
   const priority = resolvePriority(options);
+  const time = resolveTime(options, now);
   const local = options.local === true || scope !== null;
   const trees = await snapshotAll(
     snapshotFromContext(context),
@@ -155,7 +260,7 @@ export async function openSpan(
     : (await context.projects.listed()).filter(
         (load): load is UnavailableTree => load.kind !== "ok",
       );
-  return { context, scope, depth, priority, trees, unavailable };
+  return { context, scope, depth, priority, time, now, trees, unavailable };
 }
 
 /**
@@ -193,6 +298,43 @@ export function spanTasks(span: Span): DerivedTask[] {
 export function atPriority(span: Span, rows: DerivedTask[]): DerivedTask[] {
   if (span.priority === null) return rows;
   return rows.filter(priorityAtLeast(span.priority));
+}
+
+/** The rows within the time bounds asked for; every row without any. */
+export function withinTime(span: Span, rows: DerivedTask[]): DerivedTask[] {
+  const { updatedBefore: before, createdSince: since } = span.time;
+  let out = rows;
+  if (before !== null) out = out.filter(updatedBefore(before));
+  if (since !== null) out = out.filter(createdSince(since));
+  return out;
+}
+
+/**
+ * The order `--sort` asks for, or `null` for the tree order the rows already
+ * have. `list` sorts its rows with it; `tree` sorts siblings with it.
+ */
+export function timeOrder(
+  span: Span,
+): ((a: DerivedTask, b: DerivedTask) => number) | null {
+  if (span.time.sort === null) return null;
+  return timeComparator(
+    span.time.sort,
+    span.time.reverse,
+    span.context.projects.aliases(),
+  );
+}
+
+/**
+ * The overview's rendering options for this span: ids carry their alias,
+ * ages count from the command's start, and a CREATED column joins UPDATED
+ * when `created` is the key or the filter in play.
+ */
+export function viewOptions(span: Span): OverviewOptions {
+  return {
+    project: true,
+    now: span.now,
+    created: span.time.sort === "created" || span.time.createdSince !== null,
+  };
 }
 
 /** Every task of every spanned tree, unscoped, for `readySet` to filter. */

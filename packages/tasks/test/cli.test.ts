@@ -1379,7 +1379,7 @@ describe("mine", () => {
   it("renders each task's last log entry", async () => {
     sandbox = await treeSandbox(MINE_TREE);
     const out = plain((await sandbox.session("s1")("mine")).stdout);
-    expect(out).toMatch(/this-session\s+working by tester\s+live/);
+    expect(out).toMatch(/this-session\s+working by tester\s+\S+\s+live/);
     expect(out).toContain("2026-01-02T00:00:00Z alice");
     expect(out).toContain("Please deploy after the review.");
     expect(out).toContain("2026-01-03T00:00:00Z tester s:s1");
@@ -1637,7 +1637,7 @@ describe("depth", () => {
       },
     });
     const out = plain((await sandbox.run("tree", "--top")).stdout);
-    expect(out).toMatch(/epic\s+open 0\/2\s+1 waiting · 1 blocked/);
+    expect(out).toMatch(/epic\s+open 0\/2\s+\S+\s+1 waiting · 1 blocked/);
     expect(out).not.toContain("epic/leaf");
   });
 
@@ -1814,6 +1814,149 @@ describe("tree", () => {
       await sandbox.run("tree", "--resolved", "--local", "--json"),
     );
     expect(resolved.tasks.map((task) => task.id)).toContain("epic/b");
+  });
+});
+
+describe("time in overviews", () => {
+  const DATED: TreeSpec = {
+    tasks: {
+      a: { created: "2026-01-01T00:00:00Z", updated: "2026-03-01T00:00:00Z" },
+      b: { created: "2026-02-01T00:00:00Z", updated: "2026-01-15T00:00:00Z" },
+      c: { created: "2026-01-20T00:00:00Z", updated: "2026-02-10T00:00:00Z" },
+    },
+  };
+
+  it("orders list by a time with --sort, newest first, oldest first with --reverse", async () => {
+    sandbox = await treeSandbox(DATED);
+    expect(ids(await sandbox.run("list", "--json"))).toEqual(["a", "b", "c"]);
+    expect(
+      ids(await sandbox.run("list", "--sort", "updated", "--json")),
+    ).toEqual(["a", "c", "b"]);
+    expect(
+      ids(
+        await sandbox.run("list", "--sort", "updated", "--reverse", "--json"),
+      ),
+    ).toEqual(["b", "c", "a"]);
+    expect(
+      ids(await sandbox.run("list", "--sort", "created", "--json")),
+    ).toEqual(["b", "c", "a"]);
+  });
+
+  it("refuses --sort outside created and updated, and --reverse on its own", async () => {
+    sandbox = await treeSandbox({ tasks: { t: {} } });
+    const bad = await sandbox.run("list", "--sort", "title", "--json");
+    expect(bad.code).toBe(ExitCode.Usage);
+    expect(envelope(bad).error).toMatchObject({
+      message: 'Invalid --sort "title": expected created or updated.',
+      details: { sort: "title", allowed: ["created", "updated"] },
+    });
+    const alone = await sandbox.run("tree", "--reverse", "--json");
+    expect(alone.code).toBe(ExitCode.Usage);
+    expect(envelope(alone).error.message).toContain("--reverse without --sort");
+  });
+
+  it("bounds list by time with --updated-before and --created-since, in the grammar of --since", async () => {
+    sandbox = await treeSandbox(DATED);
+    // Strictly before: b, updated at that midnight, is not.
+    expect(
+      ids(
+        await sandbox.run("list", "--updated-before", "2026-02-10", "--json"),
+      ),
+    ).toEqual(["b"]);
+    // At or after; the rows keep the tree order.
+    expect(
+      ids(await sandbox.run("list", "--created-since", "2026-01-20", "--json")),
+    ).toEqual(["b", "c"]);
+    expect(
+      ids(
+        await sandbox.run(
+          "list",
+          "--created-since",
+          "2026-01-20",
+          "--updated-before",
+          "2026-02-01",
+          "--json",
+        ),
+      ),
+    ).toEqual(["b"]);
+    // A duration counts back from now, so every task of 2026 is before it.
+    expect(
+      ids(await sandbox.run("list", "--updated-before", "1d", "--json")),
+    ).toEqual(["a", "b", "c"]);
+    const bad = await sandbox.run("list", "--created-since", "soon", "--json");
+    expect(bad.code).toBe(ExitCode.Usage);
+    expect(envelope(bad).error.details).toEqual({
+      option: "--created-since",
+      value: "soon",
+    });
+  });
+
+  it("orders siblings in tree with --sort and keeps the nesting", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: { created: "2026-01-01T00:00:00Z" },
+        "epic/a": { created: "2026-01-02T00:00:00Z" },
+        "epic/b": { created: "2026-01-03T00:00:00Z" },
+        solo: { created: "2026-02-01T00:00:00Z" },
+      },
+    });
+    const lines = plain(
+      (await sandbox.run("tree", "--sort", "created")).stdout,
+    ).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(at(/^solo\s/)).toBeLessThan(at(/^epic\s/));
+    expect(at(/^epic\s/)).toBeLessThan(at(/^ {2}b\s/));
+    expect(at(/^ {2}b\s/)).toBeLessThan(at(/^ {2}a\s/));
+    const reversed = plain(
+      (await sandbox.run("tree", "--sort", "created", "--reverse")).stdout,
+    ).split("\n");
+    expect(reversed.findIndex((line) => /^epic\s/.test(line))).toBeLessThan(
+      reversed.findIndex((line) => /^solo\s/.test(line)),
+    );
+  });
+
+  it("shows UPDATED after the situation in every overview, CREATED beside it when created is the key or the bound", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        t: { created: "2026-01-01T00:00:00Z", updated: "2026-01-02T00:00:00Z" },
+        w: { status: "IN_PROGRESS" },
+      },
+    });
+    for (const argv of [["list"], ["ready"], ["tree"], ["mine"]]) {
+      const out = plain((await sandbox.run(...argv)).stdout);
+      expect(out, argv.join(" ")).toMatch(/SITUATION\s+UPDATED\s+PRIORITY/);
+      expect(out, argv.join(" ")).not.toContain("CREATED");
+    }
+    const sorted = plain(
+      (await sandbox.run("list", "--sort", "created")).stdout,
+    );
+    expect(sorted).toMatch(/SITUATION\s+CREATED\s+UPDATED\s+PRIORITY/);
+    const bounded = plain(
+      (await sandbox.run("list", "--created-since", "2025-01-01")).stdout,
+    );
+    expect(bounded).toMatch(/CREATED\s+UPDATED/);
+    const tree = plain((await sandbox.run("tree", "--sort", "created")).stdout);
+    expect(tree).toMatch(/CREATED\s+UPDATED/);
+    // The cell is a compact age; the JSON keeps its timestamps and gains nothing.
+    const row = plain((await sandbox.run("list")).stdout)
+      .split("\n")
+      .find((line) => /^\s?t\s/.test(line));
+    expect(row).toMatch(/\s\d+(m|h|d|w|mo|y)\s/);
+    const json = collection(
+      await sandbox.run("list", "--sort", "updated", "--json"),
+    );
+    expect(Object.keys(json)).toEqual([
+      "scope",
+      "projects",
+      "count",
+      "tasks",
+      "malformed",
+      "unavailable",
+    ]);
+    expect(json.tasks[0]).toMatchObject({
+      created: "2026-01-01T00:00:00Z",
+      updated: "2026-01-02T00:00:00Z",
+    });
   });
 });
 

@@ -145,12 +145,12 @@ tasks log --since 1d    # yesterday across all of them
 ```
 
 ```txt
-TASK                       SITUATION                             PRIORITY   LABELS  TITLE
-public-api                 assigned alice                                           Launch the public API
+TASK                       SITUATION                             UPDATED  PRIORITY   LABELS  TITLE
+public-api                 assigned alice                        2d                          Launch the public API
   ↳ after backend:kernel/claims-api (not-done)
   ↳ after web:session-ui (not-done)
-backend:kernel/claims-api  ready                                                    Expose the claims API
-web:session-ui             blocked by backend:kernel/claims-api                     Show the active session
+backend:kernel/claims-api  ready                                 5h                          Expose the claims API
+web:session-ui             blocked by backend:kernel/claims-api  1d                          Show the active session
 
 3 tasks · projects backend, web
 ```

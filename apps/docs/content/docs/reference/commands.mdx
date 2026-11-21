@@ -239,11 +239,12 @@ here as not listed. Without a roster the footer says so: any name may be assigne
 ### `tasks list`
 
 ```sh
-tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--priority <level>] [--json]
+tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--priority <level>]
+           [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--json]
 ```
 
-Every open task, in tree order, with its situation, its effective priority and its
-secondary labels. Filters select by the [situation](/docs/concepts#situations-not-statuses)
+Every open task, in tree order unless `--sort` says otherwise, with its situation, the age
+of its last update, its effective priority and its secondary labels. Filters select by the [situation](/docs/concepts#situations-not-statuses)
 word, or by the `active` label, and combine with OR:
 
 | Filter        | Selects                                         |
@@ -274,6 +275,21 @@ them: `list --blocked --priority high` is the blocked tasks that are high or urg
 `list --priority urgent` every urgent task whatever its situation. A level outside `urgent`,
 `high`, `normal` and `low` exits `2`.
 
+The UPDATED column, in every overview, is the time since the task's manifest was last
+written by the tool, as a compact age: `3h`, `2d`, `5w`, `4mo`, `1y`. Transitions, `note`,
+`assign`, `priority` and `move` write the manifest; `state` and a narrative `log` entry write
+workspace files and leave it as it is. `--sort created` and `--sort updated` order the rows by
+that timestamp, newest first, `--reverse` oldest first, and a CREATED column joins UPDATED
+while `created` is the key. `--updated-before <when>` keeps the tasks not written since then,
+`--created-since <when>` those created from then on (CREATED shown), each narrowing what the
+other filters select; `<when>` is the grammar of `log --since`: a timestamp, a date, or a
+duration back from now (`30m`, `12h`, `7d`, `2w`). `list --waiting --updated-before 2w` is the
+paused tasks nobody has touched for two weeks, `list --created-since 7d` the week's new tasks,
+`list --sort updated --reverse` the whole tree with the longest untouched first. The JSON is
+unchanged: the rows in the order asked for, `created` and `updated` on each task as before.
+`--reverse` without `--sort`, a `--sort` key other than the two, or a bound outside the
+grammar exit `2`.
+
 `--depth <n>` keeps the tasks at most *n* levels of containment deep, and `--top` is
 `--depth 1`: the top level alone — the epics, each with its `open 2/5` progress, and the
 tasks that stand on their own. The depth counts task ancestors within the scope, so
@@ -285,24 +301,26 @@ within the depth, and the footer names the limit (`12 tasks · depth 1`). `--top
 ### `tasks tree`
 
 ```sh
-tasks tree [--scope <path>] [--all] [--local] [--depth <n> | --top] [--resolved] [--json]
+tasks tree [--scope <path>] [--all] [--local] [--depth <n> | --top] [--resolved] [--sort created|updated] [--reverse] [--json]
 ```
 
 Open tasks nested by containment, with each task's `finishes_after` joins listed under
 it (`↳ after search (not-done)`), tagged with their project. `--resolved` includes done
 and cancelled tasks, so an open parent keeps its finished children beneath it. `--depth <n>`
 and `--top` work as for `list`: `tasks tree --top` is the top level alone, and
-`tasks tree --scope auth-rework --depth 2` the epic with its direct children. The JSON is
-the same flat collection as `list`: every task carries `parent`.
+`tasks tree --scope auth-rework --depth 2` the epic with its direct children. `--sort created`
+or `--sort updated` orders siblings by that timestamp, newest first, `--reverse` oldest first,
+the nesting unchanged; the UPDATED column is as for `list`, and CREATED joins it under
+`--sort created`. The JSON is the same flat collection as `list`: every task carries `parent`.
 
 ```txt
-TASK               SITUATION          PRIORITY          LABELS          TITLE
-auth-rework        open 1/2                             active          Rework authentication
-  wire-refresh     working by agent                     live            Wire the refresh endpoint
-release            backlog            urgent            assigned alice  Release 2.0
+TASK               SITUATION          UPDATED  PRIORITY          LABELS          TITLE
+auth-rework        open 1/2           3h                         active          Rework authentication
+  wire-refresh     working by agent   3h                         live            Wire the refresh endpoint
+release            backlog            2w       urgent            assigned alice  Release 2.0
   ↳ after search (not-done)
-search             open 0/3           high                              Full-text search
-  index-docs       ready              high (inherited)                  Index documents
+search             open 0/3           5d       high                              Full-text search
+  index-docs       ready              5d       high (inherited)                  Index documents
 ```
 
 ### `tasks log --since`

@@ -10,6 +10,7 @@ import {
   openSpan,
   priorityOption,
   scopeOptions,
+  viewOptions,
 } from "./overview.js";
 
 interface ReadyOptions extends SpanOptions, PriorityOptions {
@@ -36,7 +37,7 @@ export function readyCommand(): Command {
       );
       emitOverview(span, rows, (shown) =>
         renderOverview(shown, {
-          project: true,
+          ...viewOptions(span),
           empty: "Nothing is ready for you to take.",
         }),
       );

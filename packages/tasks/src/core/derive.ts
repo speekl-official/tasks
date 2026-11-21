@@ -466,6 +466,49 @@ export function hasOpenStatus(d: DerivedTask): boolean {
   return isOpen(d.snapshot.task.frontmatter.status);
 }
 
+/** The two timestamps an overview can order or filter by. */
+export type TimeKey = "created" | "updated";
+
+export const TIME_KEYS: readonly TimeKey[] = ["created", "updated"];
+
+export function isTimeKey(value: unknown): value is TimeKey {
+  return value === "created" || value === "updated";
+}
+
+/**
+ * The order of `--sort <key>`: the newest first (the latest `created`, or the
+ * most recently `updated`), `reverse` the oldest first; ties fall back to the
+ * tree order, local tree first. Canonical timestamps compare as text.
+ */
+export function timeComparator(
+  key: TimeKey,
+  reverse: boolean,
+  aliasOrder: string[] = [],
+): (a: DerivedTask, b: DerivedTask) => number {
+  return (a, b) => {
+    const left = a.snapshot.task.frontmatter[key];
+    const right = b.snapshot.task.frontmatter[key];
+    const byTime = reverse
+      ? compareText(left, right)
+      : compareText(right, left);
+    return (
+      byTime ||
+      compareProjects(a.snapshot.project, b.snapshot.project, aliasOrder) ||
+      compareIds(a.snapshot.task.id, b.snapshot.task.id)
+    );
+  };
+}
+
+/** The filter of `--updated-before <when>`: last written before `bound`. */
+export function updatedBefore(bound: string): (d: DerivedTask) => boolean {
+  return (d) => d.snapshot.task.frontmatter.updated < bound;
+}
+
+/** The filter of `--created-since <when>`: created at `bound` or after. */
+export function createdSince(bound: string): (d: DerivedTask) => boolean {
+  return (d) => d.snapshot.task.frontmatter.created >= bound;
+}
+
 /** The filter of `--priority <level>`: effective priority at `level` or above. */
 export function priorityAtLeast(level: Priority): (d: DerivedTask) => boolean {
   return (d) =>

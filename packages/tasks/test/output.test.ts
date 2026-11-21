@@ -201,6 +201,24 @@ describe("renderOverview", () => {
       "Nothing ready.",
     );
   });
+
+  it("shows the age since the last update after the situation, and since creation on request", async () => {
+    const { local } = await fixture();
+    const rows = [...local.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const lines = plain(renderOverview(rows, { now })).split("\n");
+    expect(lines[0]).toMatch(
+      /^ ID\s+SITUATION\s+UPDATED\s+PRIORITY\s+LABELS\s+TITLE/,
+    );
+    expect(lines[0]).not.toContain("CREATED");
+    for (const line of lines.slice(1)) {
+      expect(line).toMatch(/\s(now|\d+(m|h|d|w|mo|y))\s/);
+    }
+    const both = plain(renderOverview(rows, { now, created: true })).split(
+      "\n",
+    );
+    expect(both[0]).toMatch(/SITUATION\s+CREATED\s+UPDATED\s+PRIORITY/);
+  });
 });
 
 describe("renderTree", () => {
@@ -239,6 +257,21 @@ describe("renderTree", () => {
     );
     expect(text).toContain("\nauth-rework/phase/impl ");
     expect(plain(renderTree([]))).toBe("No tasks.");
+  });
+
+  it("orders siblings as asked and keeps the nesting", async () => {
+    const { local } = await fixture();
+    const lines = plain(
+      renderTree([...local.values()], {
+        order: (a, b) => b.snapshot.task.id.localeCompare(a.snapshot.task.id),
+      }),
+    ).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(lines[0]).toMatch(/^TASK\s+SITUATION\s+UPDATED\s+PRIORITY/);
+    // Reversed by id: deploy before auth-rework, token-schema before audit.
+    expect(at(/^deploy /)).toBeLessThan(at(/^auth-rework /));
+    expect(at(/^auth-rework /)).toBeLessThan(at(/^ {2}token-schema /));
+    expect(at(/^ {2}token-schema /)).toBeLessThan(at(/^ {2}audit /));
   });
 });
 

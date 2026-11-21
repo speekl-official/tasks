@@ -12,6 +12,7 @@ import {
 } from "./core/derive.js";
 import { ancestorPaths, compareIds, qualifyId } from "./core/ids.js";
 import type { UnavailableTree } from "./core/projects.js";
+import { compactAge } from "./core/time.js";
 import type {
   ActorsJson,
   BlockedByJson,
@@ -178,6 +179,25 @@ export interface OverviewOptions {
   project?: boolean;
   /** Printed instead of an empty table. */
   empty?: string;
+  /** The instant the ages count from (default: the clock). */
+  now?: Date;
+  /** Add the CREATED column before UPDATED. */
+  created?: boolean;
+  /** `tree`: the order of siblings (default: by id). */
+  order?: (a: DerivedTask, b: DerivedTask) => number;
+}
+
+/** The time columns: UPDATED always, CREATED before it on request. */
+function timeHeads(options: OverviewOptions): string[] {
+  return options.created ? ["CREATED", "UPDATED"] : ["UPDATED"];
+}
+
+/** The ages of a row's time columns, as `timeHeads` orders them. */
+function timeCells(d: DerivedTask, options: OverviewOptions): string[] {
+  const { created, updated } = d.snapshot.task.frontmatter;
+  const now = options.now ?? new Date();
+  const age = (timestamp: string) => pc.dim(compactAge(timestamp, now));
+  return options.created ? [age(created), age(updated)] : [age(updated)];
 }
 
 /** The PRIORITY column: a level other than `normal`, marked when inherited. */
@@ -191,11 +211,19 @@ export function renderOverview(
   options: OverviewOptions = {},
 ): string {
   if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
-  const out = table(["ID", "SITUATION", "PRIORITY", "LABELS", "TITLE"]);
+  const out = table([
+    "ID",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
+  ]);
   for (const d of rows) {
     out.push([
       shownId(d, options.project),
       situationCell(d),
+      ...timeCells(d, options),
       priorityCell(d),
       labels(d).join(" · "),
       d.snapshot.task.title,
@@ -272,14 +300,22 @@ export function renderTree(
     node.d.snapshot.project === null
       ? -1
       : firstSeen.get(node.d.snapshot.project)!;
-  const byId = (a: TreeNode, b: TreeNode) =>
-    compareIds(a.d.snapshot.task.id, b.d.snapshot.task.id);
-  roots.sort((a, b) => projectRank(a) - projectRank(b) || byId(a, b));
+  const order =
+    options.order ??
+    ((a: DerivedTask, b: DerivedTask) =>
+      compareIds(a.snapshot.task.id, b.snapshot.task.id));
+  const bySiblings = (a: TreeNode, b: TreeNode) => order(a.d, b.d);
+  roots.sort((a, b) => projectRank(a) - projectRank(b) || bySiblings(a, b));
 
   const lines: Array<string[] | string> = [
-    ["TASK", "SITUATION", "PRIORITY", "LABELS", "TITLE"].map((head) =>
-      pc.bold(head),
-    ),
+    [
+      "TASK",
+      "SITUATION",
+      ...timeHeads(options),
+      "PRIORITY",
+      "LABELS",
+      "TITLE",
+    ].map((head) => pc.bold(head)),
   ];
   const walk = (list: TreeNode[], depth: number) => {
     const indent = "  ".repeat(depth);
@@ -287,12 +323,13 @@ export function renderTree(
       lines.push([
         `${indent}${node.name}`,
         situationCell(node.d),
+        ...timeCells(node.d, options),
         priorityCell(node.d),
         labels(node.d).join(" · "),
         node.d.snapshot.task.title,
       ]);
       lines.push(...finishesAfterLines(node.d, `${indent}  `));
-      walk(node.children.sort(byId), depth + 1);
+      walk(node.children.sort(bySiblings), depth + 1);
     }
   };
   walk(roots, 0);
@@ -311,14 +348,20 @@ export function renderMine(
     return ui.dim(options.empty ?? "Nothing claimed by or assigned to you.");
   }
   const lines: Array<string[] | string> = [
-    ["ID", "SITUATION", "PRIORITY", "LABELS", "TITLE"].map((head) =>
-      pc.bold(head),
-    ),
+    [
+      "ID",
+      "SITUATION",
+      ...timeHeads(options),
+      "PRIORITY",
+      "LABELS",
+      "TITLE",
+    ].map((head) => pc.bold(head)),
   ];
   for (const d of rows) {
     lines.push([
       shownId(d, options.project),
       situationCell(d),
+      ...timeCells(d, options),
       priorityCell(d),
       labels(d).join(" · "),
       d.snapshot.task.title,

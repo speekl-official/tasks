@@ -4,7 +4,7 @@ import type { DerivedTask } from "../core/derive.js";
 import { hasOpenStatus, readyComparator } from "../core/derive.js";
 import type { Identity } from "../core/types.js";
 import { renderMine } from "../output.js";
-import { emitOverview, openSpan, spanTasks } from "./overview.js";
+import { emitOverview, openSpan, spanTasks, viewOptions } from "./overview.js";
 
 interface MineOptions {
   local?: boolean;
@@ -50,6 +50,6 @@ export function mineCommand(): Command {
             claimRank(a, identity) - claimRank(b, identity) ||
             readyComparator(a, b, aliasOrder),
         );
-      emitOverview(span, rows, (shown) => renderMine(shown, { project: true }));
+      emitOverview(span, rows, (shown) => renderMine(shown, viewOptions(span)));
     });
 }

@@ -86,3 +86,29 @@ export function daysBefore(days: number, now: Date = new Date()): string {
 export function minutesSince(date: Date, now: Date = new Date()): number {
   return (now.getTime() - date.getTime()) / MINUTE_MS;
 }
+
+const DAY_MINUTES = 24 * 60;
+const MONTH_DAYS = 30;
+const YEAR_DAYS = 365;
+
+/**
+ * The time since a canonical timestamp as a compact age for a column: `now`
+ * under a minute (an instant ahead of the clock too), then `5m`, `3h` (up to
+ * two days), `2d` (up to two weeks), `5w` (up to eight), `4mo` (up to a
+ * year), `1y`. Rounded down at every step, so an age never reads older than
+ * it is, and an anniversary reads as the full year; a timestamp that is not
+ * canonical is shown as it is.
+ */
+export function compactAge(timestamp: string, now: Date = new Date()): string {
+  if (!isIsoTimestamp(timestamp)) return timestamp;
+  const minutes = minutesSince(new Date(timestamp), now);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${Math.floor(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 48) return `${Math.floor(hours)}h`;
+  const days = minutes / DAY_MINUTES;
+  if (days < 14) return `${Math.floor(days)}d`;
+  if (days < 56) return `${Math.floor(days / 7)}w`;
+  if (days < YEAR_DAYS) return `${Math.floor(days / MONTH_DAYS)}mo`;
+  return `${Math.floor(days / YEAR_DAYS)}y`;
+}

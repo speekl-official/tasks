@@ -2,25 +2,30 @@ import { Command } from "commander";
 
 import { hasOpenStatus } from "../core/derive.js";
 import { renderTree } from "../output.js";
-import type { DepthOptions, SpanOptions } from "./overview.js";
+import type { DepthOptions, SortOptions, SpanOptions } from "./overview.js";
 import {
   depthOptions,
   emitOverview,
   openSpan,
   scopeOptions,
+  sortOptions,
   spanTasks,
+  timeOrder,
+  viewOptions,
 } from "./overview.js";
 
-interface TreeOptions extends SpanOptions, DepthOptions {
+interface TreeOptions extends SpanOptions, DepthOptions, SortOptions {
   resolved?: boolean;
   json?: boolean;
 }
 
 export function treeCommand(): Command {
-  return depthOptions(
-    scopeOptions(
-      new Command("tree").description(
-        "open tasks nested by containment, with finishes_after joins under their task; JSON is the flat list; spans the listed projects",
+  return sortOptions(
+    depthOptions(
+      scopeOptions(
+        new Command("tree").description(
+          "open tasks nested by containment, siblings in id order or by a time (--sort), with finishes_after joins under their task; JSON is the flat list; spans the listed projects",
+        ),
       ),
     ),
   )
@@ -33,8 +38,13 @@ export function treeCommand(): Command {
       const rows = spanTasks(span).filter(
         options.resolved ? () => true : hasOpenStatus,
       );
+      const order = timeOrder(span);
       emitOverview(span, rows, (shown) =>
-        renderTree(shown, { project: true, empty: "No open tasks." }),
+        renderTree(shown, {
+          ...viewOptions(span),
+          ...(order === null ? {} : { order }),
+          empty: "No open tasks.",
+        }),
       );
     });
 }
