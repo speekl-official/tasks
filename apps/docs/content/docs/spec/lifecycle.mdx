@@ -113,7 +113,9 @@ and by the `active` label (`--active`).
 an urgent epic makes its parts urgent without a write to each of them. Effective priority is the
 first key of the ready order (see [Derived conditions](/docs/spec/lifecycle#derived-conditions)); among equals,
 finishing beats starting. Overviews show a level other than `normal` in a column of its own,
-marked `(inherited)` when it is an ancestor's.
+marked `(inherited)` when it is an ancestor's. `list` and `ready` SHOULD accept `--priority <level>`,
+which keeps the tasks whose effective priority is at least that level; on `list` it narrows what the
+situation filters select instead of joining them.
 
 <Callout type="info" title="Non-normative">
   Nobody sets a priority by default, so the queue runs on the started-first rule

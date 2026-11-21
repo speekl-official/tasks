@@ -466,6 +466,12 @@ export function hasOpenStatus(d: DerivedTask): boolean {
   return isOpen(d.snapshot.task.frontmatter.status);
 }
 
+/** The filter of `--priority <level>`: effective priority at `level` or above. */
+export function priorityAtLeast(level: Priority): (d: DerivedTask) => boolean {
+  return (d) =>
+    PRIORITY_RANK[d.derived.effective_priority] <= PRIORITY_RANK[level];
+}
+
 /* ------------------------------------------------------------------------ */
 /* Words                                                                    */
 /* ------------------------------------------------------------------------ */

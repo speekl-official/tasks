@@ -60,7 +60,7 @@ const ARCHIVE_ROW =
 const LOG_ROW =
   'log <task> "<text>", log <task> [--archived], log --since <duration|timestamp> [--local] [--archived]';
 const OVERVIEW_ROW =
-  "list [--<situation>] [--active] [--depth <n> | --top], tree [--depth <n> | --top]";
+  "list [--<situation>] [--active] [--priority <level>] [--depth <n> | --top], tree [--depth <n> | --top]";
 
 /** A transition that requires a message, `--force` on all twelve. */
 function transition(name: string, args: string[], message: boolean): Entry {
@@ -88,10 +88,10 @@ const TABLE: Entry[] = [
   },
   { row: "resume <task>", path: ["resume"], args: ["<task>"], options: [] },
   {
-    row: "ready [--scope <path>] [--all] [--local]",
+    row: "ready [--scope <path>] [--all] [--local] [--priority <level>]",
     path: ["ready"],
     args: [],
-    options: ["--scope <path>", "--all", "--local"],
+    options: ["--scope <path>", "--all", "--local", "--priority <level>"],
   },
   {
     row: "mine [--as <actor>] [--local]",
@@ -112,6 +112,7 @@ const TABLE: Entry[] = [
     options: [
       ...SITUATIONS.map((word) => `--${word}`),
       "--active",
+      "--priority <level>",
       "--depth <n>",
       "--top",
     ],

@@ -163,8 +163,8 @@ worked reads `open 2/5 · active`, not `TODO`, and a task paused for review read
 A task is **ready** for you when it is `TODO` or `PAUSED`, everything it depends on is
 `DONE`, it is assigned to nobody or to you, it has no open child, and no ancestor is
 claimed or assigned. `tasks ready` orders them by effective priority, then `PAUSED`
-before `TODO` — finishing beats starting — then oldest first. An empty answer is a
-successful query, not an error.
+before `TODO` — finishing beats starting — then oldest first; `--priority high` keeps the
+urgent and high ones. An empty answer is a successful query, not an error.
 
 ## Priority
 

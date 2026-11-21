@@ -3,7 +3,7 @@ import type { Command } from "commander";
 import type { CommandContext } from "../context.js";
 import { openContext, resolveScope } from "../context.js";
 import type { DerivedTask } from "../core/derive.js";
-import { inScope } from "../core/derive.js";
+import { inScope, priorityAtLeast } from "../core/derive.js";
 import { unavailableReason } from "../core/gates.js";
 import { compareIds } from "../core/ids.js";
 import type { UnavailableTree } from "../core/projects.js";
@@ -11,8 +11,12 @@ import type { TreeDerivation } from "../core/snapshot.js";
 import { snapshotAll, snapshotFromContext } from "../core/snapshot.js";
 import type { Tree } from "../core/tree.js";
 import { taskDepth, toMalformedJson } from "../core/tree.js";
-import type { CollectionJson, UnavailableProjectJson } from "../core/types.js";
-import { CONVENTION_VERSION } from "../core/types.js";
+import type {
+  CollectionJson,
+  Priority,
+  UnavailableProjectJson,
+} from "../core/types.js";
+import { CONVENTION_VERSION, PRIORITIES, isPriority } from "../core/types.js";
 import { TaskError } from "../errors.js";
 import { emitJson, renderCollectionFooter, writeOut } from "../output.js";
 
@@ -35,6 +39,11 @@ export interface DepthOptions {
   top?: boolean;
 }
 
+/** The option of `ready` and `list` that limits by priority: `--priority`. */
+export interface PriorityOptions {
+  priority?: string;
+}
+
 /** The trees one overview spans, derived for the calling actor. */
 export interface Span {
   context: CommandContext;
@@ -42,6 +51,8 @@ export interface Span {
   scope: string | null;
   /** The deepest level of containment shown, or `null` for every level. */
   depth: number | null;
+  /** The lowest effective priority shown, or `null` for every level. */
+  priority: Priority | null;
   /** The local tree first, then every listed tree that loaded. */
   trees: TreeDerivation[];
   /** Listed projects left out because they could not be read. */
@@ -70,6 +81,26 @@ export function depthOptions(command: Command): Command {
       "tasks at most n levels of containment deep, counted from the scope",
     )
     .option("--top", "the top level only: --depth 1");
+}
+
+/** Declare `--priority <level>` on an overview that filters by it. */
+export function priorityOption(command: Command): Command {
+  return command.option(
+    "--priority <level>",
+    `only tasks whose effective priority is at least this level: ${PRIORITIES.join(", ")}`,
+  );
+}
+
+/** The level `--priority` names, or `null`; a level outside the four is refused. */
+export function resolvePriority(options: PriorityOptions): Priority | null {
+  if (options.priority === undefined) return null;
+  if (!isPriority(options.priority)) {
+    throw TaskError.usage(
+      `Invalid --priority "${options.priority}": expected one of ${PRIORITIES.join(", ")}.`,
+      { priority: options.priority, allowed: [...PRIORITIES] },
+    );
+  }
+  return options.priority;
 }
 
 /**
@@ -106,12 +137,13 @@ export function resolveDepth(options: DepthOptions): number | null {
  */
 export async function openSpan(
   command: Command,
-  options: SpanOptions & DepthOptions,
+  options: SpanOptions & DepthOptions & PriorityOptions,
   scoped: boolean,
 ): Promise<Span> {
   const context = await openContext(command);
   const scope = scoped ? resolveScope(context, options) : null;
   const depth = resolveDepth(options);
+  const priority = resolvePriority(options);
   const local = options.local === true || scope !== null;
   const trees = await snapshotAll(
     snapshotFromContext(context),
@@ -123,7 +155,7 @@ export async function openSpan(
     : (await context.projects.listed()).filter(
         (load): load is UnavailableTree => load.kind !== "ok",
       );
-  return { context, scope, depth, trees, unavailable };
+  return { context, scope, depth, priority, trees, unavailable };
 }
 
 /**
@@ -151,6 +183,16 @@ export function spanTasks(span: Span): DerivedTask[] {
       .filter((d) => inSpan(span, d) && withinDepth(span, load.tree, d))
       .sort((a, b) => compareIds(a.snapshot.task.id, b.snapshot.task.id)),
   );
+}
+
+/**
+ * The rows at the span's priority floor or above, by effective priority, so
+ * an urgent epic's parts pass with it; every row when no floor is set. The
+ * floor narrows what the other filters select instead of joining them.
+ */
+export function atPriority(span: Span, rows: DerivedTask[]): DerivedTask[] {
+  if (span.priority === null) return rows;
+  return rows.filter(priorityAtLeast(span.priority));
 }
 
 /** Every task of every spanned tree, unscoped, for `readySet` to filter. */

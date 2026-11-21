@@ -183,7 +183,7 @@ last log entry. A malformed ancestor or child is left out of these lists (the ta
 ### `tasks ready`
 
 ```sh
-tasks ready [--scope <path>] [--all] [--local] [--json]
+tasks ready [--scope <path>] [--all] [--local] [--priority <level>] [--json]
 ```
 
 | Option           | Effect                                                                   |
@@ -191,6 +191,7 @@ tasks ready [--scope <path>] [--all] [--local] [--json]
 | `--scope <path>` | Restrict the local tree to this group or task path, and keep to the local tree. Default: `scope` in `config.yml`. |
 | `--all`          | Ignore the configured scope.                                             |
 | `--local`        | The local tree only, not the projects it lists; implied by a scope.      |
+| `--priority <level>` | Only the tasks whose effective priority is at least this level: `urgent`, `high`, `normal` or `low`. |
 
 The tasks free for you — the calling actor — to take, best first: effective priority,
 then `PAUSED` before `TODO`, then oldest. A task is ready when it is `TODO` or `PAUSED`,
@@ -199,9 +200,13 @@ and no ancestor is claimed or assigned. With `projects:` configured and no scope
 listed trees are included, their ids carry the alias and the footer says how many rows came
 from them (`41 tasks · 38 from projects api`). A scope, given or configured, is a path of the
 local tree and keeps the set to it; `--all` lifts a configured scope and spans again.
+`--priority <level>` keeps the set to the tasks whose effective priority is at least that
+level, an inherited level counting: `ready --priority high` is the urgent and high work you
+could take.
 
 An empty set is success: exit `0` with `"count": 0`. **Fails** with exit `3` when
-`--scope` names no task or group, and exit `2` when `--scope` and `--all` are combined.
+`--scope` names no task or group, and exit `2` when `--scope` and `--all` are combined or
+`--priority` names a level outside the four.
 
 ### `tasks mine`
 
@@ -234,7 +239,7 @@ here as not listed. Without a roster the footer says so: any name may be assigne
 ### `tasks list`
 
 ```sh
-tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--json]
+tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--priority <level>] [--json]
 ```
 
 Every open task, in tree order, with its situation, its effective priority and its
@@ -262,6 +267,12 @@ A filter selects by the situation word alone, so `list --ready` is not `tasks re
 the ready set for you also holds tasks assigned to you — `assigned alice`,
 `waiting for alice` — and tasks whose finish gate is satisfied (`closable`).
 `--scope`, `--all` and `--local` work as for `ready`.
+
+`--priority <level>` keeps the tasks whose effective priority is at least that level, an
+inherited level counting, and narrows what the situation filters select instead of joining
+them: `list --blocked --priority high` is the blocked tasks that are high or urgent, and
+`list --priority urgent` every urgent task whatever its situation. A level outside `urgent`,
+`high`, `normal` and `low` exits `2`.
 
 `--depth <n>` keeps the tasks at most *n* levels of containment deep, and `--top` is
 `--depth 1`: the top level alone — the epics, each with its `open 2/5` progress, and the

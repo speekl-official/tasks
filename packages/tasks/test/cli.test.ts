@@ -1147,6 +1147,26 @@ describe("ready", () => {
     expect(json.tasks[0]?.effective_priority).toBe("urgent");
   });
 
+  it("keeps with --priority the ready tasks at that effective level or above", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        hot: { priority: "urgent" },
+        "hot/part": {},
+        imp: { priority: "high" },
+        plain: {},
+        stuck: { priority: "urgent", depends_on: ["plain"] },
+      },
+    });
+    expect(
+      ids(await sandbox.run("ready", "--priority", "high", "--json")),
+    ).toEqual(["hot/part", "imp"]);
+    const urgent = collection(
+      await sandbox.run("ready", "--priority", "urgent", "--json"),
+    );
+    expect(urgent.count).toBe(1);
+    expect(urgent.tasks[0]?.id).toBe("hot/part");
+  });
+
   it("offers only free, unblocked tasks outside held and unscheduled subtrees", async () => {
     sandbox = await treeSandbox({
       tasks: {
@@ -1467,6 +1487,58 @@ describe("list", () => {
     expect(
       ids(await sandbox.run("list", "--cancelled", "--resolved", "--json")),
     ).toEqual(["c1", "cl/x", "d1"]);
+  });
+
+  it("keeps with --priority the tasks at that effective level or above, narrowing the situation filters", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        hot: { priority: "urgent" },
+        "hot/part": {},
+        imp: { priority: "high" },
+        plain: {},
+        slow: { priority: "low" },
+        stuck: { priority: "high", depends_on: ["plain"] },
+      },
+    });
+    // The inherited level counts: hot/part is urgent through its parent.
+    expect(
+      ids(await sandbox.run("list", "--priority", "high", "--json")),
+    ).toEqual(["hot", "hot/part", "imp", "stuck"]);
+    expect(
+      ids(await sandbox.run("list", "--priority", "low", "--json")),
+    ).toEqual(["hot", "hot/part", "imp", "plain", "slow", "stuck"]);
+    // With situation filters the level is a second condition, not an OR term.
+    expect(
+      ids(
+        await sandbox.run("list", "--blocked", "--priority", "high", "--json"),
+      ),
+    ).toEqual(["stuck"]);
+    expect(
+      ids(
+        await sandbox.run(
+          "list",
+          "--blocked",
+          "--ready",
+          "--priority",
+          "urgent",
+          "--json",
+        ),
+      ),
+    ).toEqual(["hot/part"]);
+  });
+
+  it("refuses a --priority outside the four levels", async () => {
+    sandbox = await treeSandbox({ tasks: { t: {} } });
+    const result = await sandbox.run("list", "--priority", "medium", "--json");
+    expect(result.code).toBe(ExitCode.Usage);
+    expect(envelope(result).error).toMatchObject({
+      message:
+        'Invalid --priority "medium": expected one of urgent, high, normal, low.',
+      details: {
+        priority: "medium",
+        allowed: ["urgent", "high", "normal", "low"],
+      },
+    });
   });
 
   it("applies the configured scope, which --all lifts", async () => {

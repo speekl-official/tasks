@@ -3,11 +3,13 @@ import { Command } from "commander";
 import type { DerivedTask, ListFilterName } from "../core/derive.js";
 import { hasOpenStatus, situationFilter } from "../core/derive.js";
 import { renderOverview } from "../output.js";
-import type { DepthOptions, SpanOptions } from "./overview.js";
+import type { DepthOptions, PriorityOptions, SpanOptions } from "./overview.js";
 import {
+  atPriority,
   depthOptions,
   emitOverview,
   openSpan,
+  priorityOption,
   scopeOptions,
   spanTasks,
 } from "./overview.js";
@@ -17,7 +19,8 @@ import {
  * and cancelled together, and `--active` for the label (work in progress
  * beneath the task). The word `open` is the situation of a parent with open
  * children, not "every open task", which is what `list` shows without a
- * filter.
+ * filter. `--priority <level>` is not one of them: it narrows whatever they
+ * select to the tasks at that effective priority or above.
  */
 export const LIST_FILTERS: ReadonlyArray<readonly [ListFilterName, string]> = [
   [
@@ -40,7 +43,8 @@ export const LIST_FILTERS: ReadonlyArray<readonly [ListFilterName, string]> = [
 ];
 
 type ListOptions = SpanOptions &
-  DepthOptions & {
+  DepthOptions &
+  PriorityOptions & {
     json?: boolean;
   } & Partial<Record<ListFilterName, boolean>>;
 
@@ -61,18 +65,21 @@ export function listCommand(): Command {
   const command = depthOptions(
     scopeOptions(
       new Command("list").description(
-        "open tasks by situation, in tree order; --<situation> flags filter and combine with OR; spans the listed projects",
+        "open tasks by situation, in tree order; --<situation> flags filter and combine with OR, --priority narrows them to a level and above; spans the listed projects",
       ),
     ),
   );
   for (const [name, description] of LIST_FILTERS) {
     command.option(`--${name}`, description);
   }
-  return command
+  return priorityOption(command)
     .option("--json", "emit machine-readable JSON")
     .action(async (options: ListOptions, cmd: Command) => {
       const span = await openSpan(cmd, options, true);
-      const rows = spanTasks(span).filter(listSelection(options));
+      const rows = atPriority(
+        span,
+        spanTasks(span).filter(listSelection(options)),
+      );
       emitOverview(span, rows, (shown) =>
         renderOverview(shown, { project: true, empty: "No tasks match." }),
       );
