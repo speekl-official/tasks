@@ -20,7 +20,7 @@ import {
   Terminal,
 } from "@/components/home/terminal";
 import { InstallCommand } from "@/components/home/install-command";
-import { AuthorCard } from "@/components/author";
+import { AuthorCards } from "@/components/author";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -543,7 +543,7 @@ function GetStarted() {
 function Author() {
   return (
     <Section title="Who builds it" border>
-      <AuthorCard className="mt-8" />
+      <AuthorCards className="mt-8" />
     </Section>
   );
 }
