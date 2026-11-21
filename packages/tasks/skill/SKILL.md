@@ -247,6 +247,8 @@ Use `--json` whenever you parse; the human output is not stable.
   conflict. **Branch on the code and `details`, never on message text.**
 - **An empty result is success:** `tasks ready` with nothing to do exits `0`
   with `"count": 0`. Only `claim --next` turns it into exit `3`.
+- In a terminal an overview fits its width and cuts long titles with `…`;
+  piped output and `--json` are never cut. Read `--json` when the text matters.
 - Task objects carry the frontmatter (`status`, `priority`, `depends_on`,
   `finishes_after`, `assignee`, `claimed_by`, `claimed_at`, `claimed_session`,
   `created`, `updated`), `id`, `name`, `parent`, `project`, `title`, `path`, and

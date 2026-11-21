@@ -1,6 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
 
-import Table from "cli-table3";
 import pc from "picocolors";
 
 import type { DerivedTask } from "./core/derive.js";
@@ -48,28 +47,9 @@ export function emitJson(value: unknown): void {
 }
 
 /** A borderless table; the renderers build on it. */
-export function table(head: string[]): Table.Table {
-  return new Table({
-    head: head.map((h) => pc.bold(h)),
-    style: { head: [], border: [], "padding-left": 1, "padding-right": 1 },
-    chars: {
-      top: "",
-      "top-mid": "",
-      "top-left": "",
-      "top-right": "",
-      bottom: "",
-      "bottom-mid": "",
-      "bottom-left": "",
-      "bottom-right": "",
-      left: "",
-      "left-mid": "",
-      mid: "",
-      "mid-mid": "",
-      right: "",
-      "right-mid": "",
-      middle: " ",
-    },
-  });
+/** The width of the terminal on stdout, or `null` when stdout is not one. */
+export function terminalWidth(): number | null {
+  return process.stdout.isTTY ? (process.stdout.columns ?? null) : null;
 }
 
 export const ui = {
@@ -98,12 +78,65 @@ function visibleWidth(text: string): number {
   return stripVTControlCharacters(text).length;
 }
 
+/** How a grid is fitted into a width: which columns give way, down to what. */
+interface Fit {
+  width: number;
+  /** In the order they shrink; a column is never cut below its floor. */
+  shrink: ReadonlyArray<{ column: number; floor: number }>;
+}
+
+/** Narrow the columns that may give way until the rows fit, or stop at the floors. */
+function fitWidths(widths: number[], fit: Fit): void {
+  const gaps = 2 * Math.max(0, widths.length - 1);
+  let excess = widths.reduce((sum, width) => sum + width, 0) + gaps - fit.width;
+  for (const { column, floor } of fit.shrink) {
+    if (excess <= 0) return;
+    const current = widths[column] ?? 0;
+    const take = Math.min(excess, Math.max(0, current - floor));
+    widths[column] = current - take;
+    excess -= take;
+  }
+}
+
+const ESC = String.fromCharCode(27);
+/** Splits text into visible runs and the colour codes between them. */
+const ANSI_SPLIT = new RegExp(`(${ESC}\\[[0-9;]*m)`);
+
+/**
+ * `text` cut to `width` visible characters with an ellipsis, colour codes
+ * kept: the ones before the cut stay in place and the ones after it (the
+ * closers) follow the ellipsis, so a coloured cell closes as it did.
+ */
+function cutVisible(text: string, width: number): string {
+  if (visibleWidth(text) <= width) return text;
+  const keep = Math.max(0, width - 1);
+  let kept = "";
+  let closers = "";
+  let seen = 0;
+  for (const token of text.split(ANSI_SPLIT)) {
+    if (token.startsWith(`${ESC}[`)) {
+      if (seen < keep) kept += token;
+      else closers += token;
+    } else if (seen < keep) {
+      const room = keep - seen;
+      kept += token.slice(0, room);
+      seen += Math.min(token.length, room);
+    }
+  }
+  return `${kept}…${closers}`;
+}
+
 /**
  * Rows aligned into columns two spaces apart. A plain string is a free line,
  * printed as it is without widening any column, so a long note under one
- * row cannot push every other row apart the way a table cell would.
+ * row cannot push every other row apart the way a table cell would. With a
+ * `fit`, the columns it names give way until the rows fit its width, their
+ * cells cut with an ellipsis; without one nothing is cut.
  */
-function aligned(rows: ReadonlyArray<readonly string[] | string>): string {
+function aligned(
+  rows: ReadonlyArray<readonly string[] | string>,
+  fit?: Fit,
+): string {
   const widths: number[] = [];
   for (const row of rows) {
     if (typeof row === "string") continue;
@@ -111,15 +144,17 @@ function aligned(rows: ReadonlyArray<readonly string[] | string>): string {
       widths[index] = Math.max(widths[index] ?? 0, visibleWidth(cell));
     });
   }
+  if (fit !== undefined) fitWidths(widths, fit);
   return rows
     .map((row) => {
       if (typeof row === "string") return row.trimEnd();
       return row
-        .map((cell, index) =>
-          index === row.length - 1
-            ? cell
-            : cell + " ".repeat(widths[index]! - visibleWidth(cell) + 2),
-        )
+        .map((cell, index) => {
+          const shown = cutVisible(cell, widths[index]!);
+          return index === row.length - 1
+            ? shown
+            : shown + " ".repeat(widths[index]! - visibleWidth(shown) + 2);
+        })
         .join("")
         .trimEnd();
     })
@@ -185,6 +220,40 @@ export interface OverviewOptions {
   created?: boolean;
   /** `tree`: the order of siblings (default: by id). */
   order?: (a: DerivedTask, b: DerivedTask) => number;
+  /** The width to fit, a terminal's; `null` or absent cuts nothing. */
+  width?: number | null;
+}
+
+/**
+ * The columns an overview lets give way, in order, and their floors. The
+ * title is free text and goes first; the situation and the labels are words
+ * that lose their meaning when cut, so only an extreme one (a `blocked by`
+ * naming several long ids) is touched, and never the ids, ages or priority.
+ */
+const GIVES_WAY: ReadonlyArray<readonly [string, number]> = [
+  ["TITLE", 12],
+  ["SITUATION", 40],
+  ["LABELS", 40],
+];
+
+/** The fit for an overview with these headings, or none outside a terminal. */
+function fitFor(
+  head: readonly string[],
+  options: OverviewOptions,
+): Fit | undefined {
+  if (options.width === undefined || options.width === null) return undefined;
+  return {
+    width: options.width,
+    shrink: GIVES_WAY.flatMap(([name, floor]) => {
+      const column = head.indexOf(name);
+      return column === -1 ? [] : [{ column, floor }];
+    }),
+  };
+}
+
+/** The heading row of an overview, in bold. */
+function headingRow(head: readonly string[]): string[] {
+  return head.map((name) => pc.bold(name));
 }
 
 /** The time columns: UPDATED always, CREATED before it on request. */
@@ -211,25 +280,27 @@ export function renderOverview(
   options: OverviewOptions = {},
 ): string {
   if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
-  const out = table([
+  const now = options.now ?? new Date();
+  const head = [
     "ID",
     "SITUATION",
     ...timeHeads(options),
     "PRIORITY",
     "LABELS",
     "TITLE",
-  ]);
+  ];
+  const lines: Array<string[] | string> = [headingRow(head)];
   for (const d of rows) {
-    out.push([
+    lines.push([
       shownId(d, options.project),
       situationCell(d),
       ...timeCells(d, options),
       priorityCell(d),
-      labels(d).join(" · "),
+      labels(d, now).join(" · "),
       d.snapshot.task.title,
     ]);
   }
-  return out.toString();
+  return aligned(lines, fitFor(head, options));
 }
 
 interface TreeNode {
@@ -307,16 +378,16 @@ export function renderTree(
   const bySiblings = (a: TreeNode, b: TreeNode) => order(a.d, b.d);
   roots.sort((a, b) => projectRank(a) - projectRank(b) || bySiblings(a, b));
 
-  const lines: Array<string[] | string> = [
-    [
-      "TASK",
-      "SITUATION",
-      ...timeHeads(options),
-      "PRIORITY",
-      "LABELS",
-      "TITLE",
-    ].map((head) => pc.bold(head)),
+  const now = options.now ?? new Date();
+  const head = [
+    "TASK",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
   ];
+  const lines: Array<string[] | string> = [headingRow(head)];
   const walk = (list: TreeNode[], depth: number) => {
     const indent = "  ".repeat(depth);
     for (const node of list) {
@@ -325,7 +396,7 @@ export function renderTree(
         situationCell(node.d),
         ...timeCells(node.d, options),
         priorityCell(node.d),
-        labels(node.d).join(" · "),
+        labels(node.d, now).join(" · "),
         node.d.snapshot.task.title,
       ]);
       lines.push(...finishesAfterLines(node.d, `${indent}  `));
@@ -333,7 +404,7 @@ export function renderTree(
     }
   };
   walk(roots, 0);
-  return aligned(lines);
+  return aligned(lines, fitFor(head, options));
 }
 
 /**
@@ -347,23 +418,23 @@ export function renderMine(
   if (rows.length === 0) {
     return ui.dim(options.empty ?? "Nothing claimed by or assigned to you.");
   }
-  const lines: Array<string[] | string> = [
-    [
-      "ID",
-      "SITUATION",
-      ...timeHeads(options),
-      "PRIORITY",
-      "LABELS",
-      "TITLE",
-    ].map((head) => pc.bold(head)),
+  const now = options.now ?? new Date();
+  const head = [
+    "ID",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
   ];
+  const lines: Array<string[] | string> = [headingRow(head)];
   for (const d of rows) {
     lines.push([
       shownId(d, options.project),
       situationCell(d),
       ...timeCells(d, options),
       priorityCell(d),
-      labels(d).join(" · "),
+      labels(d, now).join(" · "),
       d.snapshot.task.title,
     ]);
     const entry = d.derived.last_entry;
@@ -372,7 +443,7 @@ export function renderMine(
       lines.push(...indentLines(entry.text, "    "));
     }
   }
-  return aligned(lines);
+  return aligned(lines, fitFor(head, options));
 }
 
 /**
@@ -753,9 +824,11 @@ export function renderSessionEnd(result: SessionEndJson): string {
  */
 export function renderDepList(refs: ResolvedRef[]): string {
   if (refs.length === 0) return ui.dim("No references.");
-  const out = table(["REFERENCE", "SATISFIED", "DETAIL"]);
+  const lines: Array<string[] | string> = [
+    headingRow(["REFERENCE", "SATISFIED", "DETAIL"]),
+  ];
   for (const ref of refs) {
-    out.push([
+    lines.push([
       qualifyId(ref.project, ref.id),
       ref.satisfied ? pc.green("yes") : pc.red("no"),
       ref.satisfied
@@ -767,7 +840,7 @@ export function renderDepList(refs: ResolvedRef[]): string {
           }),
     ]);
   }
-  return out.toString();
+  return aligned(lines);
 }
 
 /** The rows that came from listed projects: those whose `project` is an alias. */

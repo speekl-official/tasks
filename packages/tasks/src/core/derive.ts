@@ -2,6 +2,7 @@ import { ancestorPaths, compareIds, isWithin, qualifyId } from "./ids.js";
 import type { Task } from "./task.js";
 import { toTaskJson } from "./task.js";
 import type { Tree } from "./tree.js";
+import { compactAge } from "./time.js";
 import { ancestorIdsOf } from "./tree.js";
 import type {
   BlockedByJson,
@@ -596,16 +597,17 @@ export function priorityLabel(d: DerivedTask): string | null {
  * liveness; a claim without a session carries none. Unknown with a session
  * means a heartbeat that never reached this machine, which is worth seeing.
  */
-function livenessLabel(d: DerivedTask): string | null {
+function livenessLabel(d: DerivedTask, now: Date): string | null {
   const fm = d.snapshot.task.frontmatter;
   if (fm.status !== "IN_PROGRESS" || fm.claimed_session === null) return null;
   switch (d.derived.liveness) {
     case "live":
       return "live";
     case "orphaned":
+      // How long ago the session was last seen; `show` has the timestamp.
       return d.derived.last_seen === null
         ? "orphaned"
-        : `orphaned since ${d.derived.last_seen}`;
+        : `orphaned ${compactAge(d.derived.last_seen, now)}`;
     default:
       return "liveness unknown";
   }
@@ -639,7 +641,7 @@ const IMPLIES_STARTED: ReadonlySet<Situation> = new Set([
  * resolved task carries only `active`, which there flags a broken invariant;
  * everything else concerns work still to schedule.
  */
-export function labels(d: DerivedTask): string[] {
+export function labels(d: DerivedTask, now: Date = new Date()): string[] {
   const { derived } = d;
   const task = d.snapshot.task;
   if (isResolved(task.frontmatter.status)) {
@@ -656,7 +658,7 @@ export function labels(d: DerivedTask): string[] {
   if (derived.active) out.push("active");
   if (d.below.waiting > 0) out.push(`${d.below.waiting} waiting`);
   if (d.below.blocked > 0) out.push(`${d.below.blocked} blocked`);
-  const liveness = livenessLabel(d);
+  const liveness = livenessLabel(d, now);
   if (liveness !== null) out.push(liveness);
   const assignee = assigneeLabel(d);
   if (assignee !== null) out.push(assignee);

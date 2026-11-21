@@ -1960,6 +1960,20 @@ describe("time in overviews", () => {
   });
 });
 
+describe("overview width", () => {
+  it("cuts nothing when stdout is not a terminal", async () => {
+    const title = `A title long enough to wrap any terminal ${"x".repeat(160)}`;
+    sandbox = await treeSandbox({
+      tasks: { long: { title }, "long/part": { title } },
+    });
+    for (const argv of [["list"], ["ready"], ["tree"]]) {
+      const out = plain((await sandbox.run(...argv)).stdout);
+      expect(out, argv.join(" ")).toContain(title);
+      expect(out, argv.join(" ")).not.toContain("…");
+    }
+  });
+});
+
 describe("overviews", () => {
   it("speak situation, never the stored status", async () => {
     sandbox = await treeSandbox(SITUATION_TREE);

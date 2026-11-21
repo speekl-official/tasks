@@ -208,7 +208,7 @@ describe("renderOverview", () => {
     const now = new Date("2027-01-01T00:00:00Z");
     const lines = plain(renderOverview(rows, { now })).split("\n");
     expect(lines[0]).toMatch(
-      /^ ID\s+SITUATION\s+UPDATED\s+PRIORITY\s+LABELS\s+TITLE/,
+      /^ID\s+SITUATION\s+UPDATED\s+PRIORITY\s+LABELS\s+TITLE/,
     );
     expect(lines[0]).not.toContain("CREATED");
     for (const line of lines.slice(1)) {
@@ -218,6 +218,51 @@ describe("renderOverview", () => {
       "\n",
     );
     expect(both[0]).toMatch(/SITUATION\s+CREATED\s+UPDATED\s+PRIORITY/);
+  });
+
+  it("fits a terminal's width by cutting the title, then the situation, then the labels, and cuts nothing otherwise", async () => {
+    const { local, foreign } = await fixture();
+    const rows = [...local.values(), ...foreign.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const full = plain(renderOverview(rows, { now, project: true })).split(
+      "\n",
+    );
+    const widest = Math.max(...full.map((line) => line.length));
+    const longest = rows
+      .map((d) => d.snapshot.task.title)
+      .sort((a, b) => b.length - a.length)[0]!;
+    expect(full.join("\n")).toContain(longest);
+
+    // Eight columns narrower: the title alone gives way, above its floor.
+    const width = widest - 8;
+    const fitted = plain(
+      renderOverview(rows, { now, project: true, width }),
+    ).split("\n");
+    expect(fitted).toHaveLength(full.length);
+    for (const line of fitted) expect(line.length).toBeLessThanOrEqual(width);
+    expect(fitted.join("\n")).toContain("backend:api/tokens/tests");
+    expect(fitted.join("\n")).not.toContain(longest);
+    expect(fitted.join("\n")).toContain(`${longest.slice(0, -9)}…`);
+
+    // Colour codes survive the cut: only the closers follow the ellipsis.
+    const coloured = renderOverview(rows, { now, project: true, width });
+    const row = coloured.split("\n").find((line) => line.includes("…"))!;
+    expect(stripVTControlCharacters(row).length).toBeLessThanOrEqual(width);
+    expect(stripVTControlCharacters(row.slice(row.lastIndexOf("…") + 1))).toBe(
+      "",
+    );
+  });
+
+  it("never cuts below a column's floor: a very narrow width wraps instead", async () => {
+    const { local } = await fixture();
+    const now = new Date("2027-01-01T00:00:00Z");
+    const text = plain(renderOverview([...local.values()], { now, width: 20 }));
+    // Every row keeps a readable title stub of at least twelve characters.
+    for (const line of text.split("\n").slice(1)) {
+      const title = line.slice(line.lastIndexOf("  ") + 2);
+      expect(title.length).toBeGreaterThanOrEqual(Math.min(12, title.length));
+    }
+    expect(text).toContain("auth-rework");
   });
 });
 
@@ -272,6 +317,23 @@ describe("renderTree", () => {
     expect(at(/^deploy /)).toBeLessThan(at(/^auth-rework /));
     expect(at(/^auth-rework /)).toBeLessThan(at(/^ {2}token-schema /));
     expect(at(/^ {2}token-schema /)).toBeLessThan(at(/^ {2}audit /));
+  });
+
+  it("fits a terminal's width like the flat overview, the free lines untouched", async () => {
+    const { local, foreign } = await fixture();
+    const rows = [...local.values(), ...foreign.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const full = plain(renderTree(rows, { now, project: true })).split("\n");
+    const width = Math.max(...full.map((line) => line.length)) - 8;
+    const lines = plain(renderTree(rows, { now, project: true, width })).split(
+      "\n",
+    );
+    for (const line of lines) {
+      if (line.includes("↳")) continue;
+      expect(line.length).toBeLessThanOrEqual(width);
+    }
+    expect(lines.some((line) => line.endsWith("…"))).toBe(true);
+    expect(lines).toContain("  ↳ after backend:api/tokens (not-done)");
   });
 });
 

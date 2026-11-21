@@ -28,7 +28,12 @@ import { CONVENTION_VERSION, PRIORITIES, isPriority } from "../core/types.js";
 import { parseSince } from "../core/time.js";
 import { TaskError } from "../errors.js";
 import type { OverviewOptions } from "../output.js";
-import { emitJson, renderCollectionFooter, writeOut } from "../output.js";
+import {
+  emitJson,
+  renderCollectionFooter,
+  terminalWidth,
+  writeOut,
+} from "../output.js";
 
 /**
  * What the overview commands (`ready`, `mine`, `list`, `tree`) share, so
@@ -326,14 +331,16 @@ export function timeOrder(
 
 /**
  * The overview's rendering options for this span: ids carry their alias,
- * ages count from the command's start, and a CREATED column joins UPDATED
- * when `created` is the key or the filter in play.
+ * ages count from the command's start, a CREATED column joins UPDATED when
+ * `created` is the key or the filter in play, and in a terminal the rows
+ * are fitted to its width (piped output is never cut).
  */
 export function viewOptions(span: Span): OverviewOptions {
   return {
     project: true,
     now: span.now,
     created: span.time.sort === "created" || span.time.createdSince !== null,
+    width: terminalWidth(),
   };
 }
 

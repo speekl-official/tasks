@@ -168,8 +168,8 @@ tasks ready
 ```
 
 ```txt
- ID                         SITUATION   UPDATED   PRIORITY   LABELS   TITLE
- auth-rework/token-schema   ready       now                           Design the token schema
+ID                        SITUATION  UPDATED  PRIORITY  LABELS  TITLE
+auth-rework/token-schema  ready      now                        Design the token schema
 
 1 task
 ```
@@ -180,10 +180,10 @@ because its work is its children's until they close. `tasks list` shows every op
 with its situation:
 
 ```txt
- ID                         SITUATION                             UPDATED   PRIORITY   LABELS   TITLE
- auth-rework                open 0/2                              1m                            Rework authentication
- auth-rework/token-schema   ready                                 1m                            Design the token schema
- auth-rework/wire-refresh   blocked by auth-rework/token-schema   now                           Wire the refresh endpoint
+ID                        SITUATION                            UPDATED  PRIORITY  LABELS  TITLE
+auth-rework               open 0/2                             1m                         Rework authentication
+auth-rework/token-schema  ready                                1m                         Design the token schema
+auth-rework/wire-refresh  blocked by auth-rework/token-schema  now                        Wire the refresh endpoint
 ```
 
 Once the tree has grown, `tasks tree --top` shows the top level alone — the epics with their
@@ -325,8 +325,8 @@ tasks ready
 ```txt
 ✓ claim auth-rework/token-schema: PAUSED → IN_PROGRESS
 ✓ done auth-rework/token-schema: IN_PROGRESS → DONE
- ID                         SITUATION   UPDATED   PRIORITY   LABELS   TITLE
- auth-rework/wire-refresh   ready       4m                            Wire the refresh endpoint
+ID                        SITUATION  UPDATED  PRIORITY  LABELS  TITLE
+auth-rework/wire-refresh  ready      4m                         Wire the refresh endpoint
 ```
 
 `wire-refresh` was waiting on the schema, so it is ready now.

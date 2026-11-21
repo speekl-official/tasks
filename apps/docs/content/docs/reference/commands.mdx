@@ -290,6 +290,11 @@ unchanged: the rows in the order asked for, `created` and `updated` on each task
 `--reverse` without `--sort`, a `--sort` key other than the two, or a bound outside the
 grammar exit `2`.
 
+In a terminal, an overview fits the window: when a row would wrap, TITLE gives way first and
+is cut with an ellipsis, then SITUATION, then LABELS, each down to a floor; ids, ages and
+priorities are never cut, and `show` has the full text. Output that is piped or redirected
+is never cut, and neither is `--json`. The same holds for `ready`, `tree` and `mine`.
+
 `--depth <n>` keeps the tasks at most *n* levels of containment deep, and `--top` is
 `--depth 1`: the top level alone — the epics, each with its `open 2/5` progress, and the
 tasks that stand on their own. The depth counts task ancestors within the scope, so

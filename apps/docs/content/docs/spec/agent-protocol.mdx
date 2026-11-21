@@ -117,7 +117,7 @@ everyone else and may be taken over.
   | being worked | `IN_PROGRESS` | working, live |
   | session ended deliberately, work unfinished | `pause` → `PAUSED` (an agent's pause leaves the task free) | ready · started, first in `ready` |
   | a person stops, meaning to come back | `pause` → `PAUSED` + assignee (a person's pause keeps the task) | waiting for alice; her `unassign` or `handoff` releases it |
-  | session ended without `pause`, or crashed | `IN_PROGRESS` | working, orphaned since T — at once when the harness reported the end, after the timeout otherwise; the same actor's next session takes over |
+  | session ended without `pause`, or crashed | `IN_PROGRESS` | working, orphaned with the age of the last heartbeat (`orphaned 3d`) — at once when the harness reported the end, after the timeout otherwise; the same actor's next session takes over |
   | started, waits for a task — another agent's, a person's, or an external event modelled as a task assigned to whoever observes it | `pause` + `dep add` → `PAUSED` | blocked by X · started |
   | started, needs a decision or review | `handoff alice` → `PAUSED` | waiting for alice |
   | started, deferred until after Y | `pause` + `dep add Y` | blocked by Y · started |

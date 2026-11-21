@@ -254,7 +254,7 @@ Every case maps to a stored status plus what overviews show:
 | being worked                                              | `IN_PROGRESS`                         | `working by agent · live`                     |
 | session ended deliberately, work unfinished               | `pause` → `PAUSED`                    | `ready · started`, first in `ready`           |
 | a person stops, meaning to come back                      | `pause` → `PAUSED` + assignee         | `waiting for alice`; her `unassign` or `handoff` releases it |
-| session ended without `pause`, or crashed                 | `IN_PROGRESS`                         | `working by agent · orphaned since T`; the next session takes over |
+| session ended without `pause`, or crashed                 | `IN_PROGRESS`                         | `working by agent · orphaned 3d`; the next session takes over |
 | started, waits for a task                                 | `pause` + `dep add` → `PAUSED`        | `blocked by X · started`                      |
 | started, needs a decision or review                       | `handoff alice` → `PAUSED`            | `waiting for alice`                           |
 | started, set aside                                        | `pause`, then `defer` → `BACKLOG`     | `parked`; `schedule` brings it back to `PAUSED` |

@@ -25,6 +25,7 @@ import type {
   ValidationJson,
 } from "../src/core/types.js";
 import { SITUATIONS } from "../src/core/types.js";
+import { compactAge } from "../src/core/time.js";
 import { isTaskError } from "../src/errors.js";
 import type { TreeSpec } from "./fixtures.js";
 import { DEFAULT_STATE, FIXTURE_TIME, writeTree } from "./fixtures.js";
@@ -620,8 +621,8 @@ describe("Self-checking", () => {
       const labels: Record<string, string[]> = {
         worked: ["live"],
         "epic/c": ["live"],
-        crashed: [`orphaned since ${gone}`],
-        quit: [`orphaned since ${quit}`],
+        crashed: [`orphaned ${compactAge(gone)}`],
+        quit: [`orphaned ${compactAge(quit)}`],
         remote: ["unknown"],
         paused: ["started"],
         "paused-waits": ["started"],

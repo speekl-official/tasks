@@ -161,8 +161,11 @@ function get(derived: Map<string, DerivedTask>, id: string): DerivedTask {
 }
 
 /** The situation and its labels, as one overview line reads them. */
+/** The instant the ages in labels count from, in these tests. */
+const LABEL_NOW = new Date("2026-09-22T12:00:00Z");
+
 function shown(d: DerivedTask): string {
-  return [situationText(d), ...labels(d)].join(" · ");
+  return [situationText(d), ...labels(d, LABEL_NOW)].join(" · ");
 }
 
 const LIVE: ClaimLiveness = {
@@ -1056,8 +1059,9 @@ describe("labels", () => {
       },
     );
     expect(labels(get(derived, "live"))).toEqual(["live"]);
-    expect(labels(get(derived, "orphaned"))).toEqual([
-      "orphaned since 2026-09-21T16:40:12Z",
+    // The age of the last heartbeat; show and resume carry the timestamp.
+    expect(labels(get(derived, "orphaned"), LABEL_NOW)).toEqual([
+      "orphaned 19h",
     ]);
     expect(labels(get(derived, "unknown"))).toEqual(["liveness unknown"]);
     expect(labels(get(derived, "sessionless"))).toEqual([]);
@@ -1150,7 +1154,7 @@ describe("the agent protocol's Shown column", () => {
       deploy: "assigned alice",
       worked: "working by tester · live",
       paused: "ready · started",
-      crashed: "working by tester · orphaned since 2026-09-21T16:40:12Z",
+      crashed: "working by tester · orphaned 19h",
       "paused-waits": "blocked by x · started",
       review: "waiting for alice",
       "after-y": "blocked by y · started",
