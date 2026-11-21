@@ -52,7 +52,6 @@
     "prepublishOnly": "pnpm run lint && pnpm run check-types && pnpm run test && pnpm run build"
   },
   "dependencies": {
-    "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
     "js-yaml": "^4.1.0",
     "picocolors": "^1.1.1",
