@@ -1555,6 +1555,20 @@ describe("list", () => {
 });
 
 describe("depth", () => {
+  it("tells from the top what waits or is blocked beneath an epic", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: {},
+        "epic/leaf": { status: "PAUSED", assignee: "bob", state: true },
+        "epic/deep/blocked": { depends_on: ["elsewhere"] },
+        elsewhere: {},
+      },
+    });
+    const out = plain((await sandbox.run("tree", "--top")).stdout);
+    expect(out).toMatch(/epic\s+open 0\/2\s+1 waiting · 1 blocked/);
+    expect(out).not.toContain("epic/leaf");
+  });
+
   it("limits list to a depth, --top being --depth 1, counted from the scope", async () => {
     sandbox = await treeSandbox({
       tasks: {

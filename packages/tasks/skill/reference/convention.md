@@ -109,8 +109,10 @@ Overviews show one **situation** per task, the first that holds: `done`,
 (`PAUSED` with an assignee), `assigned X`, `blocked by X`, `closable` (children
 and joins all resolved), `open N/M` (a parent with open children),
 `ready`. Secondary labels follow, in this order: `started` (the task's own
-`state.md`), `blocked by X`, `active`, liveness, the assignee, `held by X` and
-`closable` — the last three only when they are not the situation itself. The
+`state.md`), `blocked by X`, `active`, `N waiting` and `N blocked` (open
+descendants in those situations, which `--top` would otherwise hide), liveness,
+the assignee, `held by X` and `closable` — the last three only when they are not
+the situation itself. The
 effective priority has a column of its own: blank for `normal`,
 `high (inherited)` when it is an ancestor's.
 

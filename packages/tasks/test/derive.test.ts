@@ -971,6 +971,30 @@ describe("situationFilter", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("labels", () => {
+  it("counts the waiting and blocked tasks beneath a parent as labels, outside the JSON", async () => {
+    const derived = await derive(
+      {
+        tasks: {
+          epic: {},
+          "epic/a": { status: "PAUSED", assignee: "bob", state: true },
+          "epic/b": {},
+          "epic/b/c": { status: "PAUSED", assignee: "ann", state: true },
+          "epic/d": {},
+          other: {},
+        },
+      },
+      { overrides: { start: { "epic/b": blockedBy(unsatisfiedRef("x")) } } },
+    );
+    expect(shown(get(derived, "epic"))).toBe(
+      "open 0/3 · 2 waiting · 1 blocked",
+    );
+    // Its own situation is the blocked one; the count is what lies beneath.
+    expect(shown(get(derived, "epic/b"))).toBe("blocked by x · 1 waiting");
+    expect(labels(get(derived, "epic/d"))).toEqual([]);
+    expect(labels(get(derived, "other"))).toEqual([]);
+    expect(get(derived, "epic").json).not.toHaveProperty("below");
+  });
+
   it("come in the fixed order", async () => {
     const derived = await derive(
       {

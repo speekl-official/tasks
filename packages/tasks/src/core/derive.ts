@@ -48,11 +48,23 @@ export interface TreeSnapshot {
   tasks: SnapshotTask[];
 }
 
+/** Open descendants a depth-limited overview would hide, by situation. */
+export interface BelowCounts {
+  waiting: number;
+  blocked: number;
+}
+
 export interface DerivedTask {
   snapshot: SnapshotTask;
   derived: Derived;
   /** toTaskJson(task, project) merged with derived. */
   json: TaskWithDerivedJson;
+  /**
+   * How many open descendants are `waiting` and how many `blocked`, for the
+   * `N waiting` and `N blocked` labels of a parent; zeros for a leaf. Not
+   * part of the JSON, whose rows carry each task's own situation.
+   */
+  below: BelowCounts;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -337,7 +349,19 @@ export function deriveTree(
       snapshot: entry,
       derived,
       json: { ...toTaskJson(entry.task, entry.project), ...derived },
+      below: { waiting: 0, blocked: 0 },
     });
+  }
+  // A second pass, once every situation is known: each waiting or blocked
+  // task counts on every task above it, so an epic shown alone still tells
+  // that a leaf beneath it waits on a person or on a dependency.
+  for (const d of out.values()) {
+    const { situation } = d.derived;
+    if (situation !== "waiting" && situation !== "blocked") continue;
+    for (const above of ancestorPaths(d.snapshot.task.id)) {
+      const parent = out.get(above);
+      if (parent !== undefined) parent.below[situation] += 1;
+    }
   }
   return out;
 }
@@ -558,8 +582,9 @@ const IMPLIES_STARTED: ReadonlySet<Situation> = new Set([
 
 /**
  * The secondary labels, in a fixed order: started, blocked by (when not the
- * situation), active, liveness, the assignee, held by, closable. The
- * priority is not one: overviews give it a column (`priorityLabel`).
+ * situation), active, the waiting and blocked counts beneath, liveness, the
+ * assignee, held by, closable. The priority is not one: overviews give it a
+ * column (`priorityLabel`).
  * `started` marks the task's own resume point, where the word does not
  * already imply one: below a parent, progress and `active` say more. A
  * resolved task carries only `active`, which there flags a broken invariant;
@@ -580,6 +605,8 @@ export function labels(d: DerivedTask): string[] {
     out.push(blockedText(d));
   }
   if (derived.active) out.push("active");
+  if (d.below.waiting > 0) out.push(`${d.below.waiting} waiting`);
+  if (d.below.blocked > 0) out.push(`${d.below.blocked} blocked`);
   const liveness = livenessLabel(d);
   if (liveness !== null) out.push(liveness);
   const assignee = assigneeLabel(d);
