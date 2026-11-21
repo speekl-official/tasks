@@ -363,6 +363,7 @@ export async function deriveWithin(
     snapshotFromContext(context),
     load,
     context.identity.actor,
+    context.identity.session,
   );
   const task = derived.get(id);
   if (task === undefined) {

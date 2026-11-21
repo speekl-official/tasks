@@ -208,6 +208,7 @@ never stored.
 | `closable`           | An open task with children or `finishes_after` whose finish gate is satisfied.        |
 | `liveness`           | For `IN_PROGRESS`: `live`, `orphaned` or `unknown`; else `null`. `last_seen` is `null` too for a claim without a session. |
 | `last_seen`          | The claimant session's last heartbeat, or `null`.                                     |
+| `yours`              | How the task is yours: `this-session` (a claim of this session, or one without a session when you have none), `orphaned` (your claim whose session is gone), `elsewhere` (your claim in another live session, or of unknown liveness), `inbox` (assigned to you, not claimed by you); else `null`. |
 | `last_entry`         | The most recent log entry — `{time, actor, via, session, text}` — or `null`.          |
 
 ```json

@@ -258,7 +258,7 @@ export async function openSpan(
   const trees = await snapshotAll(
     snapshotFromContext(context),
     context.identity.actor,
-    { local },
+    { local, session: context.identity.session },
   );
   const unavailable = local
     ? []

@@ -79,15 +79,16 @@ assigned to you — your inbox — each with its last log entry, its last activi
 for you is in the task's files: `## Notes` of `task.md`, `design.md`, `state.md`; `resume`
 shows them.
 
-- **Continue** a task claimed by this session.
-- **Then the highest effective priority** among your orphaned claims (`liveness:
-  "orphaned"`, from an older session of yours) and your inbox; at equal priority finish
+- **Continue** a task claimed by this session (`yours: "this-session"`).
+- **Then the highest effective priority** among your orphaned claims (`yours:
+  "orphaned"`, from an older session of yours) and your inbox (`yours: "inbox"`); at equal priority finish
   your orphan before starting inbox work, and a person's instruction — in the conversation
   or under `## Notes` — names what comes first. **Take over** an orphan with an ordinary
   `tasks claim <task>`, which records the takeover: one at a time, only what you will work
   on now; the others stay orphaned, which is no breakage.
-- A task held by another **live** session is not yours.
-- A claim of **unknown** liveness is reported to the person, never forced.
+- Your claim in another **live** session (`yours: "elsewhere"`) stays there.
+- A claim of **unknown** liveness (`elsewhere` as well, with `liveness: "unknown"`) is
+  reported to the person, never forced.
 - Another actor's orphaned claim is taken over only on the person's instruction.
 - **New work** comes last: `tasks claim --next`.
 

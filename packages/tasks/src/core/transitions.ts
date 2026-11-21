@@ -394,13 +394,13 @@ export async function claimNext(
     all: options.all,
   });
   const source = snapshotFromContext(context);
-  const actor = context.identity.actor;
+  const { actor, session } = context.identity;
   const local = options.local === true || scope !== null;
 
   for (let round = 0; round < NEXT_ROUNDS; round += 1) {
     if (round > 0) await reloadAll(context, local);
     const owners = new Map<DerivedTask, LoadedTree>();
-    for (const view of await snapshotAll(source, actor, { local })) {
+    for (const view of await snapshotAll(source, actor, { local, session })) {
       for (const derived of view.derived.values()) {
         owners.set(derived, view.load);
       }
@@ -415,7 +415,12 @@ export async function claimNext(
       const load = owners.get(candidate)!;
       const id = candidate.snapshot.task.id;
       const outcome = await withMutation(context, load, async (fresh) => {
-        const { derived } = await snapshotTree(source, fresh.load, actor);
+        const { derived } = await snapshotTree(
+          source,
+          fresh.load,
+          actor,
+          session,
+        );
         if (derived.get(id)?.derived.ready !== true) return null;
         return decide(new Run(context, fresh, prepared), id);
       });
@@ -1135,6 +1140,7 @@ async function finish(
     snapshotFromContext(context),
     latest,
     context.identity.actor,
+    context.identity.session,
   );
   const entry = derived.get(outcome.id);
   if (entry === undefined) {

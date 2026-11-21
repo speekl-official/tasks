@@ -23,13 +23,15 @@ export interface SnapshotSource {
 
 /**
  * Resolve gates and liveness for every live task of one tree and derive the
- * conditions for `actor` (`null` for an actor-independent view such as
- * `index.md`). This is the one place the reading modules are composed.
+ * conditions for `actor` and its `session` (`null` for an actor-independent
+ * view such as `index.md`). This is the one place the reading modules are
+ * composed.
  */
 export async function snapshotTree(
   source: SnapshotSource,
   load: LoadedTree,
   actor: string | null,
+  session: string | null = null,
   now: Date = new Date(),
 ): Promise<TreeDerivation> {
   const gates = await source.gates.gatesForTree(load);
@@ -58,21 +60,23 @@ export async function snapshotTree(
     project: load.alias,
     tasks,
   };
-  return { load, snapshot, derived: deriveTree(snapshot, actor) };
+  return { load, snapshot, derived: deriveTree(snapshot, actor, session) };
 }
 
 /** The local tree, then every listed tree that is available. */
 export async function snapshotAll(
   source: SnapshotSource,
   actor: string | null,
-  options: { local?: boolean } = {},
+  options: { local?: boolean; session?: string | null } = {},
 ): Promise<TreeDerivation[]> {
   const loads = options.local
     ? [source.projects.local]
     : await source.projects.writableTrees();
   const result: TreeDerivation[] = [];
   for (const load of loads) {
-    result.push(await snapshotTree(source, load, actor));
+    result.push(
+      await snapshotTree(source, load, actor, options.session ?? null),
+    );
   }
   return result;
 }

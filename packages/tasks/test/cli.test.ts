@@ -809,6 +809,7 @@ describe("show", () => {
       closable: false,
       liveness: null,
       last_seen: null,
+      yours: null,
       last_entry: {
         time: "2026-01-02T00:00:00Z",
         actor: "tester",
@@ -1359,6 +1360,12 @@ describe("mine", () => {
       "inbox",
     ]);
     expect(json.tasks[0]).toMatchObject({ liveness: "live" });
+    expect(json.tasks.map((task) => task.yours)).toEqual([
+      "this-session",
+      "elsewhere",
+      "inbox",
+      "inbox",
+    ]);
     expect(json.tasks[3]?.last_entry).toEqual({
       time: "2026-01-02T00:00:00Z",
       actor: "alice",
@@ -1368,12 +1375,33 @@ describe("mine", () => {
     });
 
     // Without a session, both claims are equally someone else's run.
-    expect(ids(await sandbox.run("mine", "--json"))).toEqual([
+    const sessionless = collection(await sandbox.run("mine", "--json"));
+    expect(sessionless.tasks.map((task) => task.id)).toEqual([
       "other-session",
       "this-session",
       "waiting",
       "inbox",
     ]);
+    expect(sessionless.tasks.map((task) => task.yours)).toEqual([
+      "elsewhere",
+      "elsewhere",
+      "inbox",
+      "inbox",
+    ]);
+  });
+
+  it("carries yours on every reporting command, so ready names the inbox", async () => {
+    sandbox = await treeSandbox(MINE_TREE);
+    const ready = collection(await sandbox.session("s1")("ready", "--json"));
+    expect(
+      Object.fromEntries(ready.tasks.map((task) => [task.id, task.yours])),
+    ).toEqual({ waiting: "inbox", inbox: "inbox", free: null });
+    const shown = await sandbox.session("s1")("show", "this-session", "--json");
+    expect(shown.json<ShowJson>().yours).toBe("this-session");
+    // A write answers with the task as the writer now sees it.
+    const claimed = await sandbox.session("s1")("claim", "free", "--json");
+    expect(claimed.code).toBe(ExitCode.Success);
+    expect(claimed.json<ShowJson>().yours).toBe("this-session");
   });
 
   it("renders each task's last log entry", async () => {

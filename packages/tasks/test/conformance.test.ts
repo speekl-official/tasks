@@ -393,6 +393,7 @@ describe("Self-checking", () => {
         started: false,
         liveness: null,
         last_seen: null,
+        yours: null,
       };
       const notDone = (ref: string): BlockedByJson[] => [
         { ref, reason: "not-done", status: "TODO" },
@@ -467,7 +468,12 @@ describe("Self-checking", () => {
           blocked_by: notDone("free"),
         },
         deploy: { situation: "assigned", assignee: "alice" },
-        "my-deploy": { situation: "assigned", assignee: "tester", ready: true },
+        "my-deploy": {
+          situation: "assigned",
+          assignee: "tester",
+          ready: true,
+          yours: "inbox",
+        },
         "assigned-blocked": {
           situation: "assigned",
           assignee: "alice",

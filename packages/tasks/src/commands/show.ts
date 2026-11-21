@@ -44,6 +44,7 @@ async function deriveArchived(
   const derived = deriveTree(
     { tree: load.tree, project: load.alias, tasks },
     context.identity.actor,
+    context.identity.session,
   ).get(task.id);
   if (derived === undefined) {
     throw new Error(`${task.id} was read from the archive but not derived.`);

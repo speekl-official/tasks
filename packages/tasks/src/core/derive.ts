@@ -10,13 +10,16 @@ import type {
   ClaimLiveness,
   Derived,
   FinishGate,
+  Frontmatter,
   LastEntryJson,
+  Liveness,
   Priority,
   ResolvedRef,
   Situation,
   StartGate,
   Status,
   TaskWithDerivedJson,
+  Yours,
 } from "./types.js";
 import { PRIORITY_RANK, higherPriority, isOpen, isResolved } from "./types.js";
 
@@ -256,6 +259,7 @@ function deriveTask(
   tree: Tree,
   structure: Structure,
   actor: string | null,
+  session: string | null,
 ): Derived {
   const { task } = entry;
   const fm = task.frontmatter;
@@ -329,23 +333,48 @@ function deriveTask(
     liveness: claim?.liveness ?? null,
     last_seen:
       claim !== null && fm.claimed_session !== null ? claim.last_seen : null,
+    yours: yoursOf(fm, claim?.liveness ?? null, actor, session),
     last_entry: entry.lastEntry,
   };
 }
 
 /**
- * Derive every task of one tree for the calling actor. A null actor (as for
- * `index.md`) requires no assignee: only unassigned tasks can be ready. The
- * map is keyed by the task's id within its tree, unqualified.
+ * How the task is the viewer's. A claim is this session's when the tokens
+ * match, a claim without a token counting as this session's for a viewer
+ * without one, as `session-check` counts them; the viewer's other claims
+ * are `orphaned` or held `elsewhere` (another live session, or a liveness
+ * nobody here can judge); an open task assigned to the viewer and not
+ * claimed by them is `inbox`. Null otherwise, for a resolved task, and for
+ * the actor-independent view.
+ */
+function yoursOf(
+  fm: Frontmatter,
+  liveness: Liveness | null,
+  actor: string | null,
+  session: string | null,
+): Yours | null {
+  if (actor === null) return null;
+  if (fm.status === "IN_PROGRESS" && fm.claimed_by === actor) {
+    if (fm.claimed_session === session) return "this-session";
+    return liveness === "orphaned" ? "orphaned" : "elsewhere";
+  }
+  return isOpen(fm.status) && fm.assignee === actor ? "inbox" : null;
+}
+
+/**
+ * Derive every task of one tree for the calling actor and session. A null
+ * actor (as for `index.md`) requires no assignee: only unassigned tasks can
+ * be ready. The map is keyed by the task's id within its tree, unqualified.
  */
 export function deriveTree(
   snapshot: TreeSnapshot,
   actor: string | null,
+  session: string | null = null,
 ): Map<string, DerivedTask> {
   const structure = buildStructure(snapshot);
   const out = new Map<string, DerivedTask>();
   for (const entry of snapshot.tasks) {
-    const derived = deriveTask(entry, snapshot.tree, structure, actor);
+    const derived = deriveTask(entry, snapshot.tree, structure, actor, session);
     out.set(entry.task.id, {
       snapshot: entry,
       derived,

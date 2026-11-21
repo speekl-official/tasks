@@ -115,7 +115,7 @@ they change only in a major version.
   with `"count": 0`.
 - **Task objects** carry the frontmatter fields, `id`, `name`, `parent`,
   `project`, `title` and `path`, plus the derived conditions — `situation`,
-  `blocked_by`, `ready`, `held_by`, `liveness`, `last_entry`, … — on every
+  `blocked_by`, `ready`, `held_by`, `liveness`, `yours`, `last_entry`, … — on every
   reporting command. Overviews return
   `{scope, projects, count, tasks, malformed, unavailable}`.
 

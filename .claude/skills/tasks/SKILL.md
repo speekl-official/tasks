@@ -78,8 +78,11 @@ again. Subagents use the same name and token.
    you will work on now: the others stay orphaned, which is no breakage. A task
    held by another **live** session is not yours. A claim of **unknown**
    liveness is reported to the person, never forced. Another actor's orphaned
-   claim is taken over only on the person's instruction. What was left for you
-   is in a task's files: `## Notes` of `task.md`, `design.md`, `state.md`.
+   claim is taken over only on the person's instruction. Each row's `yours`
+   names its case: `this-session`, `orphaned`, `elsewhere` (another live
+   session, or unknown liveness), `inbox`; `ready --json` carries it too. What
+   was left for you is in a task's files: `## Notes` of `task.md`, `design.md`,
+   `state.md`.
 2. **Claim before working, read before changing.** Your own orphan: `claim` it
    first (that restores your hold), then `resume`. New work: `tasks claim --next`
    (the first task of your ready set, in one step) and then `resume`, or
@@ -254,7 +257,7 @@ Use `--json` whenever you parse; the human output is not stable.
   `created`, `updated`), `id`, `name`, `parent`, `project`, `title`, `path`, and
   the derived `situation`, `blocked_by`, `ready`, `effective_priority`,
   `held_by`, `started`, `children`, `active`, `waiting_for`, `closable`,
-  `liveness`, `last_seen`, `last_entry`. Overviews return
+  `liveness`, `last_seen`, `yours`, `last_entry`. Overviews return
   `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds `body`,
   `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
   `child_tasks`, `state`, `docs`.

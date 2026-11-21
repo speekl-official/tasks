@@ -134,6 +134,8 @@ function snapshotOf(
 interface DeriveOptions {
   /** Defaults to the fixture actor; `null` derives as `index.md` does. */
   actor?: string | null;
+  /** The viewer's session token; none by default. */
+  session?: string | null;
   overrides?: Overrides;
   /** Ids at which to write an unparseable `task.md`. */
   malformed?: string[];
@@ -151,6 +153,7 @@ async function derive(
   return deriveTree(
     snapshotOf(tree, options.overrides),
     options.actor === undefined ? "tester" : options.actor,
+    options.session ?? null,
   );
 }
 
@@ -595,6 +598,76 @@ describe("derived fields", () => {
 /* ------------------------------------------------------------------------ */
 /* Hold                                                                     */
 /* ------------------------------------------------------------------------ */
+
+describe("yours", () => {
+  const YOURS: TreeSpec = {
+    tasks: {
+      here: { status: "IN_PROGRESS", claimed_session: "s1", state: true },
+      elsewhere: { status: "IN_PROGRESS", claimed_session: "s0", state: true },
+      gone: { status: "IN_PROGRESS", claimed_session: "s9", state: true },
+      terminal: { status: "IN_PROGRESS", state: true },
+      inbox: { assignee: "tester" },
+      handoff: { status: "PAUSED", assignee: "tester", state: true },
+      "assigned-done": { status: "DONE", assignee: "tester" },
+      theirs: {
+        status: "IN_PROGRESS",
+        claimed_by: "alice",
+        claimed_session: "s2",
+      },
+      free: {},
+    },
+  };
+  const liveness = {
+    here: LIVE,
+    elsewhere: LIVE,
+    gone: ORPHANED,
+    theirs: LIVE,
+  };
+  const yoursOf = (
+    derived: Map<string, DerivedTask>,
+  ): Record<string, unknown> =>
+    Object.fromEntries(
+      [...derived.values()].map((d) => [d.snapshot.task.id, d.derived.yours]),
+    );
+
+  it("names the case of each task for an actor with a session", async () => {
+    const derived = await derive(YOURS, {
+      session: "s1",
+      overrides: { liveness },
+    });
+    expect(yoursOf(derived)).toEqual({
+      here: "this-session",
+      elsewhere: "elsewhere",
+      gone: "orphaned",
+      // A claim without a token is nobody's session: unknown liveness.
+      terminal: "elsewhere",
+      inbox: "inbox",
+      handoff: "inbox",
+      "assigned-done": null,
+      theirs: null,
+      free: null,
+    });
+    expect(get(derived, "here").json.yours).toBe("this-session");
+  });
+
+  it("counts a claim without a session as this session's for an actor without one", async () => {
+    const derived = await derive(YOURS, { overrides: { liveness } });
+    expect(yoursOf(derived)).toMatchObject({
+      terminal: "this-session",
+      here: "elsewhere",
+      gone: "orphaned",
+      inbox: "inbox",
+    });
+  });
+
+  it("is null throughout for the actor-independent view", async () => {
+    const derived = await derive(YOURS, {
+      actor: null,
+      overrides: { liveness },
+    });
+    expect(new Set(Object.values(yoursOf(derived)))).toEqual(new Set([null]));
+  });
+});
 
 describe("held_by", () => {
   it("names the nearest holder, through groups", async () => {

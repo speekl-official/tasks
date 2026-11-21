@@ -262,6 +262,15 @@ export interface FinishGate {
 
 export type Liveness = "live" | "orphaned" | "unknown";
 
+/**
+ * How a task is the calling actor's: a claim of this session (or one
+ * without a session when the caller has none), the actor's claim whose
+ * session is gone, the actor's claim held elsewhere (another live session,
+ * or unknown liveness), or an open task assigned to the actor and not
+ * claimed by them.
+ */
+export type Yours = "this-session" | "orphaned" | "elsewhere" | "inbox";
+
 export interface ClaimLiveness {
   liveness: Liveness;
   /** Last heartbeat of the claimant's session, or `null` when none exists. */
@@ -331,6 +340,8 @@ export interface Derived {
   liveness: Liveness | null;
   /** `IN_PROGRESS` with a session only; `null` otherwise. */
   last_seen: string | null;
+  /** How the task is the calling actor's, or `null`. */
+  yours: Yours | null;
   last_entry: LastEntryJson | null;
 }
 

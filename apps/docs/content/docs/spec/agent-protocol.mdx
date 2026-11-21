@@ -28,8 +28,9 @@ everyone else and may be taken over.
 
 ## Entry
 
-1. Run `mine`. Continue any task claimed by this session; then take, among the orphaned tasks
-   claimed by this actor and the tasks assigned to it, the one with the highest effective priority
+1. Run `mine`. Continue any task claimed by this session (its `yours` is `this-session`); then
+   take, among the orphaned tasks claimed by this actor (`orphaned`) and the tasks assigned to it
+   (`inbox`), the one with the highest effective priority
    — at equal priority an orphan before an assigned task — unless a person's instruction names
    what comes first; only then new work. An orphan is taken over one at a time, only what the agent
    will work on now; a task held by another live session is not the agent's, a claim of unknown
