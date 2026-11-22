@@ -2563,6 +2563,17 @@ describe("--fields", () => {
       "state",
       "id",
     ]);
+    // The task objects under child_tasks answer to the same list.
+    const parent = await sandbox.run(
+      "resume",
+      "epic",
+      "--json",
+      "--fields",
+      "id,child_tasks",
+    );
+    expect(parent.json<{ child_tasks: object[] }>().child_tasks).toEqual([
+      { id: "epic/part" },
+    ]);
   });
 
   it("trims what a write answers with, leaving out an extra this run has not got", async () => {

@@ -56,7 +56,9 @@ export function parseFields(value: string): string[] {
 /**
  * The document trimmed to `fields`, in that order; a key this document has
  * not got (a transition that cascaded nothing, a row of a collection asked
- * for `body`) is left out rather than invented.
+ * for `body`) is left out rather than invented. The task objects under
+ * `child_tasks` are trimmed the same way: every task object a document
+ * carries answers to the one list.
  */
 export function pickFields(
   document: object,
@@ -65,7 +67,12 @@ export function pickFields(
   const source = document as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const field of fields) {
-    if (field in source) out[field] = source[field];
+    if (!(field in source)) continue;
+    const value = source[field];
+    out[field] =
+      field === "child_tasks" && Array.isArray(value)
+        ? value.map((child: object) => pickFields(child, fields))
+        : value;
   }
   return out;
 }

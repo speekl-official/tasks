@@ -34,7 +34,7 @@ for every shape.
 **`--fields <list>`** goes with `--json` on every command that answers with a task object or
 a collection of them: `ready`, `list`, `tree`, `mine`, `show`, `resume`, `new`, `note`,
 `restore`, the transitions, and `dep`/`after add` and `rm`. Each task object then carries only
-the named keys, in that order; a collection keeps `scope`, `projects`, `count`, `malformed` and
+the named keys, in that order, the task objects under `resume`'s `child_tasks` too; a collection keeps `scope`, `projects`, `count`, `malformed` and
 `unavailable` around the trimmed rows:
 
 ```sh

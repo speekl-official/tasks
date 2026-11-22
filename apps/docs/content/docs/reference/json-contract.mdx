@@ -36,7 +36,8 @@ on stdout and exit `4`.
 
 Every task object, alone or as a row of a collection, can be trimmed with `--fields <list>`
 beside `--json`: `tasks ready --json --fields id,situation,effective_priority` answers with
-rows of those three keys, in that order, inside the usual collection. The names are the keys
+rows of those three keys, in that order, inside the usual collection; `resume --json --fields id,child_tasks`
+trims the children the same way. The names are the keys
 below and the extras `show`, `resume` and the transitions add; a name no document has is
 exit `2` before any write, and `--fields` without `--json` is exit `2`. The shapes on this page
 are what a command emits without `--fields`.
