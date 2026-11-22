@@ -68,7 +68,14 @@ export function parseSince(
   if (duration) {
     const amount = Number(duration[1]);
     const unit = UNIT_MS[duration[2]!]!;
-    return formatIso(new Date(now.getTime() - amount * unit));
+    const when = new Date(now.getTime() - amount * unit);
+    if (Number.isNaN(when.getTime())) {
+      throw TaskError.usage(
+        `Invalid ${flag} "${arg}": the duration reaches further back than any time a date can hold.`,
+        flag === "--since" ? { since: arg } : { option: flag, value: arg },
+      );
+    }
+    return formatIso(when);
   }
 
   throw TaskError.usage(

@@ -96,6 +96,13 @@ describe("--since", () => {
   ])("refuses %j as a usage error", (arg) => {
     usageError(() => parseSince(arg, NOW));
   });
+
+  it("refuses a duration no date can hold instead of failing inside", () => {
+    usageError(() => parseSince("999999999999999999999w", NOW));
+    usageError(() =>
+      parseSince("999999999999999999999w", NOW, "--updated-before"),
+    );
+  });
 });
 
 describe("compactAge", () => {
