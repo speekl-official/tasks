@@ -246,6 +246,11 @@ export interface Migration {
   /** The migrated tree's own references, live tasks only. */
   rewritten: RewrittenRefJson[];
   unrewritten: UnrewrittenRefJson[];
+  /**
+   * Every external reference a live task of the tree will hold after the
+   * migration, as stored: the trees they lead to may hold references back.
+   */
+  external: string[];
   readme: ReadmeOutcome;
   scope: string | null;
   /** v1's `active_phase` when it named no phase directory, else `null`. */
@@ -908,6 +913,7 @@ async function plan(source: Source): Promise<Plan> {
   const writes: FileWrite[] = [];
   const rewritten: RewrittenRefJson[] = [];
   const unrewritten: UnrewrittenRefJson[] = [];
+  const external = new Set<string>();
   const inProgress: string[] = [];
   const paused: string[] = [];
 
@@ -930,6 +936,8 @@ async function plan(source: Source): Promise<Plan> {
       };
       if (next === null) unrewritten.push({ ...site, ref: raw });
       else if (next !== raw) rewritten.push({ ...site, from: raw, to: next });
+      const kept = safeParseReference(next ?? raw);
+      if (kept.ok && kept.ref.kind === "external") external.add(next ?? raw);
     }
 
     const frontmatter: Frontmatter = {
@@ -992,6 +1000,7 @@ async function plan(source: Source): Promise<Plan> {
       statuses: planner.statusTable(statusOf),
       rewritten,
       unrewritten,
+      external: [...external],
       readme: await planner.readme(),
       scope,
       droppedScope: dropped,
@@ -1266,6 +1275,30 @@ async function unrewrittenInto(
           }
         }
       }
+    }
+  }
+
+  // The migrating tree's own outgoing references, resolved from its root: a
+  // read-only tree reached only through them is one the real run meets once
+  // the project is v2 and listed, so the preview meets it too.
+  for (const ref of migration.external) {
+    const parsed = safeParseReference(ref);
+    if (!parsed.ok || parsed.ref.kind !== "external") continue;
+    let target;
+    try {
+      target = await projects.byDirectory(
+        path.resolve(migration.project.root, parsed.ref.projectPath),
+      );
+    } catch (err) {
+      if (isTaskError(err)) continue;
+      throw err;
+    }
+    if (
+      target.kind === "ok" &&
+      !target.writable &&
+      target.key !== migration.project.root
+    ) {
+      readOnly.set(target.key, target);
     }
   }
 

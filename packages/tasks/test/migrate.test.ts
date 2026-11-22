@@ -1207,6 +1207,40 @@ describe("migrate: references to and from other trees", () => {
     expect(await s.read(".tasks/epic/task.md")).toBe(before.epic);
   });
 
+  it("previews the references a read-only tree reached only through the migrating project holds into it", async () => {
+    sandbox = await makeSandbox();
+    const s = sandbox;
+    await s.tree({ tasks: { t: {} } });
+    // The tracker lists legacy (v1); legacy points at lib (v2, unlisted);
+    // lib points back into legacy as v1 named it.
+    await writeV1Tree(path.join(s.root, "legacy", ".tasks"), {
+      tasks: { "work/alpha": { depends_on: ["../lib:lib-task"] } },
+    });
+    await addProjectAlias(s.tasksDir, "legacy", "../legacy");
+    const lib = path.join(s.root, "lib", ".tasks");
+    await fs.mkdir(path.join(lib, "lib-task"), { recursive: true });
+    await fs.writeFile(path.join(lib, "config.yml"), "version: 2\n");
+    await fs.writeFile(
+      path.join(lib, "lib-task", "task.md"),
+      `---\nstatus: TODO\npriority: normal\ndepends_on: ["../legacy:alpha"]\nfinishes_after: []\nassignee: null\nclaimed_by: null\nclaimed_at: null\nclaimed_session: null\ncreated: "${FIXTURE_TIME}"\nupdated: "${FIXTURE_TIME}"\n---\n`,
+    );
+
+    const expected = [
+      {
+        project: "../lib",
+        task: "lib-task",
+        field: "depends_on",
+        ref: "../legacy:alpha",
+      },
+    ];
+    const preview = migrated(
+      await s.run("migrate", "legacy", "--dry-run", "--json"),
+    );
+    expect(preview.unrewritten).toEqual(expected);
+    const real = migrated(await s.run("migrate", "legacy", "--json"));
+    expect(real.unrewritten).toEqual(expected);
+  });
+
   it("migrates a listed v1 project from a v2 tracker and rewrites the tracker's references into it", async () => {
     sandbox = await makeSandbox();
     const s = sandbox;
