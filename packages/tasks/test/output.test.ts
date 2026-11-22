@@ -2,6 +2,7 @@ import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+import stringWidth from "string-width";
 
 import type {
   DerivedTask,
@@ -252,6 +253,38 @@ describe("renderOverview", () => {
     expect(stripVTControlCharacters(row.slice(row.lastIndexOf("…") + 1))).toBe(
       "",
     );
+  });
+
+  it("measures and cuts by display cells, so emoji and CJK titles neither overrun nor break", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        rocket: { title: "🚀".repeat(30) },
+        cjk: { title: "数据".repeat(20) },
+        plain: { title: "a".repeat(60) },
+      },
+    });
+    const rows = [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+    ];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const width = 60;
+    const lines = plain(renderOverview(rows, { now, width })).split("\n");
+    for (const line of lines) {
+      expect(stringWidth(line)).toBeLessThanOrEqual(width);
+      // No half of a surrogate pair, no replacement character.
+      expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|\uFFFD/u);
+    }
+    const rocket = lines.find((line) => line.startsWith("rocket"))!;
+    expect(rocket).toMatch(/🚀…$/u);
+    const cjk = lines.find((line) => line.startsWith("cjk"))!;
+    expect(cjk).toMatch(/数据…$|数…$/u);
+    // Nothing is cut when the output is not fitted.
+    const free = plain(renderOverview(rows, { now }));
+    expect(free).toContain("🚀".repeat(30));
+    expect(free).toContain("数据".repeat(20));
   });
 
   it("never cuts below a column's floor: a very narrow width wraps instead", async () => {

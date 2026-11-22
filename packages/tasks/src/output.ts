@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 
 import pc from "picocolors";
+import stringWidth from "string-width";
 
 import type { DerivedTask } from "./core/derive.js";
 import { pickFields } from "./core/fields.js";
@@ -102,10 +103,17 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Display width of a cell, colour codes excluded. */
+/**
+ * Display width of a cell in terminal columns, colour codes excluded: a
+ * wide character counts two, a combining mark none, so a title in CJK or
+ * emoji is measured as the terminal lays it out.
+ */
 function visibleWidth(text: string): number {
-  return stripVTControlCharacters(text).length;
+  return stringWidth(stripVTControlCharacters(text));
 }
+
+/** Cuts fall between graphemes, never inside a surrogate pair or a sequence. */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** How a grid is fitted into a width: which columns give way, down to what. */
 interface Fit {
@@ -147,9 +155,17 @@ function cutVisible(text: string, width: number): string {
       if (seen < keep) kept += token;
       else closers += token;
     } else if (seen < keep) {
-      const room = keep - seen;
-      kept += token.slice(0, room);
-      seen += Math.min(token.length, room);
+      for (const { segment } of GRAPHEMES.segment(token)) {
+        const width = stringWidth(segment);
+        // A wide character that does not fit the last cell stays out; the
+        // cell ends a column early rather than a column late.
+        if (seen + width > keep) {
+          seen = keep;
+          break;
+        }
+        kept += segment;
+        seen += width;
+      }
     }
   }
   return `${kept}…${closers}`;
