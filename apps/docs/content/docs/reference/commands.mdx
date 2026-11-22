@@ -633,7 +633,7 @@ close a cycle (exit `4`, `cycle`, with the cycle). Adding a reference already pr
 changes nothing. A `CANCELLED` target is accepted and said so: `dep add` prints that the task
 is now [stranded](/docs/reference/gates#cancelled-dependencies-are-stranded), since cancelled
 work never satisfies a dependency (an `after add` on one is satisfied and says nothing).
-`rm` accepts a reference as stored or as `add` would resolve it, and fails with exit `3`
+`rm` takes a reference as `dep list` prints it (what `add` would resolve it to), or as stored, and fails with exit `3`
 when the task does not hold it. `--force` overrides authorization only.
 
 **Writes** the field, `updated`, and a log entry such as
@@ -760,7 +760,7 @@ tasks log <task> [--since <when>] [--actor <actor>] [--archived] [--json]
 
 Without text, the task's own entries, oldest first, in the shape of
 [`log --since`](#tasks-log---since): the way to read one task's history without opening
-`log.md`. `--since <when>` keeps the entries at or after a time, in the grammar of
+`log.md`. Entries come in the file's order, where `log --since` orders by time. `--since <when>` keeps the entries at or after a time, in the grammar of
 `log --since`; `--actor <actor>` those one actor wrote (an entry made on their behalf
 under `--as` counts as theirs). `--archived` reads the log of a task under `.archive/`,
 by its former path in full; appending to an archived task is refused (exit `2`), restore
@@ -952,7 +952,7 @@ tasks without a `state.md`, references kept as written, an edited `README.md` ke
 `active_phase` that named no phase directory and became no scope.
 
 `--dry-run` prints the same report about what would happen — `Dry run: migrating … would move
-3 tasks; nothing was written`, `2 to rewrite` — and `dry_run: true` in the JSON. From a v2
+3 tasks; the tree was left untouched`, `2 to rewrite` — and `dry_run: true` in the JSON. From a v2
 tracker migrating a listed project, the references the tracker and its other projects hold into
 it are previewed too; from the v1 tree itself they are not, since nothing can open that tree
 yet, and the last `!` line says so.

@@ -173,7 +173,7 @@ export type ReadmeOutcome = "replaced" | "kept" | "absent";
 
 /** What `migrate --json` prints. */
 export interface MigrateJson {
-  /** Present, and true, under `--dry-run`: nothing was written. */
+  /** Present, and true, under `--dry-run`: the tree was left untouched. */
   dry_run?: true;
   /** The `.tasks/` directory of the migrated tree. */
   tree: string;

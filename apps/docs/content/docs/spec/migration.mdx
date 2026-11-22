@@ -34,7 +34,7 @@ one tree at a time under each tree's lock, and MUST list the ones it finds in tr
 not write; those resolve as `missing` until edited.
 
 An implementation SHOULD offer a dry run (`--dry-run`) that performs every check above, refuses
-exactly as the migration would, and reports what it would do — the counts, the mappings, the
+as the migration's checks would (a busy tree lock is met by the real run alone), and reports what it would do — the counts, the mappings, the
 references it would rewrite and the ones it would keep — without writing anything into the tree, its lock
 included. The references other trees hold into the tree MAY be left out of the preview when that
 tree is the one the command runs in, and the report then says so.

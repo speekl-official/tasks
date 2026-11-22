@@ -427,7 +427,7 @@ describe("migrate: the repository's own v1 tree", () => {
 
     const human = plain((await s.run("migrate", "--dry-run")).stdout);
     expect(human).toContain("Dry run: migrating");
-    expect(human).toContain("would move 15 tasks; nothing was written");
+    expect(human).toContain("would move 15 tasks; the tree was left untouched");
     expect(human).toContain("6 to rewrite, 1 kept as written");
     expect(human).toContain("to be replaced with the v2 scaffold");
     expect(human).toContain("to be generated; _index.md to be removed");

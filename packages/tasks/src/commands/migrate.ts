@@ -142,7 +142,7 @@ function renderMigration(
 
   const head = dryRun
     ? ui.info(
-        `Dry run: migrating ${name} to .tasks v${CONVENTION_VERSION} would move ${counts.join(", ")}; nothing was written`,
+        `Dry run: migrating ${name} to .tasks v${CONVENTION_VERSION} would move ${counts.join(", ")}; the tree was left untouched`,
       )
     : ui.success(
         `Migrated ${name} to .tasks v${CONVENTION_VERSION}: ${counts.join(", ")}`,
