@@ -194,8 +194,9 @@ and workspace files; the children with their situations; the workspace file list
 documentation lives, each location with whether it exists here; `state.md` in full; and the
 last log entry. A malformed ancestor or child is left out of these lists (the task's
 `children` count still includes it). Both forms carry the body and `state.md`, so an agent
-reads `task.md` and `state.md` through this command and opens `design.md`, `plan.md` and
-the ancestors' files afterwards: it is the second command of the
+reads `task.md` and `state.md` through this command — a project's own frontmatter keys,
+which the task object does not carry, stay in the file — and opens `design.md`, `plan.md`
+and the ancestors' files afterwards: it is the second command of the
 [agent protocol](/docs/guides/agent-protocol), after `mine`.
 
 ### `tasks ready`

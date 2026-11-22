@@ -123,13 +123,14 @@ tasks resume <task>
 and ownership, the ancestors outermost first with the workspace files each one has, the
 children with their status and situation, the documentation locations, `state.md` in full
 and the last log entry; under `--json` the same, as `body`, `state` and the full objects.
-Do not read those two files again. Then read, in this order, `design.md` and `plan.md`
-where the workspace lists them — then, for each ancestor as far as needed, its `task.md`,
-`design.md` and `plan.md`. An epic's design and plan live on the epic. `--fields` on
-`resume` trims the children too: keep `status`, `assignee`, `claimed_by`, `blocked_by`,
-`finishes_after`, `held_by` and `referenced_by` beside `body`, `state`, `ancestors`,
-`child_tasks`, `workspace`, `docs` and `last_entry`, or the gates and the holder
-disappear from view.
+Do not read those two files again; only a frontmatter key of the project's own, which the
+task object does not carry, is read from `task.md` when the project's instructions name
+one. Then read, in this order, `design.md` and `plan.md` where the workspace lists them —
+then, for each ancestor as far as needed, its `task.md`, `design.md` and `plan.md`. An
+epic's design and plan live on the epic. On entry read `resume` whole: `--fields` trims
+the children to the same keys, and a projection made for the task hides their names,
+holders and gates (`id`, `title`, `situation`, `status`, `assignee`, `claimed_by`,
+`held_by`, `depends_on`, `blocked_by`, `finishes_after`).
 
 **Do not read `log.md` on entry.** The present is fully described by the other files;
 the last entry — the last activity — is already in the `resume` output. If a person's text

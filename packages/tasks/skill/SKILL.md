@@ -110,14 +110,16 @@ again. Subagents use the same name and token.
    prints the definition, the gates and ownership, the ancestors with their
    workspace files, the children with their status and situation, the docs
    locations, `state.md` in full and the last log entry (`--json`: the same as
-   `body`, `state` and the full objects). Do not read those two files again.
+   `body`, `state` and the full objects). Do not read those two files again;
+   only a frontmatter key of the project's own, which the task object does not
+   carry, is read from `task.md` when the project's instructions name one.
    Then read `design.md` and `plan.md` where the workspace lists them, and for
    each ancestor as far as needed its `task.md`, `design.md` and `plan.md` — an
-   epic's design and plan live on the epic. `--fields` on `resume` trims the
-   children too: keep `status`, `assignee`, `claimed_by`, `blocked_by`,
-   `finishes_after`, `held_by` and `referenced_by` beside `body`, `state`,
-   `ancestors`, `child_tasks`, `workspace`, `docs` and `last_entry`, or the
-   gates and the holder disappear from view. **Never read `log.md` on entry**;
+   epic's design and plan live on the epic. On entry read `resume` whole:
+   `--fields` trims the children to the same keys, and a projection made for
+   the task hides their names, holders and gates (`id`, `title`, `situation`,
+   `status`, `assignee`, `claimed_by`, `held_by`, `depends_on`, `blocked_by`,
+   `finishes_after`). **Never read `log.md` on entry**;
    the last entry, the last activity, is in the `resume` output. A person's
    text that reached you only there goes under `## Notes` (`tasks note`).
 4. **Listed projects you cannot see** — `not shown` in an overview's footer,
