@@ -193,7 +193,9 @@ and workspace files; the children with their situations; the workspace file list
 `config.yml` lists [`docs`](/docs/reference/configuration#docs), where the project's
 documentation lives, each location with whether it exists here; `state.md` in full; and the
 last log entry. A malformed ancestor or child is left out of these lists (the task's
-`children` count still includes it). It is the second command of the
+`children` count still includes it). The JSON carries the body too, so an agent reads
+`task.md` and `state.md` through this command and opens `design.md`, `plan.md` and the
+ancestors' files afterwards: it is the second command of the
 [agent protocol](/docs/guides/agent-protocol), after `mine`.
 
 ### `tasks ready`

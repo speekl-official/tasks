@@ -42,9 +42,12 @@ everyone else and may be taken over.
    restores the hold) and resumed after; new work is claimed with `claim --next` and then resumed,
    or resumed and then claimed by id when the agent chooses among candidates. When a claim
    conflicts, another agent was first: the agent moves on to the next ready task.
-3. For the task at hand, run `resume` and read, in order, `task.md`, `state.md`, `design.md`,
-   `plan.md`, then for each ancestor as far as needed its `task.md`, `design.md` and `plan.md` —
-   an epic's design and plan live on the epic. Do not read `log.md` on entry.
+3. For the task at hand, run `resume`. Its answer carries `state.md` in full, the ancestors with
+   the workspace files each has, the children, the documentation locations and the last log
+   entry, and in the JSON the task's definition as `body` ([Task object](/docs/spec/cli#task-object)):
+   what it carried is not read again from the files. Then read `design.md` and `plan.md` where
+   `workspace` lists them, and for each ancestor as far as needed its `task.md`, `design.md` and
+   `plan.md` — an epic's design and plan live on the epic. Do not read `log.md` on entry.
 4. A listed project the commands cannot read — not checked out, a v1 tree — is reported to the
    person once and left alone: migration and checkout are a person's actions.
 

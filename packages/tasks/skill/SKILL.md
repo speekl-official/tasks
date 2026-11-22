@@ -93,12 +93,18 @@ again. Subagents use the same name and token.
    (the first task of your ready set, in one step) and then `resume`, or
    `resume` the candidates and `tasks claim <task>` by id when choosing. A
    conflict (exit `4`) means another agent was first: take the next ready task.
-3. **`tasks resume <task>`**, then read, in order: `task.md`, `state.md`,
-   `design.md`, `plan.md`, then for each ancestor as far as needed its
-   `task.md`, `design.md` and `plan.md` — an epic's design and plan live on the
-   epic. **Never read `log.md` on entry**; its last entry, the last activity, is
-   already in the `resume` output. A person's text that reached you only there
-   goes under `## Notes` (`tasks note`).
+3. **`tasks resume <task> --json`** reads `task.md` and `state.md` for you: it
+   returns the definition (`body`), `state.md` in full (`state`), the ancestors
+   with their workspace files, the children, the docs locations and the last
+   log entry. Do not read those two files again. Then read `design.md` and
+   `plan.md` where `workspace` lists them, and for each ancestor as far as
+   needed its `task.md`, `design.md` and `plan.md` — an epic's design and plan
+   live on the epic. Ask for what this step reads:
+   `--fields id,title,situation,path,ancestors,child_tasks,workspace,docs,state,last_entry,body`
+   keeps it and trims each child to its id, title, situation, path and last
+   entry. **Never read `log.md` on entry**; the last entry, the last activity,
+   is in the `resume` output. A person's text that reached you only there goes
+   under `## Notes` (`tasks note`).
 4. **Listed projects you cannot see** — `not shown` in an overview's footer,
    `unavailable` in the JSON: a v1 tree, a repository not checked out here — are
    a person's to migrate or check out. Say so once in your report and go on.
@@ -214,7 +220,7 @@ full path, an unambiguous suffix, or `alias:path` in a listed project.
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tasks mine [--local]`                                                                                                                                                                                                              | Your claims (this session's first), then your inbox.                                                                                                                                                                                                                                                              |
 | `tasks actors`                                                                                                                                                                                                                      | Who tasks may be assigned to, with their open tasks.                                                                                                                                                                                                                                                              |
-| `tasks resume <task>`                                                                                                                                                                                                               | Ancestors, children, `state.md`, last log entry, docs locations.                                                                                                                                                                                                                                                  |
+| `tasks resume <task>`                                                                                                                                                                                                               | Ancestors, children, `state.md`, last log entry, docs locations; the JSON adds the definition (`body`).                                                                                                                                                                                                           |
 | `tasks show <task> [--archived]`                                                                                                                                                                                                    | Fields, derived conditions, references, body; `--archived` reads one from the archive.                                                                                                                                                                                                                            |
 | `tasks ready [--scope <path>] [--all] [--local] [--priority <level>]`                                                                                                                                                               | What you may take now, best first; a scope keeps to this tree, `--local` does without one; `--priority high`: urgent and high only.                                                                                                                                                                               |
 | `tasks list [--<situation>…] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created\|updated] [--reverse] [--all] [--top]` / `tasks tree [--sort created\|updated] [--reverse] [--top]` | Open tasks by situation; `--blocked`, `--waiting`, `--parked`, …; `--active`: work in progress beneath; `--priority high`: narrows to urgent and high; `--updated-before 2w`: untouched for two weeks; `--sort updated --reverse`: longest untouched first; `--top`: the top level alone, `--depth <n>` for more. |
