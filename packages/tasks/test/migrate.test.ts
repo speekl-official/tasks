@@ -838,6 +838,31 @@ describe("migrate: refusals before anything is written", () => {
     });
   });
 
+  it("refuses an archive path that would cross a file, in the dry run and the real run alike", async () => {
+    const s = await v1Sandbox({
+      tasks: { "work/kept": {} },
+      archived: { old: { phase: "work", status: "DONE" } },
+    });
+    // Where `.archive/work/` must be created, a file stands.
+    await s.write(".tasks/.archive/work", "not a directory\n");
+    const before = await snapshotFiles(s.tasksDir);
+
+    for (const argv of [
+      ["migrate", "--dry-run", "--json"],
+      ["migrate", "--json"],
+    ]) {
+      const problems = problemsOf(await s.run(...argv));
+      expect(problems).toEqual([
+        expect.objectContaining({
+          kind: "collision",
+          path: path.join(s.tasksDir, ".archive", "work"),
+        }),
+      ]);
+      expect(problems[0]!.message).toContain("is not a directory");
+    }
+    expect(await snapshotFiles(s.tasksDir)).toEqual(before);
+  });
+
   it("refuses two live tasks with one id, and an archived task at a live task's path", async () => {
     const s = await v1Sandbox({
       tasks: {

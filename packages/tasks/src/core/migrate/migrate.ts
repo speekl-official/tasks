@@ -287,6 +287,29 @@ async function realpathOr(target: string): Promise<string> {
   }
 }
 
+/**
+ * The first of `dest`'s ancestors, from `top` down to its parent, that exists
+ * and is not a directory (a symlink to one counts as one), or `null`.
+ */
+async function nonDirectoryAbove(
+  dest: string,
+  top: string,
+): Promise<string | null> {
+  const steps = path.relative(top, path.dirname(dest)).split(path.sep);
+  let dir = top;
+  for (const step of ["", ...steps.filter((part) => part.length > 0)]) {
+    dir = step === "" ? dir : path.join(dir, step);
+    try {
+      if (!(await fs.stat(dir)).isDirectory()) return dir;
+    } catch (err) {
+      const code = errnoCode(err);
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw err;
+    }
+  }
+  return null;
+}
+
 async function lstatOrNull(
   target: string,
 ): Promise<Awaited<ReturnType<typeof fs.lstat>> | null> {
@@ -755,6 +778,22 @@ class Planner {
       if (!isSegment(phase) || !isSegment(task.id)) continue;
       const id = `${phase}/${task.id}`;
       const dest = path.join(this.tasksDir, ARCHIVE_DIRNAME, phase, task.id);
+      // A file where a directory must be crossed: `lstat` of anything
+      // beneath it says ENOTDIR, which reads as absence, and the move would
+      // fail after other manifests have moved.
+      const crossed = await nonDirectoryAbove(
+        dest,
+        path.join(this.tasksDir, ARCHIVE_DIRNAME),
+      );
+      if (crossed !== null) {
+        this.problems.push({
+          kind: "collision",
+          path: crossed,
+          paths: [task.file],
+          message: `${this.shown(task.file)} would become ${this.shown(dest)}/${TASK_FILENAME}, but ${this.shown(crossed)} is not a directory`,
+        });
+        continue;
+      }
       if ((await lstatOrNull(dest)) !== null) {
         this.problems.push({
           kind: "collision",
