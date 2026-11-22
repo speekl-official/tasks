@@ -419,10 +419,10 @@ describe("renderMine", () => {
     const entry = schema.derived.last_entry!;
     const onBehalf = {
       ...schema,
-      derived: { ...schema.derived, last_entry: { ...entry, via: "kate" } },
+      derived: { ...schema.derived, last_entry: { ...entry, via: "ops" } },
     };
     expect(plain(renderMine([onBehalf], { now }))).toContain(
-      "    handoff alice: IN_PROGRESS → PAUSED  (agent via kate, 19h)",
+      "    handoff alice: IN_PROGRESS → PAUSED  (agent via ops, 19h)",
     );
     expect(plain(renderMine([]))).toContain("Nothing");
   });
