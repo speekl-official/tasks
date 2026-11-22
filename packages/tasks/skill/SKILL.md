@@ -99,18 +99,20 @@ again. Subagents use the same name and token.
    (the first task of your ready set, in one step) and then `resume`, or
    `resume` the candidates and `tasks claim <task>` by id when choosing. A
    conflict (exit `4`) means another agent was first: take the next ready task.
-3. **`tasks resume <task> --json`** reads `task.md` and `state.md` for you: it
-   returns the definition (`body`), `state.md` in full (`state`), the ancestors
-   with their workspace files, the children, the docs locations and the last
-   log entry. Do not read those two files again. Then read `design.md` and
-   `plan.md` where `workspace` lists them, and for each ancestor as far as
-   needed its `task.md`, `design.md` and `plan.md` — an epic's design and plan
-   live on the epic. Ask for what this step reads:
-   `--fields id,title,situation,path,ancestors,child_tasks,workspace,docs,state,last_entry,body`
-   keeps it and trims each child to its id, title, situation, path and last
-   entry. **Never read `log.md` on entry**; the last entry, the last activity,
-   is in the `resume` output. A person's text that reached you only there goes
-   under `## Notes` (`tasks note`).
+3. **`tasks resume <task>`** is the reading of `task.md` and `state.md`: it
+   prints the definition, the gates and ownership, the ancestors with their
+   workspace files, the children with their status and situation, the docs
+   locations, `state.md` in full and the last log entry (`--json`: the same as
+   `body`, `state` and the full objects). Do not read those two files again.
+   Then read `design.md` and `plan.md` where the workspace lists them, and for
+   each ancestor as far as needed its `task.md`, `design.md` and `plan.md` — an
+   epic's design and plan live on the epic. `--fields` on `resume` trims the
+   children too: keep `status`, `assignee`, `claimed_by`, `blocked_by`,
+   `finishes_after`, `held_by` and `referenced_by` beside `body`, `state`,
+   `ancestors`, `child_tasks`, `workspace`, `docs` and `last_entry`, or the
+   gates and the holder disappear from view. **Never read `log.md` on entry**;
+   the last entry, the last activity, is in the `resume` output. A person's
+   text that reached you only there goes under `## Notes` (`tasks note`).
 4. **Listed projects you cannot see** — `not shown` in an overview's footer,
    `unavailable` in the JSON: a v1 tree, a repository not checked out here — are
    a person's to migrate or check out. Say so once in your report and go on.

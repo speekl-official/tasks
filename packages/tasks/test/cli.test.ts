@@ -1050,6 +1050,7 @@ describe("resume", () => {
       (await sandbox.run("resume", "program/epic/task")).stdout,
     );
     const order = [
+      "Do it.",
       "Ancestors",
       "program/epic ",
       "Children",

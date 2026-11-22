@@ -188,14 +188,14 @@ tasks resume <task> [--json]
 ```
 
 Everything the next session reads to continue a task, in reading order: the task's
-fields and conditions; one line per ancestor, outermost first, with its title, status
+fields and conditions; its definition, the body; one line per ancestor, outermost first, with its title, status
 and workspace files; the children with their situations; the workspace file list; when
 `config.yml` lists [`docs`](/docs/reference/configuration#docs), where the project's
 documentation lives, each location with whether it exists here; `state.md` in full; and the
 last log entry. A malformed ancestor or child is left out of these lists (the task's
-`children` count still includes it). The JSON carries the body too, so an agent reads
-`task.md` and `state.md` through this command and opens `design.md`, `plan.md` and the
-ancestors' files afterwards: it is the second command of the
+`children` count still includes it). Both forms carry the body and `state.md`, so an agent
+reads `task.md` and `state.md` through this command and opens `design.md`, `plan.md` and
+the ancestors' files afterwards: it is the second command of the
 [agent protocol](/docs/guides/agent-protocol), after `mine`.
 
 ### `tasks ready`

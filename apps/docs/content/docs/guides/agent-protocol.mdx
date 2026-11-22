@@ -109,17 +109,20 @@ left for you is in the task's files: `## Notes` of `task.md`, `design.md`, `stat
 ### Run `tasks resume`, then read what it does not carry
 
 ```sh
-tasks resume <task> --json --fields id,title,situation,path,ancestors,child_tasks,workspace,docs,state,last_entry,body
+tasks resume <task>
 ```
 
-`resume --json` reads `task.md` and `state.md` for you: it returns the definition (`body`)
-and `state.md` in full (`state`), the ancestors outermost first with the workspace files
-each one has, the children, the documentation locations and the last log entry. Do not
-read those two files again. Then read, in this order, `design.md` and `plan.md` where
-`workspace` lists them — then, for each ancestor as far as needed, its `task.md`,
-`design.md` and `plan.md`. An epic's design and plan live on the epic. The `--fields` list
-above keeps what this step reads and trims each child to its id, title, situation, path
-and last entry, which on an epic with many parts is most of the answer.
+`resume` is the reading of `task.md` and `state.md`: it prints the definition, the gates
+and ownership, the ancestors outermost first with the workspace files each one has, the
+children with their status and situation, the documentation locations, `state.md` in full
+and the last log entry; under `--json` the same, as `body`, `state` and the full objects.
+Do not read those two files again. Then read, in this order, `design.md` and `plan.md`
+where the workspace lists them — then, for each ancestor as far as needed, its `task.md`,
+`design.md` and `plan.md`. An epic's design and plan live on the epic. `--fields` on
+`resume` trims the children too: keep `status`, `assignee`, `claimed_by`, `blocked_by`,
+`finishes_after`, `held_by` and `referenced_by` beside `body`, `state`, `ancestors`,
+`child_tasks`, `workspace`, `docs` and `last_entry`, or the gates and the holder
+disappear from view.
 
 **Do not read `log.md` on entry.** The present is fully described by the other files;
 the last entry — the last activity — is already in the `resume` output. If a person's text

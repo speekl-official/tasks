@@ -571,10 +571,11 @@ describe("renderShow", () => {
 });
 
 describe("renderResume", () => {
-  it("prints ancestors, children, workspace, state.md and the last entry", async () => {
+  it("prints the definition, ancestors, children, workspace, state.md and the last entry", async () => {
     const { local } = await fixture();
     const text = plain(
       renderResume(get(local, "auth-rework/token-schema"), {
+        body: "## Description\n\nThe claims of the new token.\n",
         ancestors: [
           {
             id: "auth-rework",
@@ -595,6 +596,7 @@ describe("renderResume", () => {
     );
     const order = [
       "Design the token schema  auth-rework/token-schema",
+      "The claims of the new token.",
       "Ancestors",
       "auth-rework  TODO  Rework authentication  design.md, plan.md",
       "Children",
@@ -623,6 +625,7 @@ describe("renderResume", () => {
     const { local } = await fixture();
     const text = plain(
       renderResume(get(local, "deploy"), {
+        body: "",
         ancestors: [],
         children: [],
         workspace: [],

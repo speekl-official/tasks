@@ -36,7 +36,7 @@ export interface ResumeJson extends TaskWithDerivedJson {
 export function resumeCommand(): Command {
   return new Command("resume")
     .description(
-      "everything the next session reads to continue a task: its ancestors, children, workspace files, state.md in full, the last log entry and where the project's documentation lives",
+      "everything the next session reads to continue a task: its definition, ancestors, children, workspace files, state.md in full, the last log entry and where the project's documentation lives",
     )
     .argument("<task>", TASK_ARGUMENT_HELP)
     .option("--json", "emit machine-readable JSON")
@@ -89,6 +89,7 @@ export function resumeCommand(): Command {
       }
       writeOut(
         renderResume(shown, {
+          body: task.body,
           ancestors,
           children,
           workspace,

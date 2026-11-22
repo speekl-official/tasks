@@ -818,6 +818,8 @@ export interface ResumeAncestor {
 }
 
 export interface ResumeExtras {
+  /** The task's markdown body: its definition. */
+  body: string;
   ancestors: ResumeAncestor[];
   children: DerivedTask[];
   workspace: string[];
@@ -829,9 +831,9 @@ export interface ResumeExtras {
 
 /**
  * `resume`: everything the next session reads to continue, in reading
- * order: the task, its ancestors (in the order given), its children,
- * the workspace, where the project's documentation lives, `state.md` in
- * full, and the last log entry.
+ * order: the task, its definition, its ancestors (in the order given), its
+ * children, the workspace, where the project's documentation lives,
+ * `state.md` in full, and the last log entry.
  */
 export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
   const { json } = d;
@@ -858,6 +860,9 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
       ...blockedSection(d),
     ].join("\n"),
   ];
+
+  const body = extras.body.trim();
+  if (body.length > 0) sections.push(body);
 
   if (extras.ancestors.length > 0) {
     sections.push(
