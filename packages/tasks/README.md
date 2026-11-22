@@ -185,8 +185,9 @@ command.
 it carries the agent protocol — the session token on every command, entry through
 `mine` and `resume`, claim before working, the freshness rule for `state.md`, exit
 through `pause`, `handoff` or `done` with the commits named in the log and the
-listed documentation up to date — together with the command table and the JSON
-contract.
+listed documentation up to date — together with an index of the commands and the
+JSON contract; the full command table and the convention are its reference files,
+read on demand.
 
 Skip it with `tasks init --no-skill`. Add it to a project that predates it, or
 refresh it after upgrading the CLI, with `tasks skill install --force`. Commit
