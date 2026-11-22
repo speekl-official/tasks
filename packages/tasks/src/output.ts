@@ -11,6 +11,7 @@ import {
   referenceText,
   situationText,
 } from "./core/derive.js";
+import { normalizeBody } from "./core/frontmatter.js";
 import { ancestorPaths, compareIds, qualifyId } from "./core/ids.js";
 import type { UnavailableTree } from "./core/projects.js";
 import { compactAge } from "./core/time.js";
@@ -805,7 +806,9 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
     ]),
     ...blockedSection(d),
   ];
-  const body = extras.body.trim();
+  // The body as the file holds it: a first line that is indented, a code
+  // block for instance, keeps its indentation.
+  const body = normalizeBody(extras.body);
   if (body.length > 0) lines.push("", body);
   return lines.join("\n");
 }
@@ -861,7 +864,7 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
     ].join("\n"),
   ];
 
-  const body = extras.body.trim();
+  const body = normalizeBody(extras.body);
   if (body.length > 0) sections.push(body);
 
   if (extras.ancestors.length > 0) {

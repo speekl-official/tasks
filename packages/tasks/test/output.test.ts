@@ -621,6 +621,28 @@ describe("renderResume", () => {
     expect(text).not.toMatch(/docs\/engineering\s+absent here/);
   });
 
+  it("keeps the indentation of a definition that opens with code", async () => {
+    const { local } = await fixture();
+    const body = "    SELECT 1;\n    SELECT 2;\n\nThe probe queries.\n";
+    const extras = { workspace: [], referenced_by: [] };
+    const shown = plain(renderShow(get(local, "deploy"), { body, ...extras }));
+    const resumed = plain(
+      renderResume(get(local, "auth-rework/token-schema"), {
+        body,
+        ancestors: [],
+        children: [],
+        state: null,
+        docs: [],
+        ...extras,
+      }),
+    );
+    for (const text of [shown, resumed]) {
+      expect(text).toContain(
+        "\n    SELECT 1;\n    SELECT 2;\n\nThe probe queries.",
+      );
+    }
+  });
+
   it("says when there is no state.md yet", async () => {
     const { local } = await fixture();
     const text = plain(
