@@ -364,12 +364,12 @@ function finishesAfterLines(d: DerivedTask, indent: string): string[] {
  * so a filtered or scoped tree still reads correctly; `finishes_after`
  * entries follow their task.
  */
-export function renderTree(
-  rows: DerivedTask[],
-  options: OverviewOptions = {},
-): string {
-  if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
-
+/**
+ * The rows nested by containment, in display order: the local tree first,
+ * projects as the rows first name them, siblings by `order` (ids by default)
+ * at every level.
+ */
+function nestRows(rows: DerivedTask[], options: OverviewOptions): TreeNode[] {
   const shown = new Map(rows.map((d) => [d.json.id, d]));
   const nodes = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
@@ -409,7 +409,40 @@ export function renderTree(
       compareIds(a.snapshot.task.id, b.snapshot.task.id));
   const bySiblings = (a: TreeNode, b: TreeNode) => order(a.d, b.d);
   roots.sort((a, b) => projectRank(a) - projectRank(b) || bySiblings(a, b));
+  const sortBeneath = (node: TreeNode) => {
+    node.children.sort(bySiblings);
+    node.children.forEach(sortBeneath);
+  };
+  roots.forEach(sortBeneath);
+  return roots;
+}
 
+/**
+ * The rows in the order `renderTree` lists them: depth first, siblings as
+ * `order` has them. `tree --json` emits this sequence, so the flat list and
+ * the nesting agree under `--sort`.
+ */
+export function treeSequence(
+  rows: DerivedTask[],
+  options: OverviewOptions = {},
+): DerivedTask[] {
+  const out: DerivedTask[] = [];
+  const walk = (list: TreeNode[]) => {
+    for (const node of list) {
+      out.push(node.d);
+      walk(node.children);
+    }
+  };
+  walk(nestRows(rows, options));
+  return out;
+}
+
+export function renderTree(
+  rows: DerivedTask[],
+  options: OverviewOptions = {},
+): string {
+  if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
+  const roots = nestRows(rows, options);
   const now = options.now ?? new Date();
   const head = [
     "TASK",
@@ -432,7 +465,7 @@ export function renderTree(
         node.d.snapshot.task.title,
       ]);
       lines.push(...finishesAfterLines(node.d, `${indent}  `));
-      walk(node.children.sort(bySiblings), depth + 1);
+      walk(node.children, depth + 1);
     }
   };
   walk(roots, 0);

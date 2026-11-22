@@ -1,7 +1,7 @@
 import { Command } from "commander";
 
 import { hasOpenStatus } from "../core/derive.js";
-import { renderTree } from "../output.js";
+import { renderTree, treeSequence } from "../output.js";
 import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import type { DepthOptions, SortOptions, SpanOptions } from "./overview.js";
 import {
@@ -41,12 +41,13 @@ export function treeCommand(): Command {
         options.resolved ? () => true : hasOpenStatus,
       );
       const order = timeOrder(span);
-      emitOverview(span, rows, (shown) =>
-        renderTree(shown, {
-          ...viewOptions(span),
-          ...(order === null ? {} : { order }),
-          empty: "No open tasks.",
-        }),
+      const view = {
+        ...viewOptions(span),
+        ...(order === null ? {} : { order }),
+      };
+      // The JSON is the nesting flattened, so a sort reaches both outputs.
+      emitOverview(span, treeSequence(rows, view), (shown) =>
+        renderTree(shown, { ...view, empty: "No open tasks." }),
       );
     });
 }

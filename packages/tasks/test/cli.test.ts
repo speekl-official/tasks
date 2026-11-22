@@ -1945,6 +1945,15 @@ describe("time in overviews", () => {
     expect(reversed.findIndex((line) => /^epic\s/.test(line))).toBeLessThan(
       reversed.findIndex((line) => /^solo\s/.test(line)),
     );
+    // The JSON is the same nesting flattened, in the same order.
+    expect(
+      ids(await sandbox.run("tree", "--sort", "created", "--json")),
+    ).toEqual(["solo", "epic", "epic/b", "epic/a"]);
+    expect(
+      ids(
+        await sandbox.run("tree", "--sort", "created", "--reverse", "--json"),
+      ),
+    ).toEqual(["epic", "epic/a", "epic/b", "solo"]);
   });
 
   it("shows UPDATED after the situation in every overview, CREATED beside it when created is the key or the bound", async () => {
