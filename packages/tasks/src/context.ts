@@ -268,6 +268,24 @@ function namesTreePath(tree: Tree, id: string): boolean {
 }
 
 /**
+ * An explicit scope: a task or group path of the local tree, or exit 3, so
+ * a typo fails instead of answering with a silent empty set.
+ */
+export function assertLocalScope(
+  context: CommandContext,
+  value: string,
+): string {
+  const scope = assertTaskPath(value, "scope");
+  if (!namesTreePath(context.tree, scope)) {
+    throw TaskError.notFound(
+      `No task or group "${scope}" in ${context.project.tasksDir}; a scope is a path of the local tree.`,
+      { scope },
+    );
+  }
+  return scope;
+}
+
+/**
  * The local scope of `ready`, `list`, `tree` and `claim --next`: `--scope`
  * when given, none under `--all`, else the configured `scope`. A scope is a
  * path of the local tree; while one is in force the command keeps to that
@@ -290,14 +308,7 @@ export function resolveScope(
         { scope: options.scope },
       );
     }
-    const scope = assertTaskPath(options.scope, "scope");
-    if (!namesTreePath(context.tree, scope)) {
-      throw TaskError.notFound(
-        `No task or group "${scope}" in ${context.project.tasksDir}; a scope is a path of the local tree.`,
-        { scope },
-      );
-    }
-    return scope;
+    return assertLocalScope(context, options.scope);
   }
   if (options.all) return null;
 

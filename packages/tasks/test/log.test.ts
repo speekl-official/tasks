@@ -362,3 +362,141 @@ describe("log --since", () => {
     expect(errorOf(result).details).toMatchObject({ since: "yesterday" });
   });
 });
+
+describe("log filters", () => {
+  /** Two actors over a nested epic and a listed project. */
+  async function nested(): Promise<Sandbox> {
+    const s = await box({
+      tasks: {
+        epic: { log: entry(ago(2 * DAY), "alice", "epic two days ago") },
+        "epic/part": {
+          log: [
+            entry(ago(3 * DAY), "bob", "part three days ago"),
+            entry(ago(30), "bob", "part half an hour ago"),
+          ].join("\n"),
+        },
+        other: { log: entry(ago(60), "alice", "other an hour ago") },
+      },
+    });
+    await s.project("backend", "../backend", {
+      tasks: { x: { log: entry(ago(60), "alice", "x an hour ago") } },
+    });
+    return s;
+  }
+
+  function texts(result: CliResult): string[] {
+    expect(result.code).toBe(0);
+    return result.json<LogEntriesJson>().entries.map((e) => e.text);
+  }
+
+  it("keeps one actor's entries with --actor, across trees", async () => {
+    const s = await nested();
+    expect(
+      texts(await s.run("log", "--since", "7d", "--actor", "alice", "--json")),
+    ).toEqual(["epic two days ago", "other an hour ago", "x an hour ago"]);
+    expect(
+      texts(await s.run("log", "--since", "7d", "--actor", "nobody", "--json")),
+    ).toEqual([]);
+  });
+
+  it("keeps a subtree of the local tree with --scope, and the two combine", async () => {
+    const s = await nested();
+    const scoped = await s.run(
+      "log",
+      "--since",
+      "7d",
+      "--scope",
+      "epic",
+      "--json",
+    );
+    expect(texts(scoped)).toEqual([
+      "part three days ago",
+      "epic two days ago",
+      "part half an hour ago",
+    ]);
+    expect(scoped.json<LogEntriesJson>().entries.map((e) => e.task)).toEqual([
+      "epic/part",
+      "epic",
+      "epic/part",
+    ]);
+    expect(
+      texts(
+        await s.run(
+          "log",
+          "--since",
+          "7d",
+          "--scope",
+          "epic",
+          "--actor",
+          "bob",
+          "--json",
+        ),
+      ),
+    ).toEqual(["part three days ago", "part half an hour ago"]);
+  });
+
+  it("refuses a scope that names nothing, as an overview does", async () => {
+    const s = await nested();
+    const result = await s.run(
+      "log",
+      "--since",
+      "7d",
+      "--scope",
+      "nope",
+      "--json",
+    );
+    expect(result.code).toBe(3);
+    expect(errorOf(result).details).toMatchObject({ scope: "nope" });
+  });
+
+  it("reads one task's history since a time, by actor on request", async () => {
+    const s = await nested();
+    const recent = await s.run("log", "epic/part", "--since", "1d", "--json");
+    expect(recent.json<LogEntriesJson>()).toMatchObject({
+      count: 1,
+      entries: [{ task: "epic/part", text: "part half an hour ago" }],
+    });
+    expect(
+      texts(await s.run("log", "epic/part", "--actor", "bob", "--json")),
+    ).toEqual(["part three days ago", "part half an hour ago"]);
+    expect(
+      texts(
+        await s.run(
+          "log",
+          "epic/part",
+          "--since",
+          "1d",
+          "--actor",
+          "alice",
+          "--json",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses the filters where they mean nothing", async () => {
+    const s = await nested();
+    const refused: Array<[string[], Record<string, unknown>]> = [
+      [
+        ["log", "epic", "a", "note", "--since", "1d"],
+        { task: "epic", since: "1d" },
+      ],
+      [
+        ["log", "epic", "--since", "1d", "--scope", "epic"],
+        { task: "epic", scope: "epic" },
+      ],
+      [["log", "epic", "--scope", "epic"], { task: "epic", scope: "epic" }],
+      [
+        ["log", "epic", "a", "note", "--actor", "bob"],
+        { task: "epic", actor: "bob" },
+      ],
+    ];
+    for (const [argv, details] of refused) {
+      const result = await s.run(...argv, "--json");
+      expect({ argv, code: result.code }).toEqual({ argv, code: 2 });
+      expect(errorOf(result).details).toMatchObject(details);
+    }
+    // Without --since and without a task there is no listing to filter.
+    expect((await s.run("log", "--actor", "bob", "--json")).code).toBe(2);
+  });
+});

@@ -58,7 +58,7 @@ const DEP_ROW =
 const ARCHIVE_ROW =
   "archive <task> [--force], archive --resolved-before [<when>] | --all-resolved, restore <path>, purge <path>";
 const LOG_ROW =
-  'log <task> "<text>", log <task> [--archived], log --since <duration|timestamp> [--local] [--archived]';
+  'log <task> "<text>", log <task> [--since <when>] [--actor <actor>] [--archived], log --since <duration|timestamp> [--actor <actor>] [--scope <path>] [--local] [--archived]';
 const OVERVIEW_ROW =
   "list [--<situation>] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--depth <n> | --top], tree [--sort created|updated] [--reverse] [--depth <n> | --top]";
 
@@ -178,7 +178,13 @@ const TABLE: Entry[] = [
     row: LOG_ROW,
     path: ["log"],
     args: ["[task]", "[text...]"],
-    options: ["--since <when>", "--local", "--archived"],
+    options: [
+      "--since <when>",
+      "--actor <actor>",
+      "--scope <path>",
+      "--local",
+      "--archived",
+    ],
   },
   {
     row: 'note <task> "<text>"',

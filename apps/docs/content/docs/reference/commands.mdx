@@ -335,14 +335,18 @@ search             open 0/3           5d       high                             
 ### `tasks log --since`
 
 ```sh
-tasks log --since <when> [--local] [--archived] [--json]
+tasks log --since <when> [--actor <actor>] [--scope <path>] [--local] [--archived] [--json]
 ```
 
 Log entries since a time, across the local tree and every listed project, oldest first.
 `<when>` is an ISO timestamp (`2026-09-21T09:14:00Z`), a UTC date (`2026-09-21`), or a
-duration back from now: `30m`, `12h`, `7d`, `2w`. `--local` reads the local tree only.
-`--archived` includes the archived tasks' entries, under their former ids; the human form
-marks them `(archived)`. Appending an entry is [`tasks log <task>`](#tasks-log).
+duration back from now: `30m`, `12h`, `7d`, `2w`. `--actor <actor>` keeps one actor's
+entries; `--scope <path>` those of a task or group of the local tree and everything
+beneath it — what happened under an epic this week — and, like a scope on an overview,
+keeps the listing to that tree (exit `3` when the path names nothing); the two combine.
+`--local` reads the local tree only. `--archived` includes the archived tasks' entries,
+under their former ids; the human form marks them `(archived)`. Appending an entry is
+[`tasks log <task>`](#tasks-log).
 
 ### `tasks dep list` and `tasks after list`
 
@@ -734,13 +738,16 @@ conflict marker is refused (exit `2`). Listing entries is
 [`tasks log --since`](#tasks-log---since).
 
 ```sh
-tasks log <task> [--archived] [--json]
+tasks log <task> [--since <when>] [--actor <actor>] [--archived] [--json]
 ```
 
 Without text, the task's own entries, oldest first, in the shape of
 [`log --since`](#tasks-log---since): the way to read one task's history without opening
-`log.md`. `--archived` reads the log of a task under `.archive/`, by its former path in
-full; appending to an archived task is refused (exit `2`), restore it first.
+`log.md`. `--since <when>` keeps the entries at or after a time, in the grammar of
+`log --since`; `--actor <actor>` those one actor wrote (an entry made on their behalf
+under `--as` counts as theirs). `--archived` reads the log of a task under `.archive/`,
+by its former path in full; appending to an archived task is refused (exit `2`), restore
+it first.
 
 ### `tasks note`
 
