@@ -17,7 +17,14 @@ import {
   passedOverLine,
 } from "../core/workspace.js";
 import { TaskError, isTaskError } from "../errors.js";
-import { emitJson, renderDepList, ui, writeOut } from "../output.js";
+import {
+  emitJson,
+  emitTaskJson,
+  renderDepList,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /** What distinguishes `dep` from `after`: the field and how to speak of it. */
 interface GateSpec {
@@ -265,7 +272,7 @@ async function editGate(
 
   const json = await derivedTaskJson(context, load, outcome.id);
   if (context.json) {
-    emitJson(json);
+    emitTaskJson(context, json);
     return;
   }
 
@@ -362,6 +369,7 @@ function gateCommand(spec: GateSpec): Command {
       "override authorization (another session's live claim, an assignee); logged",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       (task: string, refs: string[], options: EditOptions, command: Command) =>
         editGate(spec, "add", task, refs, options, command),
@@ -379,6 +387,7 @@ function gateCommand(spec: GateSpec): Command {
       "override authorization (another session's live claim, an assignee); logged",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       (task: string, refs: string[], options: EditOptions, command: Command) =>
         editGate(spec, "rm", task, refs, options, command),

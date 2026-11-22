@@ -9,7 +9,8 @@ import type { LoadedTree } from "../core/projects.js";
 import type { Task } from "../core/task.js";
 import type { TaskWithDerivedJson, WorkspaceFilename } from "../core/types.js";
 import { lastLogEntry, workspaceFiles } from "../core/workspace.js";
-import { emitJson, renderShow, writeOut } from "../output.js";
+import { emitTaskJson, renderShow, writeOut } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /** What `show --json` prints: the task object with derived conditions. */
 export interface ShowJson extends TaskWithDerivedJson {
@@ -66,6 +67,7 @@ export function showCommand(): Command {
       "read a task under .archive/ by its former path in full, without restoring it",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       async (
         arg: string,
@@ -96,7 +98,7 @@ export function showCommand(): Command {
           const result: ShowJson = archived
             ? { ...shown.json, ...extras, archived: true }
             : { ...shown.json, ...extras };
-          emitJson(result);
+          emitTaskJson(context, result);
           return;
         }
         writeOut(renderShow(shown, { ...extras, archived }));

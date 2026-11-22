@@ -9,6 +9,7 @@ import type { Project } from "./core/discovery.js";
 import type { DiscoveryOptions } from "./core/discovery.js";
 import { requireProject } from "./core/discovery.js";
 import { GateResolver, requireAvailable } from "./core/gates.js";
+import { parseFields } from "./core/fields.js";
 import { assertTaskPath } from "./core/ids.js";
 import type { LoadedTree } from "./core/projects.js";
 import { Projects } from "./core/projects.js";
@@ -43,6 +44,8 @@ export interface GlobalOptions {
   as?: string;
   session?: string;
   json?: boolean;
+  /** `--fields <list>` of the commands that take it. */
+  fields?: string;
 }
 
 export interface CommandContext {
@@ -55,6 +58,8 @@ export interface CommandContext {
   gates: GateResolver;
   identity: Identity;
   json: boolean;
+  /** The keys of a task object `--fields` keeps, or `null` for whole objects. */
+  fields: readonly string[] | null;
   /** Print a warning on stderr: a condition the command survives. */
   diagnose(message: string): void;
   /** Re-read the local tree from disk and drop cached gate resolutions. */
@@ -71,6 +76,7 @@ export function globalOptions(command: Command): GlobalOptions {
     as: merged.as,
     session: merged.session,
     json: merged.json,
+    fields: merged.fields,
   };
 }
 
@@ -85,6 +91,17 @@ export function startDirectory(options: GlobalOptions): string {
  */
 export function discoveryOptions(options: GlobalOptions): DiscoveryOptions {
   return { worktree: options.dir === undefined };
+}
+
+/** `--fields` trims the JSON document, so it means nothing without one. */
+function fieldsOf(options: GlobalOptions): readonly string[] | null {
+  if (options.fields === undefined) return null;
+  if (options.json !== true) {
+    throw TaskError.usage("--fields trims the --json document; add --json.", {
+      fields: options.fields,
+    });
+  }
+  return parseFields(options.fields);
 }
 
 /** Identity without a tree: what `init` needs before anything exists. */
@@ -130,6 +147,7 @@ export async function assertV2Tree(project: Project): Promise<void> {
  */
 export async function openContext(command: Command): Promise<CommandContext> {
   const options = globalOptions(command);
+  const fields = fieldsOf(options);
   const startDir = startDirectory(options);
   const project = await requireProject(startDir, discoveryOptions(options));
   await assertV2Tree(project);
@@ -155,6 +173,7 @@ export async function openContext(command: Command): Promise<CommandContext> {
     gates,
     identity,
     json: options.json === true,
+    fields,
     // A warning the command survives; under --json stderr is the error
     // envelope's alone, so it is dropped there.
     diagnose: (message) => {

@@ -6,7 +6,8 @@ import { withMutation } from "../core/mutate.js";
 import { appendNote, assertNoteText, noteItem } from "../core/notes.js";
 import { resolveTaskArg, writeTask } from "../core/tree.js";
 import { appendLogEntry, logEntryFor } from "../core/workspace.js";
-import { emitJson, ui, writeOut } from "../output.js";
+import { emitTaskJson, ui, writeOut } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 interface NoteOptions {
   json?: boolean;
@@ -30,6 +31,7 @@ export function noteCommand(): Command {
     )
     .argument("<text...>", "the note; several words are joined with spaces")
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       async (
         taskArg: string,
@@ -67,7 +69,7 @@ export function noteCommand(): Command {
 
         const json = await derivedTaskJson(context, load, outcome.id);
         if (context.json) {
-          emitJson(json);
+          emitTaskJson(context, json);
           return;
         }
         const first = text.trim().split(/\r?\n/)[0]!;

@@ -29,7 +29,7 @@ import { parseSince } from "../core/time.js";
 import { TaskError } from "../errors.js";
 import type { OverviewOptions } from "../output.js";
 import {
-  emitJson,
+  emitCollectionJson,
   renderCollectionFooter,
   terminalWidth,
   writeOut,
@@ -415,7 +415,7 @@ export function emitOverview(
 ): void {
   const collection = collectionOf(span, rows);
   if (span.context.json) {
-    emitJson(collection);
+    emitCollectionJson(span.context, collection);
     return;
   }
   writeOut(render([...rows]));

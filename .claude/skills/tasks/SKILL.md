@@ -261,6 +261,10 @@ Use `--json` whenever you parse; the human output is not stable.
   `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds `body`,
   `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
   `child_tasks`, `state`, `docs`.
+- Ask for the keys you need: `--fields id,situation,yours,title,last_entry`
+  on any command that returns task objects (`mine`, `ready`, `list`, `tree`,
+  `show`, `resume`, `new`, `claim` and the other transitions). The names are
+  the task object's keys; a name no document has is exit `2`.
 - `session-check` exits `4` with `{"ok": false, "violations": [...]}` on stdout
   when a task of this session has no `state.md`.
 

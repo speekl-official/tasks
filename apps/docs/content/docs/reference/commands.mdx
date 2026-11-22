@@ -31,6 +31,22 @@ exceptions on failure: their result is the document on stdout, exit `4`, no enve
 `--json` the output is for people and may change at any time. See the [JSON contract](/docs/reference/json-contract)
 for every shape.
 
+**`--fields <list>`** goes with `--json` on every command that answers with a task object or
+a collection of them: `ready`, `list`, `tree`, `mine`, `show`, `resume`, `new`, `note`,
+`restore`, the transitions, and `dep`/`after add` and `rm`. Each task object then carries only
+the named keys, in that order; a collection keeps `scope`, `projects`, `count`, `malformed` and
+`unavailable` around the trimmed rows:
+
+```sh
+tasks mine --json --fields id,situation,yours,title,last_entry
+tasks claim --next --json --fields id,title,path
+```
+
+The names are the task object's keys and the extras a command adds (`body`, `state`,
+`cascaded`, …). A name no document has is exit `2`, before anything is written; a key this
+document happens not to carry is left out; `--fields` without `--json` is exit `2`. The
+document without `--fields` is the contract; `--fields` only trims it.
+
 ### Exit codes
 
 | Code | Meaning                                                                                                                         |

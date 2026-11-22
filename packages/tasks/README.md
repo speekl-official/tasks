@@ -118,6 +118,9 @@ they change only in a major version.
   `blocked_by`, `ready`, `held_by`, `liveness`, `yours`, `last_entry`, … — on every
   reporting command. Overviews return
   `{scope, projects, count, tasks, malformed, unavailable}`.
+- **Trim with `--fields`:** `tasks mine --json --fields id,situation,yours,title`
+  keeps those keys of each task object, in that order, on every command that
+  answers with task objects; the document without it is the contract.
 
 ```sh
 tasks claim --next --json | jq -r .id

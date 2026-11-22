@@ -18,6 +18,14 @@ unspecified and MUST NOT be parsed. `validate` and `session-check` report a fail
 their result document on stdout with exit `4`, not as an error (see
 [their output](/docs/spec/cli#validation-session-check-and-session-end-output)).
 
+A command whose document is a task object, or a collection of them, SHOULD accept `--fields <list>`
+beside `--json`: a comma-separated list of keys, under which each task object carries only those
+keys, in that order, and a collection keeps its own keys around the trimmed rows. The names are the
+task object's keys (`id`, `situation`, …) and the extras the command adds (`body`, `state`,
+`cascaded`, …); a name no document has is a usage error, raised before any write; a key this
+document happens not to carry is left out. `--fields` without `--json` is a usage error. The whole
+document stays the contract; `--fields` only trims it.
+
 | Code | Name | Meaning |
 | --- | --- | --- |
 | `0` | success | The command completed. An empty result set is success. |

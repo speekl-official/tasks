@@ -384,6 +384,41 @@ export interface TaskJson extends Frontmatter {
 
 export type TaskWithDerivedJson = TaskJson & Derived;
 
+/** The keys of a task object, in the order `toTaskJson` writes them. */
+export const TASK_JSON_KEYS: readonly (keyof TaskJson)[] = [
+  "id",
+  "name",
+  "parent",
+  "project",
+  "title",
+  ...FRONTMATTER_KEYS,
+  "path",
+];
+
+/** The derived conditions, in the order a task object carries them. */
+export const DERIVED_KEYS: readonly (keyof Derived)[] = [
+  "situation",
+  "blocked_by",
+  "ready",
+  "effective_priority",
+  "held_by",
+  "started",
+  "children",
+  "active",
+  "waiting_for",
+  "closable",
+  "liveness",
+  "last_seen",
+  "yours",
+  "last_entry",
+];
+
+/** Every key of a task object with its conditions: what `--fields` names. */
+export const TASK_OBJECT_KEYS: readonly string[] = [
+  ...TASK_JSON_KEYS,
+  ...DERIVED_KEYS,
+];
+
 export interface MalformedJson {
   path: string;
   message: string;

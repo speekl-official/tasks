@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { readySet } from "../core/derive.js";
 import { renderOverview } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import type { PriorityOptions, SpanOptions } from "./overview.js";
 import {
   allTasks,
@@ -26,6 +27,7 @@ export function readyCommand(): Command {
     ),
   )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(async (options: ReadyOptions, command: Command) => {
       const span = await openSpan(command, options, true);
       const rows = atPriority(

@@ -3,6 +3,7 @@ import { Command } from "commander";
 import type { DerivedTask, ListFilterName } from "../core/derive.js";
 import { hasOpenStatus, situationFilter } from "../core/derive.js";
 import { renderOverview } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import type {
   DepthOptions,
   PriorityOptions,
@@ -87,6 +88,7 @@ export function listCommand(): Command {
   }
   return sortOptions(timeFilterOptions(priorityOption(command)))
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(async (options: ListOptions, cmd: Command) => {
       const span = await openSpan(cmd, options, true);
       const rows = atPriority(

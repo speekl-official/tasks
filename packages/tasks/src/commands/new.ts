@@ -28,7 +28,13 @@ import {
   logEntryFor,
 } from "../core/workspace.js";
 import { TaskError } from "../errors.js";
-import { emitJson, renderTransitionResult, ui, writeOut } from "../output.js";
+import {
+  emitTaskJson,
+  renderTransitionResult,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 interface NewOptions {
   backlog?: boolean;
@@ -115,6 +121,7 @@ export function newCommand(): Command {
     .option("--assign <actor>", "set the assignee, who must act on it next")
     .option("--priority <level>", `set the priority: ${PRIORITIES.join(", ")}`)
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .exitOverride()
     .action(
       async (
@@ -190,7 +197,7 @@ export function newCommand(): Command {
 
         const json = await derivedTaskJson(context, load, id);
         if (context.json) {
-          emitJson(json);
+          emitTaskJson(context, json);
           return;
         }
         writeOut(renderTransitionResult(json, { command: "new", to: status }));

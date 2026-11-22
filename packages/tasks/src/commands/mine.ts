@@ -3,6 +3,7 @@ import { Command } from "commander";
 import type { DerivedTask } from "../core/derive.js";
 import { readyComparator } from "../core/derive.js";
 import { renderMine } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import { emitOverview, openSpan, spanTasks, viewOptions } from "./overview.js";
 
 interface MineOptions {
@@ -34,6 +35,7 @@ export function mineCommand(): Command {
     )
     .option("--local", "the local tree only, not the projects it lists")
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(async (options: MineOptions, command: Command) => {
       // The configured scope narrows what to take next, not what is yours.
       const span = await openSpan(command, options, false);

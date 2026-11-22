@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { hasOpenStatus } from "../core/derive.js";
 import { renderTree } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import type { DepthOptions, SortOptions, SpanOptions } from "./overview.js";
 import {
   depthOptions,
@@ -31,6 +32,7 @@ export function treeCommand(): Command {
   )
     .option("--resolved", "include done and cancelled tasks")
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(async (options: TreeOptions, command: Command) => {
       const span = await openSpan(command, options, true);
       // Resolved tasks are added, not filtered for, so the nesting stays

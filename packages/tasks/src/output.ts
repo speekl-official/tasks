@@ -3,6 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import pc from "picocolors";
 
 import type { DerivedTask } from "./core/derive.js";
+import { pickFields } from "./core/fields.js";
 import {
   labels,
   priorityLabel,
@@ -44,6 +45,34 @@ export function writeErr(text: string): void {
 
 export function emitJson(value: unknown): void {
   writeOut(JSON.stringify(value, null, 2));
+}
+
+/** Whose `--fields` the emitters honour. */
+interface Fielded {
+  fields: readonly string[] | null;
+}
+
+/** A task object under `--json`, trimmed to `--fields` when given. */
+export function emitTaskJson(context: Fielded, document: object): void {
+  emitJson(
+    context.fields === null ? document : pickFields(document, context.fields),
+  );
+}
+
+/** A collection under `--json`: rows trimmed to `--fields`, its own keys kept. */
+export function emitCollectionJson(
+  context: Fielded,
+  collection: CollectionJson,
+): void {
+  const { fields } = context;
+  if (fields === null) {
+    emitJson(collection);
+    return;
+  }
+  emitJson({
+    ...collection,
+    tasks: collection.tasks.map((task) => pickFields(task, fields)),
+  });
 }
 
 /** A borderless table; the renderers build on it. */

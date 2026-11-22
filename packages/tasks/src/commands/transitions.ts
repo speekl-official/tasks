@@ -11,7 +11,13 @@ import {
 } from "../core/transitions.js";
 import type { TransitionCommand } from "../core/types.js";
 import { TaskError } from "../errors.js";
-import { emitJson, renderTransitionResult, ui, writeOut } from "../output.js";
+import {
+  emitTaskJson,
+  renderTransitionResult,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /**
  * The twelve transition commands of the spec's table. Each is a thin shell
@@ -157,6 +163,7 @@ function withCommonOptions(command: Command, force: string): Command {
     .option("-m, --message <text>", messageHelp(command.name()))
     .option("--force", force)
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .configureHelp({ showGlobalOptions: true })
     .exitOverride();
 }
@@ -286,7 +293,7 @@ function supersededText(claim: SupersededClaim): string {
 
 function report(context: CommandContext, result: TransitionResult): void {
   if (context.json) {
-    emitJson(transitionJson(result));
+    emitTaskJson(context, transitionJson(result));
     return;
   }
   const field = FIELD_COMMANDS.has(result.command);

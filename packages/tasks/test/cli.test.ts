@@ -2475,3 +2475,124 @@ describe("command groups", () => {
     }
   });
 });
+
+describe("--fields", () => {
+  const FIELDS_TREE: TreeSpec = {
+    tasks: {
+      a: { status: "PAUSED", state: true, assignee: "tester" },
+      epic: {},
+      "epic/part": {},
+      free: {},
+    },
+  };
+
+  it("trims each row of a collection to the named keys, in that order", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const result = await sandbox.run(
+      "list",
+      "--json",
+      "--fields",
+      "situation,id",
+    );
+    expect(result.code).toBe(ExitCode.Success);
+    const json = result.json<CollectionJson<Record<string, unknown>>>();
+    expect(Object.keys(json)).toEqual([
+      "scope",
+      "projects",
+      "count",
+      "tasks",
+      "malformed",
+      "unavailable",
+    ]);
+    expect(json.count).toBe(4);
+    for (const row of json.tasks) {
+      expect(Object.keys(row)).toEqual(["situation", "id"]);
+    }
+    const none = collection(
+      await sandbox.run("list", "--done", "--json", "--fields", "id"),
+    );
+    expect(none).toMatchObject({ count: 0, tasks: [] });
+  });
+
+  it("trims a task object, the extras of show and resume included", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const shown = await sandbox.run(
+      "show",
+      "a",
+      "--json",
+      "--fields",
+      "id,body,yours",
+    );
+    expect(shown.json<Record<string, unknown>>()).toEqual({
+      id: "a",
+      body: expect.any(String),
+      yours: "inbox",
+    });
+    const resumed = await sandbox.run(
+      "resume",
+      "a",
+      "--json",
+      "--fields",
+      "state,id",
+    );
+    expect(Object.keys(resumed.json<Record<string, unknown>>())).toEqual([
+      "state",
+      "id",
+    ]);
+  });
+
+  it("trims what a write answers with, leaving out an extra this run has not got", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const claimed = await sandbox.session("s1")(
+      "claim",
+      "free",
+      "--json",
+      "--fields",
+      "id,status,yours,cascaded",
+    );
+    expect(claimed.code).toBe(ExitCode.Success);
+    expect(claimed.json<Record<string, unknown>>()).toEqual({
+      id: "free",
+      status: "IN_PROGRESS",
+      yours: "this-session",
+    });
+    const created = await sandbox.run(
+      "new",
+      "fresh",
+      "A fresh task",
+      "--json",
+      "--fields",
+      "id,situation",
+    );
+    expect(created.json<Record<string, unknown>>()).toEqual({
+      id: "fresh",
+      situation: "ready",
+    });
+  });
+
+  it("refuses a key no document has before anything is written, an empty list, and --fields without --json", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const unknown = await sandbox.session("s1")(
+      "claim",
+      "free",
+      "--json",
+      "--fields",
+      "id,nope",
+    );
+    expect(unknown.code).toBe(ExitCode.Usage);
+    expect(envelope(unknown).error.details).toMatchObject({ field: "nope" });
+    expect(
+      collection(await sandbox.run("list", "--working", "--json")).count,
+    ).toBe(0);
+    expect((await sandbox.run("ready", "--json", "--fields", " , ")).code).toBe(
+      ExitCode.Usage,
+    );
+    const human = await sandbox.run("ready", "--fields", "id");
+    expect(human.code).toBe(ExitCode.Usage);
+    expect(human.stderr).toContain("--json");
+    // A command whose document is no task object does not take the flag.
+    expect((await sandbox.run("actors", "--json", "--fields", "id")).code).toBe(
+      ExitCode.Usage,
+    );
+  });
+});
