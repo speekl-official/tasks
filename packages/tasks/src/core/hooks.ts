@@ -32,8 +32,10 @@ const SUBCOMMANDS: Record<HookEvent, string> = {
 
 /**
  * The keys of each task the SessionStart hook prints: what the entry
- * decision reads. A task's details come with `resume`, so the hook, which
- * runs on every start, resume, clear and compaction, stays small.
+ * decision reads, and the last entry, where a person's instruction to the
+ * agent (an `assign -m`, a `note`) stands until the claim displaces it. The
+ * rest of a task comes with `resume`, so the hook, which runs on every
+ * start, resume, clear and compaction, stays small.
  */
 export const SESSION_START_FIELDS = [
   "id",
@@ -42,9 +44,10 @@ export const SESSION_START_FIELDS = [
   "situation",
   "liveness",
   "effective_priority",
+  "last_entry",
 ].join(",");
 
-const SESSION_START_NOTE = `Your tasks (tasks mine --json --fields ${SESSION_START_FIELDS}), the entry step: do not run mine again. Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.`;
+const SESSION_START_NOTE = `Your tasks in this tree (tasks mine --json --fields ${SESSION_START_FIELDS}), the entry step: do not run mine again for this tree. Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.`;
 
 const STOP_NOTE =
   "A claimed task has no state.md. Write its resume point (tasks state <task>), or pause, hand off or finish it, before ending the turn:";

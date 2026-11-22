@@ -16,11 +16,12 @@ as the example:
   session keeps its id does not matter: `SessionStart` runs on resume too and exports what it is
   given.
 - **SessionStart** runs `tasks mine --json`, trimmed to the keys the entry decision reads
-  (`id`, `title`, `yours`, `situation`, `liveness`, `effective_priority`), and injects the tasks
-  claimed by this actor with the instruction to `resume` them and not to run `mine` again, and the
-  tasks merely assigned to it as its inbox. Entry needs no kickoff phrase, and the entry's `mine`
-  runs once: the hook runs on every start, resume and compaction, so what it prints stays small; a
-  task's details come with `resume`.
+  (`id`, `title`, `yours`, `situation`, `liveness`, `effective_priority`) and each task's
+  `last_entry`, where a person's instruction to the agent stands until the claim displaces it, and
+  injects the tasks claimed by this actor with the instruction to `resume` them and not to run
+  `mine` again for this tree, and the tasks merely assigned to it as its inbox. Entry needs no
+  kickoff phrase, and the entry's `mine` runs once: the hook runs on every start, resume and
+  compaction, so what it prints stays small; the rest of a task comes with `resume`.
 - **PostToolUse** runs `tasks heartbeat --session <id>`, so liveness reflects activity. It fires
   only when a tool returns, so a long-running command — a ten-minute test run — produces no
   heartbeat while it runs; this is why `session_timeout_minutes` must stay well above the longest

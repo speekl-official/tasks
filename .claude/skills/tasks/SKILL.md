@@ -24,11 +24,14 @@ through `tasks state`; `log.md` is appended by the CLI.
 
 With the harness hooks your tasks are already in your context, headed `Your
 tasks`: the hook ran the entry's `mine` when the session started, and runs it
-again after a resume, a clear or a compaction. **Do not run it again.** Without
-the hooks — nothing headed `Your tasks` in your context — run it yourself:
+again after a resume, a clear or a compaction. **Do not run it again** for the
+tree, actor and session that produced it; a tree a person points you at with
+`-C <dir>` gets its own `mine`. Without the hooks — nothing headed `Your tasks`
+in your context — set your name and session token first (next section), then
+run it yourself:
 
 ```sh
-tasks mine --json --fields id,title,yours,situation,liveness,effective_priority
+TASKS_ACTOR=agent tasks mine --json --fields id,title,yours,situation,liveness,effective_priority,last_entry --session <token>
 ```
 
 - Exit `3`, no `.tasks/` found: the project is not set up. **Ask before running
@@ -77,8 +80,11 @@ again. Subagents use the same name and token.
    continue it; then, among the tasks claimed by you in older sessions that are
    now `orphaned` and the tasks assigned to you (your inbox), the one with the
    highest effective priority — at equal priority finish your orphan before
-   starting inbox work — unless a person's instruction, in the conversation or
-   under `## Notes`, names what comes first; only then new work. Take over an
+   starting inbox work — unless a person's instruction names what comes first:
+   in the conversation, under `## Notes`, or in a candidate's `last_entry` (an
+   `assign -m`, a `note`), so read the candidates' last entries before choosing
+   or claiming, and put input the work needs under `## Notes` (`tasks note`)
+   before the claim, which writes a new last entry; only then new work. Take over an
    orphan with an ordinary `tasks claim <task>`, one at a time, and only what
    you will work on now: the others stay orphaned, which is no breakage. A task
    held by another **live** session is not yours. A claim of **unknown**
