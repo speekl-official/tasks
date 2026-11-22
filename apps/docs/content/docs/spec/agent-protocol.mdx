@@ -30,8 +30,9 @@ everyone else and may be taken over.
 
 1. Run `mine`, once per tree, as the right actor and session: where the harness ran it at session
    start ([Harness integration](/docs/spec/harness)), its output is this step for the tree, actor
-   and session that produced it, and the agent does not run it again there. Continue any task
-   claimed by this session (its `yours` is `this-session`); then
+   and session that produced it when its rows carry `last_entry` (an older hook's do not, and
+   the agent runs `mine` once in its place), and the agent does not run it again there.
+   Continue any task claimed by this session (its `yours` is `this-session`); then
    take, among the orphaned tasks claimed by this actor (`orphaned`) and the tasks assigned to it
    (`inbox`), the one with the highest effective priority
    — at equal priority an orphan before an assigned task — unless a person's instruction names

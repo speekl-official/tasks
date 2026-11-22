@@ -26,9 +26,13 @@ With the harness hooks your tasks are already in your context, headed `Your
 tasks`: the hook ran the entry's `mine` when the session started, and runs it
 again after a resume, a clear or a compaction. **Do not run it again** for the
 tree, actor and session that produced it; a tree a person points you at with
-`-C <dir>` gets its own `mine`. Without the hooks — nothing headed `Your tasks`
-in your context — set your name and session token first (next section), then
-run it yourself:
+`-C <dir>` gets its own `mine`. A row without the `last_entry` key (`null` is
+one) comes from a hook older than this skill: run the `mine` below once in its
+place (the hooks set your name and token, so without the prefix and
+`--session`), and tell the person that `tasks hooks install --force` brings the
+hook up to date. Without the hooks — nothing headed `Your tasks` in your context
+— set your name and session token first (next section), then run it yourself,
+the prefix only when `TASKS_ACTOR` is not set already (`echo $TASKS_ACTOR`):
 
 ```sh
 TASKS_ACTOR=agent tasks mine --json --fields id,title,yours,situation,liveness,effective_priority,last_entry --session <token>

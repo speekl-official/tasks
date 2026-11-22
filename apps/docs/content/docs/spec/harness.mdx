@@ -21,7 +21,9 @@ as the example:
   injects the tasks claimed by this actor with the instruction to `resume` them and not to run
   `mine` again for this tree, and the tasks merely assigned to it as its inbox. Entry needs no
   kickoff phrase, and the entry's `mine` runs once: the hook runs on every start, resume and
-  compaction, so what it prints stays small; the rest of a task comes with `resume`.
+  compaction, so what it prints stays small; the rest of a task comes with `resume`. A hook
+  installed before `last_entry` joined these keys prints rows without it, and the agent runs
+  `mine` once in its place.
 - **PostToolUse** runs `tasks heartbeat --session <id>`, so liveness reflects activity. It fires
   only when a tool returns, so a long-running command — a ten-minute test run — produces no
   heartbeat while it runs; this is why `session_timeout_minutes` must stay well above the longest
