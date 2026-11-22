@@ -107,7 +107,7 @@ qualified as `alias:path`.
 
 Commands that report state (`show`, `resume`, `ready`, `list`, `tree`, `mine`) MUST add the
 derived conditions: `situation` (the word of the [Situation](/docs/spec/lifecycle#situation) table), `blocked_by` (a
-list of `{ref, reason, status}`; empty for a resolved task), `ready` (for the calling actor), `effective_priority`, `held_by` (the nearest claimed or assigned ancestor — or a malformed one, which holds for all anyone can tell — or `null`; `null` for a resolved task), `started`, `children`
+list of `{ref, task, reason, status}`: the reference as stored, the target as the command line names it, `alias:path` for a listed project and bare for the local tree, or `null` when no alias names its tree, the reason and the target's status; empty for a resolved task), `ready` (for the calling actor), `effective_priority`, `held_by` (the nearest claimed or assigned ancestor — or a malformed one, which holds for all anyone can tell — or `null`; `null` for a resolved task), `started`, `children`
 (`{open, resolved}`), `active` (an `IN_PROGRESS` descendant exists), `waiting_for`, `closable`,
 `liveness` and `last_seen` (`null` unless the task is `IN_PROGRESS`; `last_seen` is `null` too for a
 claim without a session), `yours` (how the task is the calling actor's: `this-session` for a claim of this session, a claim

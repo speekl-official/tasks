@@ -59,6 +59,7 @@ const ENTRY: LastEntryJson = {
 function ref(stored: string, fields: Partial<ResolvedRef> = {}): ResolvedRef {
   return {
     ref: stored,
+    task: stored,
     project: null,
     id: stored,
     satisfied: false,

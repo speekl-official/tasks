@@ -372,7 +372,8 @@ tasks after list <task> [--json]
 ```
 
 Each reference in `depends_on` (or `finishes_after`), named as the command line takes it
-(the JSON carries it as stored), whether it is satisfied, and why not. Each list is judged
+(the JSON carries both: `ref` as stored and `task` as the command line takes it, `null`
+when no alias names its tree), whether it is satisfied, and why not. Each list is judged
 by its own gate: a `CANCELLED` task satisfies `finishes_after`, never `depends_on`. See
 [`tasks dep`](#tasks-dep-and-tasks-after).
 

@@ -247,6 +247,7 @@ function blockedByOf(start: StartGate): BlockedByJson[] {
     .filter((ref) => !ref.satisfied)
     .map((ref) => ({
       ref: ref.ref,
+      task: ref.task,
       // An unsatisfied reference always has a reason; `missing` is the
       // spec's recommendation for one that cannot be read at all.
       reason: ref.reason ?? "missing",

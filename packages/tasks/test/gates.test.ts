@@ -53,14 +53,32 @@ async function open(): Promise<{ projects: Projects; gates: GateResolver }> {
   return { projects, gates: new GateResolver(projects) };
 }
 
+/**
+ * A resolved reference as the resolver reports it. `task` follows `project`:
+ * bare for the local tree, `alias:id` for an alias, and none for a tree named
+ * only by its path; a reference that does not parse passes `null` itself.
+ */
 function resolved(
   ref: string,
   project: string | null,
   id: string,
   reason: GateReason | null,
   status: Status | null,
+  task: string | null = project === null
+    ? id
+    : project.startsWith(".") || project.includes("/")
+      ? null
+      : `${project}:${id}`,
 ): ResolvedRef {
-  return { ref, project, id, satisfied: reason === null, reason, status };
+  return {
+    ref,
+    task,
+    project,
+    id,
+    satisfied: reason === null,
+    reason,
+    status,
+  };
 }
 
 /** A sibling tree listed as `alias` whose `config.yml` says `version`. */
@@ -143,7 +161,7 @@ describe("resolving references", () => {
       "",
     ]) {
       expect(await gates.resolveRef(projects.local, raw)).toEqual(
-        resolved(raw, null, raw, "missing", null),
+        resolved(raw, null, raw, "missing", null, null),
       );
     }
   });
@@ -258,10 +276,11 @@ describe("start gate", () => {
       "Bad Ref",
     ]);
     expect(toBlockedBy(gate.refs)).toEqual([
-      { ref: "todo", reason: "not-done", status: "TODO" },
-      { ref: "gone", reason: "cancelled", status: "CANCELLED" },
-      { ref: "nowhere", reason: "missing", status: null },
-      { ref: "Bad Ref", reason: "missing", status: null },
+      { ref: "todo", task: "todo", reason: "not-done", status: "TODO" },
+      { ref: "gone", task: "gone", reason: "cancelled", status: "CANCELLED" },
+      { ref: "nowhere", task: "nowhere", reason: "missing", status: null },
+      // Unparseable: nothing the command line could name.
+      { ref: "Bad Ref", task: null, reason: "missing", status: null },
     ]);
   });
 });
@@ -336,7 +355,7 @@ describe("finish gate", () => {
     const lost = await gates.finishGate(projects.local, findTask(tree, "lost"));
     expect(lost.satisfied).toBe(false);
     expect(toBlockedBy(lost.refs)).toEqual([
-      { ref: "nowhere", reason: "missing", status: null },
+      { ref: "nowhere", task: "nowhere", reason: "missing", status: null },
     ]);
     const pending = await gates.finishGate(
       projects.local,
@@ -344,7 +363,7 @@ describe("finish gate", () => {
     );
     expect(pending.satisfied).toBe(false);
     expect(toBlockedBy(pending.refs)).toEqual([
-      { ref: "todo", reason: "not-done", status: "TODO" },
+      { ref: "todo", task: "todo", reason: "not-done", status: "TODO" },
     ]);
   });
 

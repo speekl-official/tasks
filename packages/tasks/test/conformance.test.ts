@@ -396,7 +396,7 @@ describe("Self-checking", () => {
         yours: null,
       };
       const notDone = (ref: string): BlockedByJson[] => [
-        { ref, reason: "not-done", status: "TODO" },
+        { ref, task: ref, reason: "not-done", status: "TODO" },
       ];
       const expected: Record<string, Partial<TaskWithDerivedJson>> = {
         shipped: { situation: "done" },
@@ -483,7 +483,12 @@ describe("Self-checking", () => {
         stranded: {
           situation: "blocked",
           blocked_by: [
-            { ref: "dropped", reason: "cancelled", status: "CANCELLED" },
+            {
+              ref: "dropped",
+              task: "dropped",
+              reason: "cancelled",
+              status: "CANCELLED",
+            },
           ],
         },
         "paused-waits": {
@@ -1535,12 +1540,26 @@ describe("Self-checking", () => {
     expect((await frontmatterOf(s, "uses-epic")).status).toBe("TODO");
     expect(
       success<ShowJson>(await s.run("show", "uses-api", "--json")).blocked_by,
-    ).toEqual([{ ref: "epic/api", reason: "cancelled", status: "CANCELLED" }]);
+    ).toEqual([
+      {
+        ref: "epic/api",
+        task: "epic/api",
+        reason: "cancelled",
+        status: "CANCELLED",
+      },
+    ]);
+    // Seen from here, the backend's reference leads back into this tree,
+    // so the command line names its target bare.
     expect(
       success<ShowJson>(await s.run("show", "backend:client", "--json"))
         .blocked_by,
     ).toEqual([
-      { ref: "../repo:epic/api", reason: "cancelled", status: "CANCELLED" },
+      {
+        ref: "../repo:epic/api",
+        task: "epic/api",
+        reason: "cancelled",
+        status: "CANCELLED",
+      },
     ]);
   });
 
@@ -1689,7 +1708,12 @@ describe("Self-checking", () => {
         success<ShowJson>(await s.run("show", "uses-tokens", "--json"))
           .blocked_by,
       ).toEqual([
-        { ref: "identity/tokens", reason: "not-done", status: "TODO" },
+        {
+          ref: "identity/tokens",
+          task: "identity/tokens",
+          reason: "not-done",
+          status: "TODO",
+        },
       ]);
       expect(
         success<ShowJson>(await s.run("show", "backend:client", "--json"))
@@ -1697,6 +1721,7 @@ describe("Self-checking", () => {
       ).toEqual([
         {
           ref: "../repo:identity/tokens",
+          task: "identity/tokens",
           reason: "not-done",
           status: "TODO",
         },

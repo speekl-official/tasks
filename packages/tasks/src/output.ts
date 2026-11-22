@@ -877,6 +877,7 @@ export function renderDepList(refs: ResolvedRef[]): string {
         ? pc.dim(ref.status ?? "")
         : blockedDetail({
             ref: ref.ref,
+            task: ref.task,
             reason: ref.reason ?? "missing",
             status: ref.status,
           }),

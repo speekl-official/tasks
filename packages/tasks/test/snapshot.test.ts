@@ -59,7 +59,12 @@ describe("snapshotTree", () => {
     const later = derived.get("later")!;
     expect(later.derived.situation).toBe("blocked");
     expect(later.derived.blocked_by).toEqual([
-      { ref: "epic/b", reason: "not-done", status: "IN_PROGRESS" },
+      {
+        ref: "epic/b",
+        task: "epic/b",
+        reason: "not-done",
+        status: "IN_PROGRESS",
+      },
     ]);
     expect(later.derived.ready).toBe(false);
   });

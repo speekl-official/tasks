@@ -392,7 +392,9 @@ describe("force", () => {
     expect(errorOf(refused).details).toEqual({
       id: "a",
       kind: "start-gate",
-      blocked_by: [{ ref: "dep", reason: "not-done", status: "TODO" }],
+      blocked_by: [
+        { ref: "dep", task: "dep", reason: "not-done", status: "TODO" },
+      ],
     });
     expect((await sandbox.run("claim", "a", "--force")).code).toBe(0);
     expect((await lastEntry(sandbox, "a")).text).toBe(

@@ -226,6 +226,11 @@ export type GateReason = (typeof GATE_REASONS)[number];
  */
 export interface ResolvedRef {
   ref: string;
+  /**
+   * The target as the command line names it: `alias:path` for a listed
+   * project, bare for the local tree; `null` when no alias names its tree.
+   */
+  task: string | null;
   project: string | null;
   /** The target id inside its own tree. */
   id: string;
@@ -239,6 +244,8 @@ export interface ResolvedRef {
 /** An unsatisfied reference as the JSON `blocked_by` list carries it. */
 export interface BlockedByJson {
   ref: string;
+  /** The target as the command line names it, or `null`. */
+  task: string | null;
   reason: GateReason;
   status: Status | null;
 }

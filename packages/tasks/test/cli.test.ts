@@ -798,7 +798,7 @@ describe("show", () => {
       updated: "2026-01-01T00:00:00Z",
       path: path.join(sandbox.tasksDir, "a"),
       situation: "blocked",
-      blocked_by: [{ ref: "b", reason: "not-done", status: "TODO" }],
+      blocked_by: [{ ref: "b", task: "b", reason: "not-done", status: "TODO" }],
       ready: false,
       effective_priority: "high",
       held_by: null,

@@ -63,7 +63,9 @@ describe("dep add", () => {
       id: "x/a",
       depends_on: ["y/b"],
       situation: "blocked",
-      blocked_by: [{ ref: "y/b", reason: "not-done", status: "TODO" }],
+      blocked_by: [
+        { ref: "y/b", task: "y/b", reason: "not-done", status: "TODO" },
+      ],
     });
     expect(json.updated).not.toBe(FIXTURE_TIME);
     expect(json.created).toBe(FIXTURE_TIME);
@@ -120,7 +122,12 @@ describe("dep add", () => {
     expect(result.json<TaskWithDerivedJson>()).toMatchObject({
       depends_on: ["../backend:kernel/tests"],
       blocked_by: [
-        { ref: "../backend:kernel/tests", reason: "not-done", status: "TODO" },
+        {
+          ref: "../backend:kernel/tests",
+          task: "backend:kernel/tests",
+          reason: "not-done",
+          status: "TODO",
+        },
       ],
     });
   });

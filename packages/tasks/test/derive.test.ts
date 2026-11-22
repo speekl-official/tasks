@@ -67,11 +67,27 @@ function unsatisfiedRef(
   reason: GateReason = "not-done",
   status: Status | null = "TODO",
 ): ResolvedRef {
-  return { ref, project: null, id: ref, satisfied: false, reason, status };
+  return {
+    ref,
+    task: ref,
+    project: null,
+    id: ref,
+    satisfied: false,
+    reason,
+    status,
+  };
 }
 
 function satisfiedRef(ref: string, status: Status = "DONE"): ResolvedRef {
-  return { ref, project: null, id: ref, satisfied: true, reason: null, status };
+  return {
+    ref,
+    task: ref,
+    project: null,
+    id: ref,
+    satisfied: true,
+    reason: null,
+    status,
+  };
 }
 
 function blockedBy(...refs: ResolvedRef[]): StartGate {
@@ -289,7 +305,7 @@ describe("the situation table", () => {
     );
     expect(situationText(get(derived, "b"))).toBe("blocked by gone (missing)");
     expect(get(derived, "c").derived.blocked_by).toEqual([
-      { ref: "y", reason: "not-done", status: "TODO" },
+      { ref: "y", task: "y", reason: "not-done", status: "TODO" },
     ]);
   });
 
@@ -301,6 +317,7 @@ describe("the situation table", () => {
           start: {
             a: blockedBy({
               ref: "../backend:api/tokens",
+              task: "backend:api/tokens",
               project: "backend",
               id: "api/tokens",
               satisfied: false,
@@ -315,8 +332,11 @@ describe("the situation table", () => {
     expect(situationText(d)).toBe(
       "blocked by backend:api/tokens (not-checked-out)",
     );
-    // The JSON keeps the stored form.
-    expect(d.derived.blocked_by[0]!.ref).toBe("../backend:api/tokens");
+    // The JSON keeps the stored form, and names the target beside it.
+    expect(d.derived.blocked_by[0]).toMatchObject({
+      ref: "../backend:api/tokens",
+      task: "backend:api/tokens",
+    });
   });
 });
 

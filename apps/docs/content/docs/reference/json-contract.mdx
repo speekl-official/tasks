@@ -91,8 +91,8 @@ be reworded in a patch release; codes may not. `--help` and `--version` exit `0`
 | ----------------------------------------- | ------------------------------------------------------------------------- |
 | Illegal transition                        | `id`, `from`, `to`, and `allowed`: the statuses the command applies to    |
 | Authorization                             | `id`, `claimed_by`, `claimed_session`, `assignee`, `liveness`             |
-| Unsatisfied start gate                    | `id`, `blocked_by`: `[{ref, reason, status}]`                             |
-| Unsatisfied finish gate                   | `id`, `open_children`, `finishes_after`: `[{ref, reason, status}]`        |
+| Unsatisfied start gate                    | `id`, `blocked_by`: `[{ref, task, reason, status}]`                       |
+| Unsatisfied finish gate                   | `id`, `open_children`, `finishes_after`: `[{ref, task, reason, status}]`  |
 | Cascade over a live or unknown claim      | `id`, `claims`: `[{id, claimant, session, liveness}]`                     |
 | Ancestor in `BACKLOG`, claimed or assigned | `id`, `ancestor`                                                         |
 | Missing or present `state.md`             | `id`, `kind`                                                              |
@@ -204,7 +204,7 @@ never stored.
 | Field                | Notes                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | `situation`          | One of `done`, `cancelled`, `working`, `parked`, `backlog`, `held`, `waiting`, `assigned`, `blocked`, `closable`, `open`, `ready`. Its object is in the fields below. |
-| `blocked_by`         | Unsatisfied `depends_on` references: `[{ref, reason, status}]`; empty for a resolved task. |
+| `blocked_by`         | Unsatisfied `depends_on` references: `[{ref, task, reason, status}]` — `ref` as stored, `task` as the command line names the target (`alias:path`, bare for the local tree, `null` when no alias names its tree); empty for a resolved task. |
 | `ready`              | Ready for the calling actor.                                                          |
 | `effective_priority` | The highest of the task's own priority and its ancestors'.                            |
 | `held_by`            | The nearest claimed or assigned ancestor — or a malformed one, which holds for all anyone can tell — or `null`; `null` for a resolved task. |
@@ -428,6 +428,7 @@ conditions too.
   "refs": [
     {
       "ref": "billing/invoices",
+      "task": "billing/invoices",
       "project": null,
       "id": "billing/invoices",
       "satisfied": false,
@@ -438,9 +439,10 @@ conditions too.
 }
 ```
 
-Every reference, satisfied or not. `project` is the target's alias, `null` for the local
-tree, or its project path for a tree reached without an alias; `id` is the target inside
-its own tree; `reason` is `null` when satisfied; `status` is `null` when the target is not
+Every reference, satisfied or not. `task` is the target as the command line names it,
+`alias:path` for a listed project and bare for the local tree, or `null` when no alias
+names its tree; `project` is the target's alias, `null` for the local tree, or its project
+path for a tree reached without an alias; `id` is the target inside its own tree; `reason` is `null` when satisfied; `status` is `null` when the target is not
 a live, readable task.
 
 ### `actors`
