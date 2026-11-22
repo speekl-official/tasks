@@ -233,7 +233,8 @@ command table in `${CLAUDE_SKILL_DIR}/reference/commands.md`.
 - **Read:** `mine [--local]`;
   `ready [--scope <path>] [--all] [--local] [--priority <level>]`;
   `list [--<situation>…] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--all] [--top] [--depth <n>]`
-  (the situations: `--blocked`, `--waiting`, `--parked`, …);
+  (the situations: `--blocked`, `--waiting`, `--parked`, …; `--priority high`
+  is urgent and high; `--updated-before 2w` is untouched for two weeks);
   `tree [--sort created|updated] [--reverse] [--top] [--depth <n>]`;
   `show <task> [--archived]`; `resume <task>`; `actors`;
   `log <task> [--since <when>] [--actor <actor>]`;
@@ -244,13 +245,15 @@ command table in `${CLAUDE_SKILL_DIR}/reference/commands.md`.
   `handoff <task> <actor> -m <text>`; `done <task> -m <text>`; `release <task>`.
 - **Shape the tree:**
   `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]`;
-  `move <source> <destination>`; `dep add|rm <task> <ref>…`;
+  `move <source> <destination>` (rewrites every reference);
+  `dep add|rm <task> <ref>…`;
   `after add|rm <task> <ref>…`; `priority <task> urgent|high|normal|low`;
   `assign <task> <actor>` / `unassign <task>` (an assigned task holds its
   subtree); `schedule <task>` / `defer <task>` (onto / off the plan, with the
   subtree); `cancel <task> -m <text>` (with the subtree) /
   `reopen <task> -m <text>`.
-- **Housekeeping:** `archive [<task>] [--resolved-before <when>]`,
+- **Housekeeping:** `archive <task>`, or for a batch
+  `archive --resolved-before [<when>]` / `archive --all-resolved`;
   `restore <path>`, `purge <path>`, `delete <task>` (a never-worked task only);
   `reindex`; `migrate [--dry-run]`; `init [--actors [<names>]]` and
   `hooks install [--actor <name>]` (ask first); `skill install --force`.
