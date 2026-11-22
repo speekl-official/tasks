@@ -150,16 +150,11 @@ describe("log <task> <text>", () => {
 
 describe("log <task> (read)", () => {
   it("prints one task's entries, oldest first, as the entries object", async () => {
+    // Stamped once: computed twice, the two stamps can straddle a second.
+    const first = entry(ago(60), "bob", "first");
+    const second = entry(ago(5), "alice", "second\ntwo lines");
     const s = await box({
-      tasks: {
-        a: {
-          log:
-            entry(ago(60), "bob", "first") +
-            "\n" +
-            entry(ago(5), "alice", "second\ntwo lines"),
-        },
-        b: {},
-      },
+      tasks: { a: { log: `${first}\n${second}` }, b: {} },
     });
     const result = await s.run("log", "a", "--json");
     expect(result.code).toBe(0);
@@ -170,11 +165,7 @@ describe("log <task> (read)", () => {
       ["a", "alice", "second\ntwo lines"],
     ]);
     // Nothing was written: a read.
-    expect(await s.read(".tasks/a/log.md")).toBe(
-      entry(ago(60), "bob", "first") +
-        "\n" +
-        entry(ago(5), "alice", "second\ntwo lines"),
-    );
+    expect(await s.read(".tasks/a/log.md")).toBe(`${first}\n${second}`);
 
     const human = await s.run("log", "a");
     expect(stripVTControlCharacters(human.stdout)).toContain("bob  a\n  first");
