@@ -931,7 +931,7 @@ tasks migrate [<alias>] [--dry-run] [--map <OLD=NEW>â€¦] [--map-phase <OLD=NEW>â
 | `<alias>`               | Migrate the v1 tree of a project this v2 tree lists, instead of this tree.              |
 | `--map <OLD=NEW>`       | The v2 status of a v1 status: needed for a status outside the v1 roles; may also override a role's. Repeatable. |
 | `--map-phase <OLD=NEW>` | The v2 directory name of a v1 phase: needed when its name has a `.` or `_`; may also rename a valid one. Repeatable. |
-| `--dry-run`             | Check everything and report what the migration would do, writing nothing: not the tree, not its lock. A refusal is the same refusal. |
+| `--dry-run`             | Check everything and report what the migration would do, writing nothing into the tree, not even its lock (a session's heartbeat is recorded as for any command). A refusal is the same refusal. |
 
 The one-time upgrade of a v1 tree, and the only command that opens a v1 tree (`skill install`
 and `hooks install` write beside one without reading it). Under the
