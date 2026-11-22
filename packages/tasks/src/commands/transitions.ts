@@ -289,10 +289,11 @@ const FIELD_COMMANDS: ReadonlySet<string> = new Set([
 
 /** Whose claim the takeover ended; the token and the timestamp are in the log. */
 function supersededText(claim: SupersededClaim): string {
+  const age = claim.last_seen === null ? null : compactAge(claim.last_seen);
   const seen =
-    claim.last_seen === null
+    age === null
       ? claim.liveness
-      : `${claim.liveness}, last seen ${compactAge(claim.last_seen)} ago`;
+      : `${claim.liveness}, last seen ${age === "now" ? "just now" : `${age} ago`}`;
   return `superseded ${claim.claimant} on ${claim.id} (${seen})`;
 }
 
