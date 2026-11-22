@@ -169,7 +169,9 @@ recommended structure is four sections:
 ```
 
 _Open_ names every uncommitted file and branch the work leaves behind — anything a
-reader would otherwise find unexplained in the working tree. Its presence drives three
+reader would otherwise find unexplained in the working tree. The file stays short — a
+screen, about twenty lines — naming results and the commits that carry them rather than
+the steps that produced them, which are `log.md`'s; each write replaces it whole. Its presence drives three
 rules: `pause` and `handoff` need it, `release` refuses it, and `schedule` and `reopen`
 return a task to `PAUSED` rather than `TODO` when it exists. A `BACKLOG` task with a
 `state.md` at or beneath it is **parked**: started, then set aside.

@@ -28,7 +28,10 @@ which writes exactly the content the caller supplies.
 - Its content is free; the RECOMMENDED structure is four sections — **Done**, **Verified**,
   **Open**, **Next** — where *Done* names what was delivered, with the commits that carry it, and
   *Open* names uncommitted files, branches and anything else a reader would otherwise find
-  unexplained in the working tree.
+  unexplained in the working tree. It is a resume point, not a history: it SHOULD stay short —
+  a screen, some twenty lines — naming results and the commits that carry them rather than the
+  steps that produced them, which belong to `log.md`; each write replaces it whole, and a file
+  that grows turn by turn is being appended to, whatever the command.
 - `pause` and `handoff` MUST refuse when it is missing; `release` MUST refuse when it is present.
 - `schedule` and `reopen` return a task to `PAUSED` when it exists; `schedule` does so for every
   descendant its cascade reaches.

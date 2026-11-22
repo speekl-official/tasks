@@ -73,8 +73,9 @@ everyone else and may be taken over.
 - `--as` is used only on an explicit instruction from that actor given in the current session,
   and the message quotes it. An agent MUST NOT use `--as` to satisfy an assignee rule on its own
   initiative.
-- **Freshness rule:** every turn in which the work progressed ends with `state.md` updated. The
-  status stays `IN_PROGRESS` between turns.
+- **Freshness rule:** every turn in which the work progressed ends with `state.md` updated —
+  rewritten as the short resume point it is ([`state.md`](/docs/spec/workspace#statemd)), not
+  extended by the turn's steps. The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 

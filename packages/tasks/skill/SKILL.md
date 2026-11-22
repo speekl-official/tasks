@@ -115,7 +115,10 @@ again. Subagents use the same name and token.
   task directory; use `tasks move`.
 - Write `state.md` through **`tasks state <task> < file`** (or a heredoc), so
   the write is fenced like a transition. Recommended sections: **Done** (with
-  the commits that carry it), **Verified**, **Open**, **Next**.
+  the commits that carry it), **Verified**, **Open**, **Next**. Keep it a short
+  resume point — a screen, about twenty lines: results and the commits that
+  carry them, not the steps that produced them; the history is `log.md`. Each
+  write replaces it whole; never let it grow turn by turn.
 - A clarification of the statement changes `Description` / `Acceptance
 criteria` in place; an input received after the start goes to `## Notes`; a
   decision goes to `design.md`; a change of plan goes to `plan.md`.
@@ -136,7 +139,8 @@ criteria` in place; an input received after the start goes to `## Notes`; a
   session, with the instruction quoted in `-m`. Never to satisfy an assignee
   rule on your own.
 - **Freshness rule:** every turn in which the work progressed ends with
-  `state.md` updated. The status stays `IN_PROGRESS` between turns.
+  `state.md` updated — rewritten as the short resume point above, not extended
+  by the turn's steps. The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 

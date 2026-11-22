@@ -159,7 +159,10 @@ out. Say so once in your report and go on.
   rewrites the references.
 - **Write `state.md` through `tasks state`**, so the write is fenced like a transition: a
   session whose claim was taken over learns of it before it overwrites the new claimant's
-  file.
+  file. Keep it a short resume point — a screen, about twenty lines — naming results and
+  the commits that carry them, not the steps that produced them; what happened along the
+  way is `log.md`'s. Each write replaces it whole; a file that grows turn by turn is being
+  appended to.
 
   ```sh
   tasks state <task> < state.md
@@ -185,7 +188,8 @@ out. Say so once in your report and go on.
   session, and the message quotes it. Never use `--as` to satisfy an assignee rule on
   your own initiative.
 - **The freshness rule:** every turn in which the work progressed ends with `state.md`
-  updated. The status stays `IN_PROGRESS` between turns.
+  updated — rewritten as the short resume point above, not extended by the turn's steps.
+  The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 
