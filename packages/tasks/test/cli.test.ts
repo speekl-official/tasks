@@ -1404,13 +1404,17 @@ describe("mine", () => {
     expect(claimed.json<ShowJson>().yours).toBe("this-session");
   });
 
-  it("renders each task's last log entry", async () => {
+  it("renders each task's last log entry as its text, then its author and age", async () => {
     sandbox = await treeSandbox(MINE_TREE);
     const out = plain((await sandbox.session("s1")("mine")).stdout);
     expect(out).toMatch(/this-session\s+working by tester\s+\S+\s+live/);
-    expect(out).toContain("2026-01-02T00:00:00Z alice");
-    expect(out).toContain("Please deploy after the review.");
-    expect(out).toContain("2026-01-03T00:00:00Z tester s:s1");
+    expect(out).toMatch(/^ {4}claim: TODO → IN_PROGRESS {2}\(tester, \S+\)$/m);
+    expect(out).toMatch(/^ {4}Started on the schema\.$/m);
+    expect(out).toMatch(/^ {4}assign tester {2}\(alice, \S+\)$/m);
+    expect(out).toMatch(/^ {4}Please deploy after the review\.$/m);
+    // The heading's timestamp and token are for the JSON and `log`.
+    expect(out).not.toContain("2026-01-0");
+    expect(out).not.toContain("s:s1");
     expect(out).toContain("4 tasks");
   });
 

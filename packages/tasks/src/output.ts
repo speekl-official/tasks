@@ -408,6 +408,22 @@ export function renderTree(
 }
 
 /**
+ * A task's last log entry beneath its row: what happened, then who and how
+ * long ago, dimmed; the entry's further lines follow as written. The
+ * heading's timestamp and session token stay in the JSON and in `log`.
+ */
+function entryLines(entry: LastEntryJson, now: Date): string[] {
+  const [first = "", ...rest] = entry.text.split("\n");
+  const who =
+    entry.via === null ? entry.actor : `${entry.actor} via ${entry.via}`;
+  const stamp = pc.dim(`(${who}, ${compactAge(entry.time, now)})`);
+  return [
+    `    ${first === "" ? stamp : `${first}  ${stamp}`}`,
+    ...(rest.length === 0 ? [] : indentLines(rest.join("\n"), "    ")),
+  ];
+}
+
+/**
  * `mine`: the overview with each task's last log entry beneath it, in full,
  * because a handoff's closing note is written there for the next reader.
  */
@@ -438,10 +454,7 @@ export function renderMine(
       d.snapshot.task.title,
     ]);
     const entry = d.derived.last_entry;
-    if (entry !== null) {
-      lines.push(`    ${pc.dim(entryHeading(entry))}`);
-      lines.push(...indentLines(entry.text, "    "));
-    }
+    if (entry !== null) lines.push(...entryLines(entry, now));
   }
   return aligned(lines, fitFor(head, options));
 }

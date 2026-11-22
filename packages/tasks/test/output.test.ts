@@ -340,21 +340,29 @@ describe("renderTree", () => {
 describe("renderMine", () => {
   it("puts each task's last entry, in full, beneath it", async () => {
     const { local } = await fixture();
+    const now = new Date("2026-09-22T12:00:00Z");
+    const schema = get(local, "auth-rework/token-schema");
     const lines = plain(
-      renderMine([
-        get(local, "auth-rework/token-schema"),
-        get(local, "auth-rework/phase/impl"),
-      ]),
+      renderMine([schema, get(local, "auth-rework/phase/impl")], { now }),
     ).split("\n");
     const row = lines.findIndex((line) =>
       line.startsWith("auth-rework/token-schema"),
     );
-    expect(lines.slice(row + 1, row + 4)).toEqual([
-      "    2026-09-21T16:40:12Z agent s:s0",
-      "    handoff alice: IN_PROGRESS → PAUSED",
+    expect(lines.slice(row + 1, row + 3)).toEqual([
+      "    handoff alice: IN_PROGRESS → PAUSED  (agent, 19h)",
       "    Schema drafted; decide the rotation.",
     ]);
-    expect(lines[row + 4]).toMatch(/^auth-rework\/phase\/impl\s+working/);
+    expect(lines[row + 3]).toMatch(/^auth-rework\/phase\/impl\s+working/);
+
+    // An entry made on someone's behalf names the operator too.
+    const entry = schema.derived.last_entry!;
+    const onBehalf = {
+      ...schema,
+      derived: { ...schema.derived, last_entry: { ...entry, via: "kate" } },
+    };
+    expect(plain(renderMine([onBehalf], { now }))).toContain(
+      "    handoff alice: IN_PROGRESS → PAUSED  (agent via kate, 19h)",
+    );
     expect(plain(renderMine([]))).toContain("Nothing");
   });
 });

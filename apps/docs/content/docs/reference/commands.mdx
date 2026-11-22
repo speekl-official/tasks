@@ -219,8 +219,9 @@ your other claims (orphaned ones are yours to take over), then the tasks merely 
 to you — your inbox. In the JSON each row's `yours` names its group: `this-session`,
 `orphaned`, `elsewhere` (your claim in another live session, or of unknown liveness) or
 `inbox`; every reporting command carries the field, so `ready --json` marks your inbox
-and `list --working --json` your own orphans. Each row carries its situation, liveness and last log entry, its
-last activity; what was left for you is in the task's files (`## Notes` of `task.md`,
+and `list --working --json` your own orphans. Each row carries its situation and liveness and, beneath it, the task's last log
+entry — what happened, then its author and age — its last activity; what was left for
+you is in the task's files (`## Notes` of `task.md`,
 `design.md`, `state.md`). Not restricted by `scope`. Use `--as <actor>` to see
 someone else's.
 
