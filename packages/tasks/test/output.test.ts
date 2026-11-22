@@ -287,6 +287,33 @@ describe("renderOverview", () => {
     expect(free).toContain("数据".repeat(20));
   });
 
+  it("keeps a tab and a colon-form colour code in a title from overrunning the width", async () => {
+    const esc = String.fromCharCode(27);
+    sandbox = await treeSandbox({
+      tasks: {
+        tabbed: { title: `x\t${"y".repeat(40)}\t${"z".repeat(40)}` },
+        coloured: { title: `${esc}[38:2::255:0:0m${"w".repeat(95)}${esc}[0m` },
+      },
+    });
+    const rows = [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+    ];
+    const width = 65;
+    // Node's own stripper stops at the colon, so the colour code is removed
+    // here before the picocolors codes are.
+    const sgr = new RegExp(`${esc}\\[[0-9;:]*m`, "g");
+    const raw = renderOverview(rows, { now: new Date(), width }).split("\n");
+    for (const line of raw) {
+      const visible = stripVTControlCharacters(line.replace(sgr, ""));
+      expect(visible).not.toContain("\t");
+      const fits = stringWidth(visible) <= width;
+      expect({ line: visible, fits }).toEqual({ line: visible, fits: true });
+    }
+  });
+
   it("never cuts below a column's floor: a very narrow width wraps instead", async () => {
     const { local } = await fixture();
     const now = new Date("2027-01-01T00:00:00Z");

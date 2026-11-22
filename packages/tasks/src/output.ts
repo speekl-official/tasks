@@ -103,13 +103,17 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+const ESC = String.fromCharCode(27);
+/** Every SGR sequence, the colon-separated forms (`38:2::r:g:b`) included. */
+const SGR_ALL = new RegExp(`${ESC}\\[[0-9;:]*m`, "g");
+
 /**
  * Display width of a cell in terminal columns, colour codes excluded: a
  * wide character counts two, a combining mark none, so a title in CJK or
  * emoji is measured as the terminal lays it out.
  */
 function visibleWidth(text: string): number {
-  return stringWidth(stripVTControlCharacters(text));
+  return stringWidth(stripVTControlCharacters(text.replace(SGR_ALL, "")));
 }
 
 /** Cuts fall between graphemes, never inside a surrogate pair or a sequence. */
@@ -135,9 +139,8 @@ function fitWidths(widths: number[], fit: Fit): void {
   }
 }
 
-const ESC = String.fromCharCode(27);
 /** Splits text into visible runs and the colour codes between them. */
-const ANSI_SPLIT = new RegExp(`(${ESC}\\[[0-9;]*m)`);
+const ANSI_SPLIT = new RegExp(`(${ESC}\\[[0-9;:]*m)`);
 
 /**
  * `text` cut to `width` visible characters with an ellipsis, colour codes
@@ -179,9 +182,14 @@ function cutVisible(text: string, width: number): string {
  * cells cut with an ellipsis; without one nothing is cut.
  */
 function aligned(
-  rows: ReadonlyArray<readonly string[] | string>,
+  input: ReadonlyArray<readonly string[] | string>,
   fit?: Fit,
 ): string {
+  // A tab in a cell would reach the next tab stop of the terminal, past any
+  // width this arithmetic knows; it shows as one space.
+  const rows = input.map((row) =>
+    typeof row === "string" ? row : row.map((cell) => cell.replace(/\t/g, " ")),
+  );
   const widths: number[] = [];
   for (const row of rows) {
     if (typeof row === "string") continue;
