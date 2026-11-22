@@ -236,8 +236,9 @@ dependent tasks over one task with a long checklist.
 Global options: `-C <dir>` (the tree of another checkout), `--as <actor>`,
 `--session <token>`. Every command that prints takes `--json`. `<task>` is a
 full path, an unambiguous suffix, or `alias:path` in a listed project. What a
-command does, and every flag with its values: `tasks <command> --help`, or the
-command table in `${CLAUDE_SKILL_DIR}/reference/commands.md`.
+command does and its main flags: the command table in
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; every option with its values:
+`tasks <command> --help`.
 
 - **Read:** `mine [--local]`;
   `ready [--scope <path>] [--all] [--local] [--priority <level>]`;
@@ -254,7 +255,8 @@ command table in `${CLAUDE_SKILL_DIR}/reference/commands.md`.
   `handoff <task> <actor> -m <text>`; `done <task> -m <text>`; `release <task>`.
 - **Shape the tree:**
   `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]`;
-  `move <source> <destination>` (rewrites every reference);
+  `move <source> <destination>` (rewrites the references here and in listed
+  trees; the rest come back as `unrewritten`);
   `dep add|rm <task> <ref>…`;
   `after add|rm <task> <ref>…`; `priority <task> urgent|high|normal|low`;
   `assign <task> <actor>` / `unassign <task>` (an assigned task holds its
@@ -328,11 +330,11 @@ decides whether to cancel it, drop the reference, or point it elsewhere.
 
 ## Deeper reference
 
-The command table — every command with its flags and what it does — is
-`${CLAUDE_SKILL_DIR}/reference/commands.md`; `tasks <command> --help` says the
-same for one command. For the file layout, the `task.md` fields and their
-canonical form, the workspace files, `config.yml`, the reference grammar, gate
-reasons, situations, validation kinds and the error shape, read
-`${CLAUDE_SKILL_DIR}/reference/convention.md`. Load either only when you need
-it: a flag you do not know, a file to hand-author, the configuration, a finding
-to interpret.
+The command table — every command, what it does and its main flags — is
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; `tasks <command> --help` lists
+every option of one command with its values. For the file layout, the
+`task.md` fields and their canonical form, the workspace files, `config.yml`,
+the reference grammar, gate reasons, situations, validation kinds and the error
+shape, read `${CLAUDE_SKILL_DIR}/reference/convention.md`. Load either only
+when you need it: a flag you do not know, a file to hand-author, the
+configuration, a finding to interpret.
