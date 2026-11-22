@@ -49,7 +49,9 @@ describe("log <task> <text>", () => {
 
     const result = await s.run("log", "a", "Found the cause: a stale cache.");
     expect(result.code).toBe(0);
-    expect(stripVTControlCharacters(result.stdout)).toContain("✓ log x/a:");
+    expect(stripVTControlCharacters(result.stdout)).toBe(
+      "✓ log x/a: Found the cause: a stale cache.\n",
+    );
 
     expect(await s.read(".tasks/x/a/task.md")).toBe(manifest);
     const entries = await readLog(path.join(s.tasksDir, "x", "a"));

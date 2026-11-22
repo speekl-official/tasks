@@ -10,6 +10,7 @@ import {
   transitionJson,
 } from "../core/transitions.js";
 import type { TransitionCommand } from "../core/types.js";
+import { compactAge } from "../core/time.js";
 import { TaskError } from "../errors.js";
 import {
   emitTaskJson,
@@ -286,9 +287,13 @@ const FIELD_COMMANDS: ReadonlySet<string> = new Set([
   "priority",
 ]);
 
+/** Whose claim the takeover ended; the token and the timestamp are in the log. */
 function supersededText(claim: SupersededClaim): string {
-  const session = claim.session === null ? "" : ` s:${claim.session}`;
-  return `superseded ${claim.claimant}${session} on ${claim.id} (${claim.liveness}, last seen ${claim.last_seen ?? "unknown"})`;
+  const seen =
+    claim.last_seen === null
+      ? claim.liveness
+      : `${claim.liveness}, last seen ${compactAge(claim.last_seen)} ago`;
+  return `superseded ${claim.claimant} on ${claim.id} (${seen})`;
 }
 
 function report(context: CommandContext, result: TransitionResult): void {

@@ -101,7 +101,9 @@ describe("defer cascade", () => {
     expect(await logTexts(sandbox, "epic/a")).toEqual([
       `defer with epic: IN_PROGRESS → BACKLOG\nsupersedes alice s:s1, last seen ${seen}\nparked`,
     ]);
-    expect(plain(result.stdout)).toContain("superseded alice s:s1 on epic/a");
+    expect(plain(result.stdout)).toMatch(
+      /superseded alice on epic\/a \(orphaned/,
+    );
   });
 
   it("refuses to reach a live claim, naming it; --force overrides", async () => {

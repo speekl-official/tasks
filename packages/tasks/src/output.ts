@@ -226,10 +226,13 @@ function shownId(d: DerivedTask, qualified: boolean | undefined): string {
 }
 
 /** The heading of a log entry, in the grammar `log.md` uses. */
+/**
+ * The heading of a listed entry: when and who. The session token stays in
+ * the file and in the JSON; a person reading a listing never needs it.
+ */
 function entryHeading(entry: LastEntryJson): string {
   const via = entry.via === null ? "" : ` via ${entry.via}`;
-  const session = entry.session === null ? "" : ` s:${entry.session}`;
-  return `${entry.time} ${entry.actor}${via}${session}`;
+  return `${entry.time} ${entry.actor}${via}`;
 }
 
 function blockedDetail(blocked: BlockedByJson): string {
@@ -441,14 +444,18 @@ export function renderTree(
  * long ago, dimmed; the entry's further lines follow as written. The
  * heading's timestamp and session token stay in the JSON and in `log`.
  */
-function entryLines(entry: LastEntryJson, now: Date): string[] {
+function entryLines(
+  entry: LastEntryJson,
+  now: Date,
+  indent = "    ",
+): string[] {
   const [first = "", ...rest] = entry.text.split("\n");
   const who =
     entry.via === null ? entry.actor : `${entry.actor} via ${entry.via}`;
   const stamp = pc.dim(`(${who}, ${compactAge(entry.time, now)})`);
   return [
-    `    ${first === "" ? stamp : `${first}  ${stamp}`}`,
-    ...(rest.length === 0 ? [] : indentLines(rest.join("\n"), "    ")),
+    `${indent}${first === "" ? stamp : `${first}  ${stamp}`}`,
+    ...(rest.length === 0 ? [] : indentLines(rest.join("\n"), indent)),
   ];
 }
 
@@ -765,11 +772,9 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
   const entry = d.derived.last_entry;
   if (entry !== null) {
     sections.push(
-      [
-        pc.bold("Last entry"),
-        `  ${pc.dim(entryHeading(entry))}`,
-        ...indentLines(entry.text, "  "),
-      ].join("\n"),
+      [pc.bold("Last entry"), ...entryLines(entry, new Date(), "  ")].join(
+        "\n",
+      ),
     );
   }
   return sections.join("\n\n");

@@ -89,13 +89,9 @@ async function appendNarrative(
     emitJson(entry);
     return;
   }
-  const via = entry.via === null ? "" : ` via ${entry.via}`;
-  const session = entry.session === null ? "" : ` s:${entry.session}`;
-  writeOut(
-    ui.success(
-      `log ${entry.task}: ${entry.time} ${entry.actor}${via}${session}`,
-    ),
-  );
+  // The confirmation repeats what was written, as `note` does; the heading
+  // the file got is for `tasks log <task>` and the JSON.
+  writeOut(ui.success(`log ${entry.task}: ${entry.text.split("\n")[0]}`));
 }
 
 /**

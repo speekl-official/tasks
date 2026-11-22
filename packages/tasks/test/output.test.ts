@@ -453,6 +453,11 @@ describe("renderResume", () => {
     ].map((words) => text.indexOf(words));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The entry reads as in `mine`: its text, then who and how long ago.
+    expect(text).toMatch(
+      /handoff alice: IN_PROGRESS → PAUSED {2}\(agent, \S+\)/,
+    );
+    expect(text).not.toContain("s:s0");
     expect(text).toMatch(/\.\.\/api-docs\s+absent here/);
     expect(text).not.toMatch(/docs\/engineering\s+absent here/);
   });
@@ -495,7 +500,8 @@ describe("renderLogEntries", () => {
         },
       ]),
     );
-    expect(text).toContain("2026-09-21T16:40:12Z agent s:s0  auth/x");
+    expect(text).toContain("2026-09-21T16:40:12Z agent  auth/x");
+    expect(text).not.toContain("s:s0");
     expect(text).toContain(
       "2026-09-22T08:02:41Z alice via agent  backend:api/y",
     );
