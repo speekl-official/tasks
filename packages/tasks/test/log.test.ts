@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -348,11 +350,44 @@ describe("log --since", () => {
     expect(empty.json<LogEntriesJson>()).toEqual({ count: 0, entries: [] });
   });
 
-  it("refuses a --since it cannot read", async () => {
+  it("refuses a --since it cannot read, after the tree and the usage checks as before", async () => {
     const { s } = await history();
     const result = await s.run("log", "--since", "yesterday", "--json");
     expect(result.code).toBe(2);
     expect(errorOf(result).details).toMatchObject({ since: "yesterday" });
+
+    // Text beside --since is the refusal 1.0.0 gave, bound unread.
+    const both = await s.run(
+      "log",
+      "a",
+      "text",
+      "--since",
+      "yesterday",
+      "--json",
+    );
+    expect(both.code).toBe(2);
+    expect(errorOf(both).details).toEqual({ task: "a", since: "yesterday" });
+
+    // --local belongs to the listing; a single task's read refuses it too.
+    const local = await s.run("log", "a", "--since", "1d", "--local", "--json");
+    expect(local.code).toBe(2);
+    expect(errorOf(local).details).toEqual({ task: "a", since: "1d" });
+
+    // Without a tree, the missing tree is reported first, as for every command.
+    const nowhere = await fs.mkdtemp(path.join(os.tmpdir(), "tasks-nowhere-"));
+    try {
+      const lost = await s.run(
+        "-C",
+        nowhere,
+        "log",
+        "--since",
+        "yesterday",
+        "--json",
+      );
+      expect(lost.code).toBe(3);
+    } finally {
+      await fs.rm(nowhere, { recursive: true, force: true });
+    }
   });
 });
 

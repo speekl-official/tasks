@@ -208,9 +208,11 @@ async function collectEntries(
 
 async function listSince(
   context: CommandContext,
-  filter: EntryFilter,
+  arg: string,
+  actor: string | null,
   options: LogOptions,
 ): Promise<void> {
+  const filter: EntryFilter = { since: parseSince(arg), actor };
   // A scope is a path of the local tree, so it keeps the listing to that
   // tree, as a scope keeps an overview.
   const scope =
@@ -281,44 +283,26 @@ export function logCommand(): Command {
         command: Command,
       ) => {
         const actor = options.actor ?? null;
-        if (options.since !== undefined) {
-          const since = parseSince(options.since);
-          if (task === undefined) {
-            await listSince(
-              await openContext(command),
-              { since, actor },
-              options,
-            );
-            return;
-          }
-          if (words.length > 0) {
+        if (task === undefined) {
+          if (options.since === undefined) {
             throw TaskError.usage(
-              "--since lists entries: drop the text to read the task's history since a time, or drop --since to append.",
-              { task, since: options.since },
+              'Name a task and the text to append (tasks log <task> "<text>"), or list entries with --since.',
             );
           }
-          if (options.scope !== undefined) {
-            throw TaskError.usage(
-              "--scope narrows a listing across the tree; a task's history is already one task's.",
-              { task, scope: options.scope },
-            );
-          }
-          await readTaskLog(
+          // The tree first, the bound after: a missing or v1 tree is reported
+          // as for every command, whatever the bound says.
+          await listSince(
             await openContext(command),
-            task,
-            options.archived === true,
-            { since, actor },
+            options.since,
+            actor,
+            options,
           );
           return;
-        }
-        if (task === undefined) {
-          throw TaskError.usage(
-            'Name a task and the text to append (tasks log <task> "<text>"), or list entries with --since.',
-          );
         }
         if (options.local === true) {
           throw TaskError.usage("--local applies to log --since only.", {
             task,
+            ...(options.since === undefined ? {} : { since: options.since }),
           });
         }
         if (options.scope !== undefined) {
@@ -326,6 +310,20 @@ export function logCommand(): Command {
             task,
             scope: options.scope,
           });
+        }
+        if (options.since !== undefined) {
+          if (words.length > 0) {
+            throw TaskError.usage(
+              "--since lists entries: drop the text to read the task's history since a time, or drop --since to append.",
+              { task, since: options.since },
+            );
+          }
+          const context = await openContext(command);
+          await readTaskLog(context, task, options.archived === true, {
+            since: parseSince(options.since),
+            actor,
+          });
+          return;
         }
         if (words.length === 0) {
           await readTaskLog(
