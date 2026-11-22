@@ -30,8 +30,21 @@ const SUBCOMMANDS: Record<HookEvent, string> = {
   SessionEnd: "session-end",
 };
 
-const SESSION_START_NOTE =
-  "Your tasks (tasks mine --json). Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.";
+/**
+ * The keys of each task the SessionStart hook prints: what the entry
+ * decision reads. A task's details come with `resume`, so the hook, which
+ * runs on every start, resume, clear and compaction, stays small.
+ */
+export const SESSION_START_FIELDS = [
+  "id",
+  "title",
+  "yours",
+  "situation",
+  "liveness",
+  "effective_priority",
+].join(",");
+
+const SESSION_START_NOTE = `Your tasks (tasks mine --json --fields ${SESSION_START_FIELDS}), the entry step: do not run mine again. Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.`;
 
 const STOP_NOTE =
   "A claimed task has no state.md. Write its resume point (tasks state <task>), or pause, hand off or finish it, before ending the turn:";
@@ -50,7 +63,7 @@ function hookCommands(actor: string): Record<HookEvent, string> {
     SessionStart: [
       "sid=$(jq -r .session_id)",
       String.raw`[ -n "$CLAUDE_ENV_FILE" ] && printf 'export TASKS_SESSION=%s\nexport ${env}\n' "$sid" >> "$CLAUDE_ENV_FILE"`,
-      String.raw`mine=$(${env} tasks mine --json --session "$sid" 2>/dev/null) && printf '${SESSION_START_NOTE}\n%s\n' "$mine"`,
+      String.raw`mine=$(${env} tasks mine --json --fields ${SESSION_START_FIELDS} --session "$sid" 2>/dev/null) && printf '${SESSION_START_NOTE}\n%s\n' "$mine"`,
       "exit 0",
     ].join("; "),
     PostToolUse: [

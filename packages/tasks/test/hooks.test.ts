@@ -6,6 +6,8 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { HooksInstallJson } from "../src/commands/hooks.js";
+import { SESSION_START_FIELDS } from "../src/core/hooks.js";
+import { TASK_OBJECT_KEYS } from "../src/core/types.js";
 import { ExitCode } from "../src/errors.js";
 import type { CliResult, Sandbox } from "./helpers.js";
 import { makeSandbox, treeSandbox } from "./helpers.js";
@@ -110,6 +112,24 @@ describe("hooks install", () => {
     const text = await guideText();
     expect(await settings(sandbox)).toEqual(JSON.parse(text));
     expect(await sandbox.read(SETTINGS)).toBe(`${text}\n`);
+  });
+
+  it("prints on SessionStart keys mine accepts, so the hook never goes silent", async () => {
+    // A name `--fields` refuses makes `mine` exit 2, and the hook prints nothing.
+    const [entry] = await documented("SessionStart");
+    const fields = /--fields (\S+)/.exec(entry!.hooks[0]!.command)?.at(1);
+    expect(fields).toBe(SESSION_START_FIELDS);
+    for (const field of SESSION_START_FIELDS.split(",")) {
+      expect(TASK_OBJECT_KEYS).toContain(field);
+    }
+    sandbox = await treeSandbox({});
+    const result = await sandbox.run(
+      "mine",
+      "--json",
+      "--fields",
+      SESSION_START_FIELDS,
+    );
+    expect(result.code).toBe(ExitCode.Success);
   });
 
   it("creates .claude/settings.json with the four events, and says so", async () => {

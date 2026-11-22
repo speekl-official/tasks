@@ -53,7 +53,7 @@ reaches the main checkout's tree by discovery, so the heartbeat, the end-of-turn
         "hooks": [
           {
             "type": "command",
-            "command": "sid=$(jq -r .session_id); [ -n \"$CLAUDE_ENV_FILE\" ] && printf 'export TASKS_SESSION=%s\\nexport TASKS_ACTOR=agent\\n' \"$sid\" >> \"$CLAUDE_ENV_FILE\"; mine=$(TASKS_ACTOR=agent tasks mine --json --session \"$sid\" 2>/dev/null) && printf 'Your tasks (tasks mine --json). Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.\\n%s\\n' \"$mine\"; exit 0"
+            "command": "sid=$(jq -r .session_id); [ -n \"$CLAUDE_ENV_FILE\" ] && printf 'export TASKS_SESSION=%s\\nexport TASKS_ACTOR=agent\\n' \"$sid\" >> \"$CLAUDE_ENV_FILE\"; mine=$(TASKS_ACTOR=agent tasks mine --json --fields id,title,yours,situation,liveness,effective_priority --session \"$sid\" 2>/dev/null) && printf 'Your tasks (tasks mine --json --fields id,title,yours,situation,liveness,effective_priority), the entry step: do not run mine again. Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.\\n%s\\n' \"$mine\"; exit 0"
           }
         ]
       }
@@ -114,10 +114,14 @@ export TASKS_ACTOR=agent
 ```
 
 So the agent passes no `--session`: every `tasks` command it runs carries the token.
-Then it prints `tasks mine --json`, and a SessionStart hook's standard output becomes
-context the agent sees before the first prompt: the tasks claimed by this actor, with the
-instruction to resume them, and the tasks merely assigned to it as its inbox. Without a
-`.tasks/` tree it prints nothing.
+Then it prints `tasks mine --json`, trimmed with `--fields` to the keys the entry decision
+reads (`id`, `title`, `yours`, `situation`, `liveness`, `effective_priority`), and a
+SessionStart hook's standard output becomes context the agent sees before the first
+prompt: the tasks claimed by this actor, with the instruction to resume them and not to
+run `mine` again, and the tasks merely assigned to it as its inbox. The entry's `mine` is
+thus run once, by the hook, and what it prints stays small on every start, resume, clear
+and compaction; a task's details, its last log entry included, come with `resume`.
+Without a `.tasks/` tree it prints nothing.
 
 Whether a resumed session keeps its id does not matter: the hook runs on resume too and
 exports what it is given, and a later line in the file overrides an earlier one.

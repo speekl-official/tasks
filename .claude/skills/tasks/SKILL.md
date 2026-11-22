@@ -22,8 +22,13 @@ through `tasks state`; `log.md` is appended by the CLI.
 
 ## Before anything else
 
+With the harness hooks your tasks are already in your context, headed `Your
+tasks`: the hook ran the entry's `mine` when the session started, and runs it
+again after a resume, a clear or a compaction. **Do not run it again.** Without
+the hooks — nothing headed `Your tasks` in your context — run it yourself:
+
 ```sh
-tasks mine --json
+tasks mine --json --fields id,title,yours,situation,liveness,effective_priority
 ```
 
 - Exit `3`, no `.tasks/` found: the project is not set up. **Ask before running
@@ -68,7 +73,7 @@ again. Subagents use the same name and token.
 
 ## Entry
 
-1. **`tasks mine`**, first. In this order: a task claimed by this session —
+1. **Your tasks** (`mine`, above), first. In this order: a task claimed by this session —
    continue it; then, among the tasks claimed by you in older sessions that are
    now `orphaned` and the tasks assigned to you (your inbox), the one with the
    highest effective priority — at equal priority finish your orphan before

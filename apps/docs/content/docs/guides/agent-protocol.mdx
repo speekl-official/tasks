@@ -68,16 +68,20 @@ command; a `state` write counts.
 
 <Step>
 
-### Run `tasks mine`
+### Your tasks: `tasks mine`, once
+
+With the [harness hooks](/docs/guides/harness) this step is done before your first
+prompt: the SessionStart hook prints `mine`, trimmed to the keys the decision below reads,
+headed `Your tasks`. Do not run it again. Without the hooks, run it yourself:
 
 ```sh
-tasks mine --json
+tasks mine --json --fields id,title,yours,situation,liveness,effective_priority
 ```
 
 It lists your claims first — this session's, then older ones — and then the tasks merely
-assigned to you — your inbox — each with its last log entry, its last activity. What was left
-for you is in the task's files: `## Notes` of `task.md`, `design.md`, `state.md`; `resume`
-shows them.
+assigned to you — your inbox. What was left for you is in the task's files: `## Notes` of
+`task.md`, `design.md`, `state.md`; `resume` shows them, and the task's last log entry,
+its last activity.
 
 - **Continue** a task claimed by this session (`yours: "this-session"`).
 - **Then the highest effective priority** among your orphaned claims (`yours:
