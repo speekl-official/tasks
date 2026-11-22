@@ -823,6 +823,17 @@ describe("show", () => {
     });
   });
 
+  it("prints an archived task's references as the command line takes them", async () => {
+    sandbox = await treeSandbox({
+      tasks: {},
+      archived: { old: { status: "CANCELLED", depends_on: ["../backend:x"] } },
+    });
+    await sandbox.project("backend", "../backend", { tasks: { x: {} } });
+    const out = plain((await sandbox.run("show", "old", "--archived")).stdout);
+    expect(out).toMatch(/depends on\s+backend:x/);
+    expect(out).not.toContain("../backend:x");
+  });
+
   it("prints the stored status beside the situation", async () => {
     sandbox = await treeSandbox({
       tasks: { a: { status: "PAUSED", state: true, depends_on: ["b"] }, b: {} },

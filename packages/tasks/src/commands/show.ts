@@ -34,11 +34,26 @@ async function deriveArchived(
   task: Task,
 ): Promise<DerivedTask> {
   const lastEntry = await lastLogEntry(task.dir);
+  // Resolved for display alone: nothing gates an archived task, but its
+  // references read as the command line names them, as a live task's do.
+  const { depends_on, finishes_after } = task.frontmatter;
+  const start = {
+    satisfied: true,
+    refs: await context.gates.resolveRefs(load, depends_on),
+  };
+  const finish = {
+    satisfied: true,
+    open_children: [],
+    refs: await context.gates.resolveRefs(load, finishes_after),
+  };
   const tasks: SnapshotTask[] = load.tree.archived.map((entry) => ({
     task: entry,
     project: load.alias,
-    start: { satisfied: true, refs: [] },
-    finish: { satisfied: true, open_children: [], refs: [] },
+    start: entry.id === task.id ? start : { satisfied: true, refs: [] },
+    finish:
+      entry.id === task.id
+        ? finish
+        : { satisfied: true, open_children: [], refs: [] },
     liveness: null,
     lastEntry: entry.id === task.id ? lastEntry : null,
   }));
