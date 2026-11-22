@@ -346,7 +346,9 @@ function deriveTask(
  * are `orphaned` or held `elsewhere` (another live session, or a liveness
  * nobody here can judge); an open task assigned to the viewer and not
  * claimed by them is `inbox`. Null otherwise, for a resolved task, and for
- * the actor-independent view.
+ * the actor-independent view. A claim recorded on an open task that is not
+ * `IN_PROGRESS` is a manifest validation reports; it stays the viewer's, as
+ * `elsewhere`, so `mine` keeps showing it and nothing invites resuming it.
  */
 function yoursOf(
   fm: Frontmatter,
@@ -355,7 +357,8 @@ function yoursOf(
   session: string | null,
 ): Yours | null {
   if (actor === null) return null;
-  if (fm.status === "IN_PROGRESS" && fm.claimed_by === actor) {
+  if (fm.claimed_by === actor && isOpen(fm.status)) {
+    if (fm.status !== "IN_PROGRESS") return "elsewhere";
     if (fm.claimed_session === session) return "this-session";
     return liveness === "orphaned" ? "orphaned" : "elsewhere";
   }

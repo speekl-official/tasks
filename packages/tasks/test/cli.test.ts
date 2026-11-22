@@ -1390,6 +1390,21 @@ describe("mine", () => {
     ]);
   });
 
+  it("keeps an open task whose stale claim names the actor, as elsewhere", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        stale: { status: "TODO", claimed_by: "tester" },
+        theirs: { status: "TODO", claimed_by: "alice" },
+      },
+    });
+    const json = collection(await sandbox.session("s1")("mine", "--json"));
+    expect(json.tasks.map((task) => [task.id, task.yours])).toEqual([
+      ["stale", "elsewhere"],
+    ]);
+    const shown = await sandbox.run("show", "stale", "--json");
+    expect(shown.json<ShowJson>().yours).toBe("elsewhere");
+  });
+
   it("carries yours on every reporting command, so ready names the inbox", async () => {
     sandbox = await treeSandbox(MINE_TREE);
     const ready = collection(await sandbox.session("s1")("ready", "--json"));

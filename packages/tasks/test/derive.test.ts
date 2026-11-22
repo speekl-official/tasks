@@ -626,6 +626,9 @@ describe("yours", () => {
       elsewhere: { status: "IN_PROGRESS", claimed_session: "s0", state: true },
       gone: { status: "IN_PROGRESS", claimed_session: "s9", state: true },
       terminal: { status: "IN_PROGRESS", state: true },
+      // A claim left on a task that is not in progress: inconsistent, and
+      // still the actor's.
+      stale: { status: "TODO", claimed_by: "tester" },
       inbox: { assignee: "tester" },
       handoff: { status: "PAUSED", assignee: "tester", state: true },
       "assigned-done": { status: "DONE", assignee: "tester" },
@@ -661,6 +664,7 @@ describe("yours", () => {
       gone: "orphaned",
       // A claim without a token is nobody's session: unknown liveness.
       terminal: "elsewhere",
+      stale: "elsewhere",
       inbox: "inbox",
       handoff: "inbox",
       "assigned-done": null,
