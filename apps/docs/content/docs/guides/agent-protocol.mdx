@@ -96,9 +96,11 @@ left for you is in the task's files: `## Notes` of `task.md`, `design.md`, `stat
   "orphaned"`, from an older session of yours) and your inbox (`yours: "inbox"`); at equal priority finish
   your orphan before starting inbox work, and a person's instruction — in the conversation,
   under `## Notes`, or in a candidate's last entry (an `assign -m`, a `note`) — names what
-  comes first: read the candidates' `last_entry` before choosing or claiming, and preserve
-  input the work needs under `## Notes` with `tasks note` before the claim, which writes a
-  new last entry. **Take over** an orphan with an ordinary
+  comes first: read the candidates' `last_entry` before choosing, and claim the task an
+  instruction names by id (`claim --next` takes the first ready task instead). An
+  `assign -m` message lives only in the log, where the claim, or any later entry, displaces
+  it: copy what the work needs under `## Notes` with `tasks note` before the claim; a
+  `note` is there already. **Take over** an orphan with an ordinary
   `tasks claim <task>`, which records the takeover: one at a time, only what you will work
   on now; the others stay orphaned, which is no breakage.
 - Your claim in another **live** session (`yours: "elsewhere"`) stays there.

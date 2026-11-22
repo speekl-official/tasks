@@ -86,9 +86,12 @@ again. Subagents use the same name and token.
    highest effective priority — at equal priority finish your orphan before
    starting inbox work — unless a person's instruction names what comes first:
    in the conversation, under `## Notes`, or in a candidate's `last_entry` (an
-   `assign -m`, a `note`), so read the candidates' last entries before choosing
-   or claiming, and put input the work needs under `## Notes` (`tasks note`)
-   before the claim, which writes a new last entry; only then new work. Take over an
+   `assign -m`, a `note`), so read the candidates' last entries before choosing,
+   and claim the task an instruction names by id (`--next` takes the first
+   ready task instead); only then new work. An `assign -m` message lives only
+   in the log, where the claim, or any later entry, displaces it: copy what the
+   work needs under `## Notes` (`tasks note`) before the claim; a `note` is
+   there already. Take over an
    orphan with an ordinary `tasks claim <task>`, one at a time, and only what
    you will work on now: the others stay orphaned, which is no breakage. A task
    held by another **live** session is not yours. A claim of **unknown**
