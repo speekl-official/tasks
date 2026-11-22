@@ -400,7 +400,12 @@ export async function claimNext(
   for (let round = 0; round < NEXT_ROUNDS; round += 1) {
     if (round > 0) await reloadAll(context, local);
     const owners = new Map<DerivedTask, LoadedTree>();
-    for (const view of await snapshotAll(source, actor, { local, session })) {
+    const now = new Date();
+    for (const view of await snapshotAll(source, actor, {
+      local,
+      session,
+      now,
+    })) {
       for (const derived of view.derived.values()) {
         owners.set(derived, view.load);
       }

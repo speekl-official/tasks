@@ -67,15 +67,18 @@ export async function snapshotTree(
 export async function snapshotAll(
   source: SnapshotSource,
   actor: string | null,
-  options: { local?: boolean; session?: string | null } = {},
+  options: { local?: boolean; session?: string | null; now?: Date } = {},
 ): Promise<TreeDerivation[]> {
+  // One instant for every tree: a claim at the timeout's edge is live or
+  // orphaned in all of them alike, not live here and orphaned there.
+  const now = options.now ?? new Date();
   const loads = options.local
     ? [source.projects.local]
     : await source.projects.writableTrees();
   const result: TreeDerivation[] = [];
   for (const load of loads) {
     result.push(
-      await snapshotTree(source, load, actor, options.session ?? null),
+      await snapshotTree(source, load, actor, options.session ?? null, now),
     );
   }
   return result;

@@ -85,6 +85,40 @@ describe("snapshotAll", () => {
     const local = await snapshotAll(await source(), "agent", { local: true });
     expect(local.map((d) => d.load.alias)).toEqual([null]);
   });
+
+  it("judges liveness in every tree at one instant", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        a: {
+          status: "IN_PROGRESS",
+          claimed_by: "agent",
+          claimed_session: "s1",
+        },
+      },
+      projects: { backend: "../backend" },
+    });
+    await sandbox.project("backend", "../backend", {
+      tasks: {
+        x: {
+          status: "IN_PROGRESS",
+          claimed_by: "agent",
+          claimed_session: "s1",
+        },
+      },
+    });
+    await sandbox.write(".tasks/.locks/sessions/s1", "");
+    await sandbox.write("../backend/.tasks/.locks/sessions/s1", "");
+    const liveness = async (now: Date) =>
+      (await snapshotAll(await source(), "agent", { now })).map(
+        (view) => [...view.derived.values()][0]!.derived.liveness,
+      );
+    expect(await liveness(new Date())).toEqual(["live", "live"]);
+    // Well past the timeout, both trees agree the other way.
+    expect(await liveness(new Date(Date.now() + 10 * 60 * 60 * 1000))).toEqual([
+      "orphaned",
+      "orphaned",
+    ]);
+  });
 });
 
 describe("refreshIndexFor", () => {
