@@ -25,7 +25,7 @@ export function treeCommand(): Command {
     depthOptions(
       scopeOptions(
         new Command("tree").description(
-          "open tasks nested by containment, siblings in id order or by a time (--sort), with finishes_after joins under their task; JSON is the flat list; spans the listed projects",
+          "open tasks nested by containment, siblings sharing a group or a project under one line naming it, in id order or by a time (--sort), with finishes_after joins under their task; JSON is the flat list; spans the listed projects",
         ),
       ),
     ),

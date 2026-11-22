@@ -1873,6 +1873,36 @@ describe("tree", () => {
     );
     expect(resolved.tasks.map((task) => task.id)).toContain("epic/b");
   });
+
+  it("gathers siblings under the group or project they share; groups are no level and the JSON has no such line", async () => {
+    sandbox = await treeSandbox({
+      tasks: { "ops/a": {}, "ops/b": {}, "platform/ci": {}, solo: {} },
+    });
+    await sandbox.project("backend", "../backend", { tasks: { k: {}, m: {} } });
+    const lines = plain((await sandbox.run("tree")).stdout).split("\n");
+    expect(lines.slice(0, 9)).toEqual([
+      expect.stringMatching(/^TASK\s+SITUATION/),
+      "ops/",
+      expect.stringMatching(/^ {2}a\s+ready/),
+      expect.stringMatching(/^ {2}b\s+ready/),
+      expect.stringMatching(/^platform\/ci\s+ready/),
+      expect.stringMatching(/^solo\s+ready/),
+      "backend:",
+      expect.stringMatching(/^ {2}k\s+ready/),
+      expect.stringMatching(/^ {2}m\s+ready/),
+    ]);
+    expect(plain((await sandbox.run("tree", "--top")).stdout)).toContain(
+      "\nops/\n  a ",
+    );
+    expect(ids(await sandbox.run("tree", "--top", "--json"))).toEqual([
+      "ops/a",
+      "ops/b",
+      "platform/ci",
+      "solo",
+      "backend:k",
+      "backend:m",
+    ]);
+  });
 });
 
 describe("time in overviews", () => {

@@ -330,18 +330,26 @@ tasks tree [--scope <path>] [--all] [--local] [--depth <n> | --top] [--resolved]
 ```
 
 Open tasks nested by containment, with each task's `finishes_after` joins listed under
-it (`↳ after search (not-done)`), tagged with their project. `--resolved` includes done
-and cancelled tasks, so an open parent keeps its finished children beneath it. `--depth <n>`
-and `--top` work as for `list`: `tasks tree --top` is the top level alone, and
-`tasks tree --scope auth-rework --depth 2` the epic with its direct children. `--sort created`
-or `--sort updated` orders siblings by that timestamp, newest first, `--reverse` oldest first,
-the nesting unchanged; the UPDATED column is as for `list`, and CREATED joins it under
-`--sort created`. The JSON is the same flat collection as `list`: every task carries `parent`.
+it (`↳ after search (not-done)`), tagged with their project. Two or more siblings that share
+a group directory or a project alias are gathered under one dimmed line naming it (`ops/`,
+`backend:`), each named by the path below it, as `index.md` lists a group; a prefix only one
+of them shows stays on its line (`platform/ci-pipeline`), as a file browser compacts a folder
+with a single entry. `--resolved` includes done and cancelled tasks, so an open parent keeps
+its finished children beneath it. `--depth <n>` and `--top` work as for `list`:
+`tasks tree --top` is the top level alone, and `tasks tree --scope auth-rework --depth 2` the
+epic with its direct children; a group is not a level. `--sort created` or `--sort updated`
+orders siblings by that timestamp, newest first, `--reverse` oldest first, the nesting
+unchanged and a group line standing where its first task sorts; the UPDATED column is as for
+`list`, and CREATED joins it under `--sort created`. The JSON is the same flat collection as
+`list`: every task carries `parent`, and no line stands for a group.
 
 ```txt
 TASK               SITUATION          UPDATED  PRIORITY          LABELS          TITLE
 auth-rework        open 1/2           3h                         active          Rework authentication
   wire-refresh     working by agent   3h                         live            Wire the refresh endpoint
+ops/
+  renew-certs      ready              1d                                         Renew the TLS certificates
+  rotate-keys      assigned alice     3d                                         Rotate the signing keys
 release            backlog            2w       urgent            assigned alice  Release 2.0
   ↳ after search (not-done)
 search             open 0/3           5d       high                              Full-text search

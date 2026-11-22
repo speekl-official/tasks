@@ -32,6 +32,7 @@ import {
   renderShow,
   renderTransitionResult,
   renderTree,
+  treeSequence,
   renderValidation,
 } from "../src/output.js";
 import type { Sandbox } from "./helpers.js";
@@ -395,6 +396,102 @@ describe("renderTree", () => {
     }
     expect(lines.some((line) => line.endsWith("…"))).toBe(true);
     expect(lines).toContain("  ↳ after backend:api/tokens (not-done)");
+  });
+
+  /** Groups of two, a group of one, a group inside a task, two projects. */
+  async function grouped(): Promise<DerivedTask[]> {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: {},
+        "epic/phase/x": {},
+        "epic/phase/y": {},
+        "infra/db/reindex": {},
+        "infra/db/vacuum": {},
+        "ops/a": {},
+        "ops/b": {},
+        "platform/ci": {},
+        solo: {},
+      },
+    });
+    const api = await sandbox.project("api", "../api", {
+      tasks: { k: {}, m: {} },
+    });
+    const web = await sandbox.project("web", "../web", {
+      tasks: { one: {} },
+    });
+    const foreign = async (root: string, alias: string) =>
+      deriveTree(
+        snapshotOf(
+          await loadTree({ root, tasksDir: path.join(root, TASKS_DIRNAME) }),
+          alias,
+        ),
+        "tester",
+      );
+    return [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+      ...(await foreign(api, "api")).values(),
+      ...(await foreign(web, "web")).values(),
+    ];
+  }
+
+  it("gathers siblings under the group or project they share, a prefix one shows alone left on its line", async () => {
+    const lines = plain(renderTree(await grouped(), { project: true })).split(
+      "\n",
+    );
+    expect(lines).toEqual([
+      expect.stringMatching(/^TASK\s+SITUATION/),
+      expect.stringMatching(/^epic\s+open 0\/2/),
+      "  phase/",
+      expect.stringMatching(/^ {4}x\s+ready/),
+      expect.stringMatching(/^ {4}y\s+ready/),
+      "infra/db/",
+      expect.stringMatching(/^ {2}reindex\s+ready/),
+      expect.stringMatching(/^ {2}vacuum\s+ready/),
+      "ops/",
+      expect.stringMatching(/^ {2}a\s+ready/),
+      expect.stringMatching(/^ {2}b\s+ready/),
+      expect.stringMatching(/^platform\/ci\s+ready/),
+      expect.stringMatching(/^solo\s+ready/),
+      "api:",
+      expect.stringMatching(/^ {2}k\s+ready/),
+      expect.stringMatching(/^ {2}m\s+ready/),
+      expect.stringMatching(/^web:one\s+ready/),
+    ]);
+  });
+
+  it("places a shared line where its first member sorts; the JSON sequence has no such line", async () => {
+    const rows = await grouped();
+    const order = (a: DerivedTask, b: DerivedTask) =>
+      b.snapshot.task.id.localeCompare(a.snapshot.task.id);
+    const lines = plain(renderTree(rows, { project: true, order })).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(at(/^solo /)).toBeLessThan(at(/^platform\/ci /));
+    expect(at(/^platform\/ci /)).toBeLessThan(at(/^ops\/$/));
+    expect(at(/^ops\/$/)).toBeLessThan(at(/^ {2}b /));
+    expect(at(/^ {2}b /)).toBeLessThan(at(/^ {2}a /));
+    expect(at(/^ {2}a /)).toBeLessThan(at(/^infra\/db\/$/));
+    expect(at(/^epic /)).toBeLessThan(at(/^ {2}phase\/$/));
+    expect(at(/^ {2}phase\/$/)).toBeLessThan(at(/^ {4}y /));
+    expect(at(/^api:$/)).toBeLessThan(at(/^ {2}m /));
+    expect(
+      treeSequence(rows, { project: true, order }).map((d) => d.json.id),
+    ).toEqual([
+      "solo",
+      "platform/ci",
+      "ops/b",
+      "ops/a",
+      "infra/db/vacuum",
+      "infra/db/reindex",
+      "epic",
+      "epic/phase/y",
+      "epic/phase/x",
+      "api:m",
+      "api:k",
+      "web:one",
+    ]);
   });
 });
 

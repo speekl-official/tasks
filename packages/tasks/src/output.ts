@@ -383,15 +383,11 @@ function finishesAfterLines(d: DerivedTask, indent: string): string[] {
 }
 
 /**
- * `tree`: the rows nested by containment. A task nests under its nearest
- * ancestor that is itself among the rows and is named by the path below it,
- * so a filtered or scoped tree still reads correctly; `finishes_after`
- * entries follow their task.
- */
-/**
- * The rows nested by containment, in display order: the local tree first,
- * projects as the rows first name them, siblings by `order` (ids by default)
- * at every level.
+ * `tree`: the rows nested by containment, in display order. A task nests
+ * under its nearest ancestor that is itself among the rows and is named by
+ * the path below it, so a filtered or scoped tree still reads correctly;
+ * the local tree comes first, then projects as the rows first name them,
+ * siblings by `order` (ids by default) at every level.
  */
 function nestRows(rows: DerivedTask[], options: OverviewOptions): TreeNode[] {
   const shown = new Map(rows.map((d) => [d.json.id, d]));
@@ -461,6 +457,103 @@ export function treeSequence(
   return out;
 }
 
+/**
+ * A line of the human tree: a task, named below the line above it, or the
+ * group directory or project alias that two or more siblings share, named
+ * once above them. The JSON knows no such line; `treeSequence` walks the
+ * nesting itself.
+ */
+interface TreeLine {
+  name: string;
+  task: TreeNode | null;
+  children: TreeLine[];
+}
+
+interface Folding {
+  node: TreeNode;
+  /** The segments of the name still to show: the alias with its colon first. */
+  segments: string[];
+}
+
+/** The project alias with its colon, then the path, segment by segment. */
+function nameSegments(name: string): string[] {
+  const colon = name.indexOf(":");
+  if (colon === -1) return name.split("/");
+  return [name.slice(0, colon + 1), ...name.slice(colon + 1).split("/")];
+}
+
+function joinSegments(segments: string[]): string {
+  const [first = "", ...rest] = segments;
+  return first.endsWith(":") ? `${first}${rest.join("/")}` : segments.join("/");
+}
+
+function foldingOf(node: TreeNode): Folding {
+  return { node, segments: nameSegments(node.name) };
+}
+
+type Slot =
+  | { kind: "one"; entry: Folding }
+  | { kind: "shared"; key: string; members: Folding[] };
+
+/**
+ * Siblings that share a leading group directory or project alias gather
+ * under one line naming it, as `index.md` lists a group, when two or more
+ * of them are shown; the line takes the place of the first of them, so a
+ * sort still reads top-down, and it swallows the next segment while every
+ * member shares that too (`ops/db/`, `api:webhooks/`). A prefix one sibling
+ * shows alone stays on its line, as a file browser compacts a folder with
+ * a single entry.
+ */
+function foldSiblings(entries: Folding[]): TreeLine[] {
+  const slots: Slot[] = [];
+  const shared = new Map<string, Folding[]>();
+  for (const entry of entries) {
+    const key = entry.segments.length > 1 ? entry.segments[0]! : null;
+    const members = key === null ? undefined : shared.get(key);
+    if (key === null) {
+      slots.push({ kind: "one", entry });
+    } else if (members === undefined) {
+      const list = [entry];
+      shared.set(key, list);
+      slots.push({ kind: "shared", key, members: list });
+    } else {
+      members.push(entry);
+    }
+  }
+  return slots.map((slot) =>
+    slot.kind === "one"
+      ? taskLine(slot.entry)
+      : slot.members.length === 1
+        ? taskLine(slot.members[0]!)
+        : headingLine(slot.key, slot.members),
+  );
+}
+
+function taskLine(entry: Folding): TreeLine {
+  return {
+    name: joinSegments(entry.segments),
+    task: entry.node,
+    children: foldSiblings(entry.node.children.map(foldingOf)),
+  };
+}
+
+function headingLine(key: string, members: Folding[]): TreeLine {
+  const heading = [key];
+  let rest = members.map((m) => ({ ...m, segments: m.segments.slice(1) }));
+  while (
+    rest.every((m) => m.segments.length > 1) &&
+    new Set(rest.map((m) => m.segments[0])).size === 1
+  ) {
+    heading.push(rest[0]!.segments[0]!);
+    rest = rest.map((m) => ({ ...m, segments: m.segments.slice(1) }));
+  }
+  return {
+    name: heading.map((s) => (s.endsWith(":") ? s : `${s}/`)).join(""),
+    task: null,
+    children: foldSiblings(rest),
+  };
+}
+
 export function renderTree(
   rows: DerivedTask[],
   options: OverviewOptions = {},
@@ -477,22 +570,28 @@ export function renderTree(
     "TITLE",
   ];
   const lines: Array<string[] | string> = [headingRow(head)];
-  const walk = (list: TreeNode[], depth: number) => {
+  const walk = (list: TreeLine[], depth: number) => {
     const indent = "  ".repeat(depth);
-    for (const node of list) {
-      lines.push([
-        `${indent}${node.name}`,
-        situationCell(node.d),
-        ...timeCells(node.d, options),
-        priorityCell(node.d),
-        labels(node.d, now).join(" · "),
-        node.d.snapshot.task.title,
-      ]);
-      lines.push(...finishesAfterLines(node.d, `${indent}  `));
-      walk(node.children, depth + 1);
+    for (const line of list) {
+      if (line.task === null) {
+        // A group or project line: the name alone, dimmed, nothing beside it.
+        lines.push([`${indent}${pc.dim(line.name)}`]);
+      } else {
+        const { d } = line.task;
+        lines.push([
+          `${indent}${line.name}`,
+          situationCell(d),
+          ...timeCells(d, options),
+          priorityCell(d),
+          labels(d, now).join(" · "),
+          d.snapshot.task.title,
+        ]);
+        lines.push(...finishesAfterLines(d, `${indent}  `));
+      }
+      walk(line.children, depth + 1);
     }
   };
-  walk(roots, 0);
+  walk(foldSiblings(roots.map(foldingOf)), 0);
   return aligned(lines, fitFor(head, options));
 }
 
