@@ -130,9 +130,10 @@ again. Subagents use the same name and token.
 
 ## During work
 
-- **Never hand-edit frontmatter**; every field has a command — a key of the
-  project's own (`custom_fields`) is the exception, edited by hand only on the
-  project's instructions. **Never `mv`** a task directory; use `tasks move`.
+- **The convention's frontmatter fields change only through the CLI**; every
+  field has a command. A key of the project's own (`custom_fields`) is edited
+  by hand only on the project's explicit instructions. **Never `mv`** a task
+  directory; use `tasks move`.
 - Write `state.md` through **`tasks state <task> < file`** (or a heredoc), so
   the write is fenced like a transition. Recommended sections: **Done** (with
   the commits that carry it), **Verified**, **Open**, **Next**. Keep it a short
@@ -329,8 +330,10 @@ someone else was first, or a person decided — re-read with `tasks resume`.
 | `cascade-claim`                    | A live claim beneath that is not yours: wait, or ask the person.                 |
 | `resolved-ancestor`                | The parent is resolved: `tasks reopen <parent> -m` first, or model it elsewhere. |
 
-Never `--force` on your own initiative, never hand-edit frontmatter, never `mv`
-a task directory. A task shown `blocked by X (cancelled)` is stranded: a person
+Never `--force` on your own initiative, never change the convention's
+frontmatter fields except through the CLI (a project's own key only on its
+explicit instructions), never `mv` a task directory. A task shown
+`blocked by X (cancelled)` is stranded: a person
 decides whether to cancel it, drop the reference, or point it elsewhere.
 
 ## Deeper reference

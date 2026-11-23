@@ -60,7 +60,9 @@ everyone else and may be taken over.
 
 ## During work
 
-- Never hand-edit frontmatter; every field has a command. Never move a task directory by hand.
+- The frontmatter fields this specification defines change only through the CLI; every field has
+  a command. A key of the project's own ([Task file](/docs/spec/task-file#serialization)) is edited by hand only on the
+  project's explicit instructions. Never move a task directory by hand.
 - `state.md` is written through `state` wherever the implementation offers it, so the write is
   fenced like a transition; only without that command is the file written directly.
 - A clarification of the statement changes `Description` / `Acceptance criteria`; an input

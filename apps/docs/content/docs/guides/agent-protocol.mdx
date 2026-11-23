@@ -171,8 +171,10 @@ out. Say so once in your report and go on.
 
 ## During work
 
-- **Never hand-edit frontmatter.** Every field has a command. The body below it is
-  yours; edit it with ordinary file tools.
+- **The convention's frontmatter fields change only through the CLI.** Every field has
+  a command; a key of the project's own (`custom_fields`) is edited by hand only on the
+  project's explicit instructions. The body below the frontmatter is yours; edit it with
+  ordinary file tools.
 - **Never move a task directory by hand.** Its id is its path; use `tasks move`, which
   rewrites the references.
 - **Write `state.md` through `tasks state`**, so the write is fenced like a transition: a
@@ -302,8 +304,9 @@ Every case maps to a stored status plus what overviews show:
   takeover of your own stale session. Re-read with `tasks resume` and move on.
 - **Never `--force` on your own initiative.** It is for a person's explicit decision, and
   the log records every forced transition (a forced `state` write is not logged).
-- **Never hand-edit frontmatter, never `mv` a task directory.** Both bypass the checks
-  that keep the tree trustworthy.
+- **Never change the convention's frontmatter fields except through the CLI, never `mv`
+  a task directory.** Both bypass the checks that keep the tree trustworthy; a project's
+  own key is the one hand edit, on the project's explicit instructions.
 - If `tasks` is not on `PATH`, use `npx @speekl/tasks` in its place. Exit `3` with no
   `.tasks/` found means the project is not set up: **ask before running `tasks init`** —
   creating a tree is a project-level decision — and ask whom to list as actors:

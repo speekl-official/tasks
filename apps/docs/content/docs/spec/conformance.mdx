@@ -50,8 +50,9 @@ An Agent MUST follow the [agent protocol](/docs/spec/agent-protocol): a session 
 entry through `mine` and `resume` with the reading order; claim before work; the freshness rule,
 with `state.md` written through `state` where offered; `--as` only on instruction; exit through
 `pause`, `handoff` or `done` with a message, the commits made named in the log and the listed
-documentation up to date before `done`; no frontmatter edits and no manual moves; project state
-only in the tree.
+documentation up to date before `done`; no edit of a defined frontmatter field except through the
+CLI, a project's own key by hand only on the project's explicit instructions, and no manual moves;
+project state only in the tree.
 
 ## Self-checking
 
