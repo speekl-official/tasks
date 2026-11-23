@@ -4,12 +4,15 @@ import { isDeepStrictEqual } from "node:util";
 
 import { TaskError } from "../errors.js";
 import { errnoCode, writeFileAtomic } from "./fs-utils.js";
-import { AGENT_ACTOR } from "./types.js";
+import { ACTOR_PATTERN, AGENT_ACTOR } from "./types.js";
 
 /** Claude Code's shared project settings, where its hooks are configured. */
 export const SETTINGS_RELATIVE_PATH = path.join(".claude", "settings.json");
 
-/** The actor the hooks act as unless `--actor` names another. */
+/**
+ * The actor the hooks act as on a first install, unless `--actor` names
+ * another; a refresh keeps the actor of the hooks it finds.
+ */
 export const DEFAULT_HOOKS_ACTOR = AGENT_ACTOR;
 
 /** The events the hooks attach to, in the order the block lists them. */
@@ -30,8 +33,24 @@ const SUBCOMMANDS: Record<HookEvent, string> = {
   SessionEnd: "session-end",
 };
 
-const SESSION_START_NOTE =
-  "Your tasks (tasks mine --json). Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.";
+/**
+ * The keys of each task the SessionStart hook prints: what the entry
+ * decision reads, and the last entry, where a person's instruction to the
+ * agent (an `assign -m`, a `note`) stands until the claim displaces it. The
+ * rest of a task comes with `resume`, so the hook, which runs on every
+ * start, resume, clear and compaction, stays small.
+ */
+export const SESSION_START_FIELDS = [
+  "id",
+  "title",
+  "yours",
+  "situation",
+  "liveness",
+  "effective_priority",
+  "last_entry",
+].join(",");
+
+const SESSION_START_NOTE = `Your tasks in this tree (tasks mine --json --fields ${SESSION_START_FIELDS}), the entry step: do not run mine again for this tree. Resume a claimed task with tasks resume <id> before taking new work; a task only assigned to you is your inbox.`;
 
 const STOP_NOTE =
   "A claimed task has no state.md. Write its resume point (tasks state <task>), or pause, hand off or finish it, before ending the turn:";
@@ -50,7 +69,7 @@ function hookCommands(actor: string): Record<HookEvent, string> {
     SessionStart: [
       "sid=$(jq -r .session_id)",
       String.raw`[ -n "$CLAUDE_ENV_FILE" ] && printf 'export TASKS_SESSION=%s\nexport ${env}\n' "$sid" >> "$CLAUDE_ENV_FILE"`,
-      String.raw`mine=$(${env} tasks mine --json --session "$sid" 2>/dev/null) && printf '${SESSION_START_NOTE}\n%s\n' "$mine"`,
+      String.raw`mine=$(${env} tasks mine --json --fields ${SESSION_START_FIELDS} --session "$sid" 2>/dev/null) && printf '${SESSION_START_NOTE}\n%s\n' "$mine"`,
       "exit 0",
     ].join("; "),
     PostToolUse: [
@@ -218,6 +237,68 @@ export interface HooksInstallResult {
   /** The events whose tasks hook was already there and was left as it was. */
   kept: HookEvent[];
   skippedReason?: "exists";
+}
+
+/** The tasks hooks a settings file already holds, and the actor they name. */
+export interface InstalledHooks {
+  /** A tasks hook of some event is in the file. */
+  installed: boolean;
+  /**
+   * The `TASKS_ACTOR=` of the first tasks hook that names one as a complete
+   * literal, quoted or not, events in block order; `null` when none does (a
+   * computed name, `review${ROLE}`, is no literal).
+   */
+  actor: string | null;
+  /** The events without a tasks hook, which an install would add. */
+  missing: HookEvent[];
+}
+
+/** Every `TASKS_ACTOR=` assignment of a command: quoted, or up to a break. */
+const ACTOR_ASSIGNMENT = /TASKS_ACTOR=(?:"([^"]*)"|'([^']*)'|([^\s;]*))/g;
+
+/** The actor a command names as a complete literal, or `null`. */
+function literalActor(command: string): string | null {
+  for (const match of command.matchAll(ACTOR_ASSIGNMENT)) {
+    const literal = match[1] ?? match[2] ?? match[3] ?? "";
+    if (ACTOR_PATTERN.test(literal)) return literal;
+  }
+  return null;
+}
+
+/**
+ * What `hooks install` acts as when `--actor` is not given: the actor the
+ * hooks already in the file act as, so a refresh after an upgrade
+ * (`--force`) does not turn hooks installed for one actor into hooks for the
+ * default. A refresh of hooks that name no actor leaves the choice to
+ * `--actor`.
+ */
+export async function installedHooksActor(
+  projectRoot: string,
+): Promise<InstalledHooks> {
+  const settings = await readSettings(
+    path.join(projectRoot, SETTINGS_RELATIVE_PATH),
+  );
+  const hooks = settings?.hooks;
+  const missing: HookEvent[] = [];
+  let actor: string | null = null;
+  if (isRecord(hooks)) {
+    for (const event of HOOK_EVENTS) {
+      const entries = hooks[event];
+      const own = Array.isArray(entries)
+        ? entries.flatMap((entry) =>
+            hooksOf(entry).filter((hook) => isTasksHook(event, hook)),
+          )
+        : [];
+      if (own.length === 0) missing.push(event);
+      for (const hook of own) {
+        if (actor !== null || !isRecord(hook)) continue;
+        actor = literalActor(String(hook.command));
+      }
+    }
+  } else {
+    missing.push(...HOOK_EVENTS);
+  }
+  return { installed: missing.length < HOOK_EVENTS.length, actor, missing };
 }
 
 /**

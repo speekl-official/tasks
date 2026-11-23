@@ -1,35 +1,78 @@
 import { Globe } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
-import { author, authorHandle } from "@/lib/author";
+import { author, authorHandle, coauthor, coauthorHandle } from "@/lib/author";
 import { cn } from "@/lib/cn";
-import { standardName } from "@/lib/shared";
+import { specVersion, standardName } from "@/lib/shared";
 
 /**
  * Who wrote the thing. Lucide dropped its brand marks, so GitHub, X and
  * LinkedIn are inlined below; only the generic globe comes from the icon set.
  */
-const LINKS: {
+interface PersonLink {
   label: string;
   href: string;
   icon: ComponentType<{ className?: string }>;
-}[] = [
-  { label: "Website", href: author.site, icon: Globe },
-  { label: "GitHub", href: author.github, icon: GithubIcon },
-  { label: authorHandle, href: author.x, icon: XIcon },
-  { label: "LinkedIn", href: author.linkedin, icon: LinkedinIcon },
+}
+
+interface Person {
+  name: string;
+  photo: string;
+  blurb: ReactNode;
+  links: PersonLink[];
+}
+
+const PEOPLE: Person[] = [
+  {
+    name: author.name,
+    photo: author.photo,
+    blurb: (
+      <>
+        Dan writes the <Code>{standardName}</Code> specification and maintains
+        the CLI that implements it. Questions, disagreements with the spec, and
+        implementations of your own are all welcome.
+      </>
+    ),
+    links: [
+      { label: "Website", href: author.site, icon: Globe },
+      { label: "GitHub", href: author.github, icon: GithubIcon },
+      { label: authorHandle, href: author.x, icon: XIcon },
+      { label: "LinkedIn", href: author.linkedin, icon: LinkedinIcon },
+    ],
+  },
+  {
+    name: coauthor.name,
+    photo: coauthor.photo,
+    blurb: (
+      <>
+        Kirill designed the {specVersion} revision of{" "}
+        <Code>{standardName}</Code> and wrote the CLI that implements it: a
+        directory per task with its own files, nested tasks, resume points,
+        sessions for parallel agents, and projects across repositories.
+      </>
+    ),
+    links: [
+      { label: coauthorHandle, href: coauthor.x, icon: XIcon },
+      { label: "LinkedIn", href: coauthor.linkedin, icon: LinkedinIcon },
+    ],
+  },
 ];
 
-export function AuthorCard({ className }: { className?: string }) {
+export function AuthorCards({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center gap-6 rounded-xl border border-fd-border bg-fd-card p-6 text-center sm:flex-row sm:items-start sm:gap-8 sm:p-8 sm:text-left",
-        className,
-      )}
-    >
+    <div className={cn("grid gap-6 lg:grid-cols-2", className)}>
+      {PEOPLE.map((person) => (
+        <PersonCard key={person.name} person={person} />
+      ))}
+    </div>
+  );
+}
+
+function PersonCard({ person }: { person: Person }) {
+  return (
+    <div className="flex flex-col items-center gap-6 rounded-xl border border-fd-border bg-fd-card p-6 text-center sm:flex-row sm:items-start sm:gap-8 sm:p-8 sm:text-left">
       <img
-        src={author.photo}
-        alt={author.name}
+        src={person.photo}
+        alt={person.name}
         width={96}
         height={96}
         loading="lazy"
@@ -38,15 +81,13 @@ export function AuthorCard({ className }: { className?: string }) {
       />
 
       <div className="min-w-0">
-        <h3 className="text-lg font-semibold tracking-tight">{author.name}</h3>
+        <h3 className="text-lg font-semibold tracking-tight">{person.name}</h3>
         <p className="mt-2 max-w-prose text-sm/6 text-fd-muted-foreground">
-          Dan writes the <Code>{standardName}</Code> specification and maintains
-          the CLI that implements it. Questions, disagreements with the spec,
-          and implementations of your own are all welcome.
+          {person.blurb}
         </p>
 
         <ul className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
-          {LINKS.map((link) => (
+          {person.links.map((link) => (
             <li key={link.href}>
               <AuthorLink href={link.href} icon={link.icon}>
                 {link.label}

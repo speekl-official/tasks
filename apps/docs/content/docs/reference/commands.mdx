@@ -31,6 +31,22 @@ exceptions on failure: their result is the document on stdout, exit `4`, no enve
 `--json` the output is for people and may change at any time. See the [JSON contract](/docs/reference/json-contract)
 for every shape.
 
+**`--fields <list>`** goes with `--json` on every command that answers with a task object or
+a collection of them: `ready`, `list`, `tree`, `mine`, `show`, `resume`, `new`, `note`,
+`restore`, the transitions, and `dep`/`after add` and `rm`. Each task object then carries only
+the named keys, in that order, the task objects under `resume`'s `child_tasks` too; a collection keeps `scope`, `projects`, `count`, `malformed` and
+`unavailable` around the trimmed rows:
+
+```sh
+tasks mine --json --fields id,situation,yours,title,last_entry
+tasks claim --next --json --fields id,title,path
+```
+
+The names are the task object's keys and the extras a command adds (`body`, `state`,
+`cascaded`, …). A name no document has is exit `2`, before anything is written; a key this
+document happens not to carry is left out; `--fields` without `--json` is exit `2`. The
+document without `--fields` is the contract; `--fields` only trims it.
+
 ### Exit codes
 
 | Code | Meaning                                                                                                                         |
@@ -121,7 +137,7 @@ tasks hooks install [--actor <name>] [--force] [--json]
 
 | Option           | Effect                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------- |
-| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. Default: `agent`. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
+| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. A fresh install defaults to `agent`; hooks already in the file keep their actor when it is a complete literal, quoted or not, else `--actor` is required before adding or replacing hooks. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
 | `--force`        | Replace the tasks hooks already in the file with the documented ones.                    |
 
 The file and `.claude/` are created when absent, and what is written is the guide's
@@ -130,15 +146,17 @@ file holds — other settings, other events, other hooks of the same events — 
 is. An event that already has a tasks hook, one whose command runs that event's
 subcommand (also through a path such as `./node_modules/.bin/tasks`), keeps it as it is
 unless `--force`, so local edits survive; with nothing to add or replace, the file is not
-touched and the command says so. Use `--force` after upgrading the CLI. The hooks need
+touched and the command says so. Use `--force` after upgrading the CLI: the hooks are
+refreshed for the actor they were installed for. The hooks need
 `tasks` and [`jq`](https://jqlang.org) on `PATH`. Commit `.claude/settings.json` so every
 session in the repository runs them.
 
 **Fails** with exit `2`, changing nothing, when the file is not a JSON object or its
 `hooks` is not an object of event lists, when the tree's `config.yml` cannot be read, or
 when it lists [actors](/docs/reference/configuration#actors) without the hooks' name
-(pass `--actor` with a listed one, or add `agent` to the roster), and with exit `3` when
-no tree is found.
+(pass `--actor` with a listed one, or add `agent` to the roster), when hooks would be
+added or replaced beside tasks hooks whose actor cannot be read as a complete literal and
+`--actor` is not given, and with exit `3` when no tree is found.
 
 ## Reading
 
@@ -150,10 +168,14 @@ None of these write anything except the session heartbeat when a session is know
 tasks show <task> [--archived] [--json]
 ```
 
-The task: its fields, its derived conditions (situation, blocked by, held by, liveness, …;
+The task: its fields, the project's own frontmatter keys when it has any, as a
+`custom fields` block after the fields (`custom_fields` in the JSON), its derived conditions (situation, blocked by, held by, liveness, …;
 the JSON carries every one, `ready` and `last_entry` included), the workspace files present, the live tasks that
 reference it through `depends_on` or `finishes_after` — here and in listed projects —
-and its body. **Fails** with exit `3` for an unknown or archived task, and with exit `4`
+and its body. References print as the command line takes them: `alias:path` for a task in
+a listed project, the bare id for a task of this tree, and the stored path only for a tree
+that is not listed; the JSON carries `depends_on`, `finishes_after` and `blocked_by[].ref`
+as stored. **Fails** with exit `3` for an unknown or archived task, and with exit `4`
 when its `task.md` is malformed.
 
 `--archived` reads a task under `.archive/` without restoring it: `<task>` is then its former
@@ -169,18 +191,20 @@ tasks resume <task> [--json]
 ```
 
 Everything the next session reads to continue a task, in reading order: the task's
-fields and conditions; one line per ancestor, outermost first, with its title, status
+fields and conditions; its definition, the body; one line per ancestor, outermost first, with its title, status
 and workspace files; the children with their situations; the workspace file list; when
 `config.yml` lists [`docs`](/docs/reference/configuration#docs), where the project's
 documentation lives, each location with whether it exists here; `state.md` in full; and the
 last log entry. A malformed ancestor or child is left out of these lists (the task's
-`children` count still includes it). It is the second command of the
-[agent protocol](/docs/guides/agent-protocol), after `mine`.
+`children` count still includes it). Both forms carry the body, `state.md` and the project's
+own frontmatter keys (`custom_fields`), so an agent reads `task.md` and `state.md` through
+this command and opens `design.md`, `plan.md` and the ancestors' files afterwards: it is
+the second command of the [agent protocol](/docs/guides/agent-protocol), after `mine`.
 
 ### `tasks ready`
 
 ```sh
-tasks ready [--scope <path>] [--all] [--local] [--json]
+tasks ready [--scope <path>] [--all] [--local] [--priority <level>] [--json]
 ```
 
 | Option           | Effect                                                                   |
@@ -188,6 +212,7 @@ tasks ready [--scope <path>] [--all] [--local] [--json]
 | `--scope <path>` | Restrict the local tree to this group or task path, and keep to the local tree. Default: `scope` in `config.yml`. |
 | `--all`          | Ignore the configured scope.                                             |
 | `--local`        | The local tree only, not the projects it lists; implied by a scope.      |
+| `--priority <level>` | Only the tasks whose effective priority is at least this level: `urgent`, `high`, `normal` or `low`. |
 
 The tasks free for you — the calling actor — to take, best first: effective priority,
 then `PAUSED` before `TODO`, then oldest. A task is ready when it is `TODO` or `PAUSED`,
@@ -196,9 +221,13 @@ and no ancestor is claimed or assigned. With `projects:` configured and no scope
 listed trees are included, their ids carry the alias and the footer says how many rows came
 from them (`41 tasks · 38 from projects api`). A scope, given or configured, is a path of the
 local tree and keeps the set to it; `--all` lifts a configured scope and spans again.
+`--priority <level>` keeps the set to the tasks whose effective priority is at least that
+level, an inherited level counting: `ready --priority high` is the urgent and high work you
+could take.
 
 An empty set is success: exit `0` with `"count": 0`. **Fails** with exit `3` when
-`--scope` names no task or group, and exit `2` when `--scope` and `--all` are combined.
+`--scope` names no task or group, and exit `2` when `--scope` and `--all` are combined or
+`--priority` names a level outside the four.
 
 ### `tasks mine`
 
@@ -208,8 +237,12 @@ tasks mine [--local] [--json]
 
 Open tasks whose claimant or assignee is you: first the claims of this session, then
 your other claims (orphaned ones are yours to take over), then the tasks merely assigned
-to you — your inbox. Each row carries its situation, liveness and last log entry, its
-last activity; what was left for you is in the task's files (`## Notes` of `task.md`,
+to you — your inbox. In the JSON each row's `yours` names its group: `this-session`,
+`orphaned`, `elsewhere` (your claim in another live session, or of unknown liveness) or
+`inbox`; every reporting command carries the field, so `ready --json` marks your inbox
+and `list --working --json` your own orphans. Each row carries its situation and liveness and, beneath it, the task's last log
+entry — what happened, then its author and age — its last activity; what was left for
+you is in the task's files (`## Notes` of `task.md`,
 `design.md`, `state.md`). Not restricted by `scope`. Use `--as <actor>` to see
 someone else's.
 
@@ -231,11 +264,12 @@ here as not listed. Without a roster the footer says so: any name may be assigne
 ### `tasks list`
 
 ```sh
-tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--json]
+tasks list [--scope <path>] [--all] [--local] [--depth <n> | --top] [--<situation>…] [--active] [--priority <level>]
+           [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--json]
 ```
 
-Every open task, in tree order, with its situation, its effective priority and its
-secondary labels. Filters select by the [situation](/docs/concepts#situations-not-statuses)
+Every open task, in tree order unless `--sort` says otherwise, with its situation, the age
+of its last update, its effective priority and its secondary labels. Filters select by the [situation](/docs/concepts#situations-not-statuses)
 word, or by the `active` label, and combine with OR:
 
 | Filter        | Selects                                         |
@@ -260,6 +294,32 @@ the ready set for you also holds tasks assigned to you — `assigned alice`,
 `waiting for alice` — and tasks whose finish gate is satisfied (`closable`).
 `--scope`, `--all` and `--local` work as for `ready`.
 
+`--priority <level>` keeps the tasks whose effective priority is at least that level, an
+inherited level counting, and narrows what the situation filters select instead of joining
+them: `list --blocked --priority high` is the blocked tasks that are high or urgent, and
+`list --priority urgent` every urgent task whatever its situation. A level outside `urgent`,
+`high`, `normal` and `low` exits `2`.
+
+The UPDATED column, in every overview, is the time since the task's manifest was last
+written by the tool, as a compact age: `3h`, `2d`, `5w`, `4mo`, `1y`. Transitions, `note`,
+`assign`, `priority` and `move` write the manifest; `state` and a narrative `log` entry write
+workspace files and leave it as it is. `--sort created` and `--sort updated` order the rows by
+that timestamp, newest first, `--reverse` oldest first, and a CREATED column joins UPDATED
+while `created` is the key. `--updated-before <when>` keeps the tasks not written since then,
+`--created-since <when>` those created from then on (CREATED shown), each narrowing what the
+other filters select; `<when>` is the grammar of `log --since`: a timestamp, a date, or a
+duration back from now (`30m`, `12h`, `7d`, `2w`). `list --waiting --updated-before 2w` is the
+paused tasks nobody has touched for two weeks, `list --created-since 7d` the week's new tasks,
+`list --sort updated --reverse` the whole tree with the longest untouched first. The JSON is
+unchanged: the rows in the order asked for, `created` and `updated` on each task as before.
+`--reverse` without `--sort`, a `--sort` key other than the two, or a bound outside the
+grammar exit `2`.
+
+In a terminal, an overview fits the window: when a row would wrap, TITLE gives way first and
+is cut with an ellipsis, then SITUATION, then LABELS, each down to a floor; ids, ages and
+priorities are never cut, and `show` has the full text. Output that is piped or redirected
+is never cut, and neither is `--json`. The same holds for `ready`, `tree` and `mine`.
+
 `--depth <n>` keeps the tasks at most *n* levels of containment deep, and `--top` is
 `--depth 1`: the top level alone — the epics, each with its `open 2/5` progress, and the
 tasks that stand on their own. The depth counts task ancestors within the scope, so
@@ -271,37 +331,51 @@ within the depth, and the footer names the limit (`12 tasks · depth 1`). `--top
 ### `tasks tree`
 
 ```sh
-tasks tree [--scope <path>] [--all] [--local] [--depth <n> | --top] [--resolved] [--json]
+tasks tree [--scope <path>] [--all] [--local] [--depth <n> | --top] [--resolved] [--sort created|updated] [--reverse] [--json]
 ```
 
 Open tasks nested by containment, with each task's `finishes_after` joins listed under
-it (`↳ after search (not-done)`), tagged with their project. `--resolved` includes done
-and cancelled tasks, so an open parent keeps its finished children beneath it. `--depth <n>`
-and `--top` work as for `list`: `tasks tree --top` is the top level alone, and
-`tasks tree --scope auth-rework --depth 2` the epic with its direct children. The JSON is
-the same flat collection as `list`: every task carries `parent`.
+it (`↳ after search (not-done)`), tagged with their project. Two or more siblings that share
+a group directory or a project alias are gathered under one dimmed line naming it (`ops/`,
+`backend:`), each named by the path below it, as `index.md` lists a group; a prefix only one
+of them shows stays on its line (`platform/ci-pipeline`), as a file browser compacts a folder
+with a single entry. `--resolved` includes done and cancelled tasks, so an open parent keeps
+its finished children beneath it. `--depth <n>` and `--top` work as for `list`:
+`tasks tree --top` is the top level alone, and `tasks tree --scope auth-rework --depth 2` the
+epic with its direct children; a group is not a level. `--sort created` or `--sort updated`
+orders siblings by that timestamp, newest first, `--reverse` oldest first, the nesting
+unchanged and a group line standing where its first task sorts; the UPDATED column is as for
+`list`, and CREATED joins it under `--sort created`. The JSON is the same flat collection as
+`list`: every task carries `parent`, and no line stands for a group.
 
 ```txt
-TASK               SITUATION          PRIORITY          LABELS          TITLE
-auth-rework        open 1/2                             active          Rework authentication
-  wire-refresh     working by agent                     live            Wire the refresh endpoint
-release            backlog            urgent            assigned alice  Release 2.0
+TASK               SITUATION          UPDATED  PRIORITY          LABELS          TITLE
+auth-rework        open 1/2           3h                         active          Rework authentication
+  wire-refresh     working by agent   3h                         live            Wire the refresh endpoint
+ops/
+  renew-certs      ready              1d                                         Renew the TLS certificates
+  rotate-keys      assigned alice     3d                                         Rotate the signing keys
+release            backlog            2w       urgent            assigned alice  Release 2.0
   ↳ after search (not-done)
-search             open 0/3           high                              Full-text search
-  index-docs       ready              high (inherited)                  Index documents
+search             open 0/3           5d       high                              Full-text search
+  index-docs       ready              5d       high (inherited)                  Index documents
 ```
 
 ### `tasks log --since`
 
 ```sh
-tasks log --since <when> [--local] [--archived] [--json]
+tasks log --since <when> [--actor <actor>] [--scope <path>] [--local] [--archived] [--json]
 ```
 
 Log entries since a time, across the local tree and every listed project, oldest first.
 `<when>` is an ISO timestamp (`2026-09-21T09:14:00Z`), a UTC date (`2026-09-21`), or a
-duration back from now: `30m`, `12h`, `7d`, `2w`. `--local` reads the local tree only.
-`--archived` includes the archived tasks' entries, under their former ids; the human form
-marks them `(archived)`. Appending an entry is [`tasks log <task>`](#tasks-log).
+duration back from now: `30m`, `12h`, `7d`, `2w`. `--actor <actor>` keeps one actor's
+entries; `--scope <path>` those of a task or group of the local tree and everything
+beneath it — what happened under an epic this week — and, like a scope on an overview,
+keeps the listing to that tree (exit `3` when the path names nothing); the two combine.
+`--local` reads the local tree only. `--archived` includes the archived tasks' entries,
+under their former ids; the human form marks them `(archived)`. Appending an entry is
+[`tasks log <task>`](#tasks-log).
 
 ### `tasks dep list` and `tasks after list`
 
@@ -310,9 +384,11 @@ tasks dep list <task> [--json]
 tasks after list <task> [--json]
 ```
 
-Each reference in `depends_on` (or `finishes_after`), whether it is satisfied, and why
-not. Each list is judged by its own gate: a `CANCELLED` task satisfies `finishes_after`,
-never `depends_on`. See [`tasks dep`](#tasks-dep-and-tasks-after).
+Each reference in `depends_on` (or `finishes_after`), named as the command line takes it
+(the JSON carries both: `ref` as stored and `task` as the command line takes it, `null`
+when no alias names its tree), whether it is satisfied, and why not. Each list is judged
+by its own gate: a `CANCELLED` task satisfies `finishes_after`, never `depends_on`. See
+[`tasks dep`](#tasks-dep-and-tasks-after).
 
 ## Transitions
 
@@ -570,7 +646,7 @@ close a cycle (exit `4`, `cycle`, with the cycle). Adding a reference already pr
 changes nothing. A `CANCELLED` target is accepted and said so: `dep add` prints that the task
 is now [stranded](/docs/reference/gates#cancelled-dependencies-are-stranded), since cancelled
 work never satisfies a dependency (an `after add` on one is satisfied and says nothing).
-`rm` accepts a reference as stored or as `add` would resolve it, and fails with exit `3`
+`rm` takes a reference as `dep list` prints it (what `add` would resolve it to), or as stored, and fails with exit `3`
 when the task does not hold it. `--force` overrides authorization only.
 
 **Writes** the field, `updated`, and a log entry such as
@@ -598,9 +674,13 @@ then in every other tree the command can write — the local tree and the trees 
 one tree at a time under each tree's lock, keeping each reference's project path and
 replacing its id. References found in trees it can read but not write are reported as
 not rewritten; they resolve as `missing` until someone edits them. A listed tree that
-cannot be written does not fail the move: its references are reported too. Run `move`
-from the tree that lists the others — the tracker, in a multi-repository layout — and it
-reaches every reference the tooling can see.
+cannot be written does not fail the move: its references are reported too. A listed tree
+that is not checked out here is not searched at all, so a reference it holds is neither
+rewritten nor reported; when it returns, run `tasks validate` there: it names the reference
+dangling, and the repair is `tasks dep add` of the new target followed by `tasks dep rm` of
+the stale reference (`after add`, then `after rm`, for a finish gate), since adding alone
+leaves the stale reference blocking. Run `move` from the tree that lists the others — the tracker, in
+a multi-repository layout — and it reaches every reference the tooling can see.
 
 **Under a `BACKLOG` parent**, the moved subtree is deferred, as `defer` would do it:
 `state.md` and assignees are kept, claims are cleared.
@@ -692,13 +772,16 @@ conflict marker is refused (exit `2`). Listing entries is
 [`tasks log --since`](#tasks-log---since).
 
 ```sh
-tasks log <task> [--archived] [--json]
+tasks log <task> [--since <when>] [--actor <actor>] [--archived] [--json]
 ```
 
 Without text, the task's own entries, oldest first, in the shape of
 [`log --since`](#tasks-log---since): the way to read one task's history without opening
-`log.md`. `--archived` reads the log of a task under `.archive/`, by its former path in
-full; appending to an archived task is refused (exit `2`), restore it first.
+`log.md`. Entries come in the file's order, where `log --since` orders by time. `--since <when>` keeps the entries at or after a time, in the grammar of
+`log --since`; `--actor <actor>` those one actor wrote (an entry made on their behalf
+under `--as` counts as theirs). `--archived` reads the log of a task under `.archive/`,
+by its former path in full; appending to an archived task is refused (exit `2`), restore
+it first.
 
 ### `tasks note`
 
@@ -857,7 +940,7 @@ exists, every write regenerates it, so this is needed once, or after a hand edit
 ### `tasks migrate`
 
 ```sh
-tasks migrate [<alias>] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
+tasks migrate [<alias>] [--dry-run] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
 ```
 
 | Argument / option       | Effect                                                                                  |
@@ -865,6 +948,7 @@ tasks migrate [<alias>] [--map <OLD=NEW>…] [--map-phase <OLD=NEW>…] [--json]
 | `<alias>`               | Migrate the v1 tree of a project this v2 tree lists, instead of this tree.              |
 | `--map <OLD=NEW>`       | The v2 status of a v1 status: needed for a status outside the v1 roles; may also override a role's. Repeatable. |
 | `--map-phase <OLD=NEW>` | The v2 directory name of a v1 phase: needed when its name has a `.` or `_`; may also rename a valid one. Repeatable. |
+| `--dry-run`             | Check everything and report what the migration would do, writing nothing into the tree, not even its lock (a session's heartbeat is recorded as for any command). A refusal is the same refusal. |
 
 The one-time upgrade of a v1 tree, and the only command that opens a v1 tree (`skill install`
 and `hooks install` write beside one without reading it). Under the
@@ -883,6 +967,12 @@ in trees it can read but not write are reported. The output names the consequenc
 person must know about: `IN_PROGRESS` tasks whose claims now have no session, `PAUSED`
 tasks without a `state.md`, references kept as written, an edited `README.md` kept, an
 `active_phase` that named no phase directory and became no scope.
+
+`--dry-run` prints the same report about what would happen — `Dry run: migrating … would move
+3 tasks; the tree was left untouched`, `2 to rewrite` — and `dry_run: true` in the JSON. From a v2
+tracker migrating a listed project, the references the tracker and its other projects hold into
+it are previewed too; from the v1 tree itself they are not, since nothing can open that tree
+yet, and the last `!` line says so.
 
 ```txt
 ✓ Migrated /Users/you/acme-api/.tasks to .tasks v2: 3 tasks

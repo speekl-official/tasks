@@ -9,7 +9,8 @@ import type { LoadedTree } from "../core/projects.js";
 import type { Task } from "../core/task.js";
 import type { TaskWithDerivedJson, WorkspaceFilename } from "../core/types.js";
 import { lastLogEntry, workspaceFiles } from "../core/workspace.js";
-import { emitJson, renderShow, writeOut } from "../output.js";
+import { emitTaskJson, renderShow, writeOut } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /** What `show --json` prints: the task object with derived conditions. */
 export interface ShowJson extends TaskWithDerivedJson {
@@ -33,17 +34,33 @@ async function deriveArchived(
   task: Task,
 ): Promise<DerivedTask> {
   const lastEntry = await lastLogEntry(task.dir);
+  // Resolved for display alone: nothing gates an archived task, but its
+  // references read as the command line names them, as a live task's do.
+  const { depends_on, finishes_after } = task.frontmatter;
+  const start = {
+    satisfied: true,
+    refs: await context.gates.resolveRefs(load, depends_on),
+  };
+  const finish = {
+    satisfied: true,
+    open_children: [],
+    refs: await context.gates.resolveRefs(load, finishes_after),
+  };
   const tasks: SnapshotTask[] = load.tree.archived.map((entry) => ({
     task: entry,
     project: load.alias,
-    start: { satisfied: true, refs: [] },
-    finish: { satisfied: true, open_children: [], refs: [] },
+    start: entry.id === task.id ? start : { satisfied: true, refs: [] },
+    finish:
+      entry.id === task.id
+        ? finish
+        : { satisfied: true, open_children: [], refs: [] },
     liveness: null,
     lastEntry: entry.id === task.id ? lastEntry : null,
   }));
   const derived = deriveTree(
     { tree: load.tree, project: load.alias, tasks },
     context.identity.actor,
+    context.identity.session,
   ).get(task.id);
   if (derived === undefined) {
     throw new Error(`${task.id} was read from the archive but not derived.`);
@@ -65,6 +82,7 @@ export function showCommand(): Command {
       "read a task under .archive/ by its former path in full, without restoring it",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       async (
         arg: string,
@@ -95,10 +113,12 @@ export function showCommand(): Command {
           const result: ShowJson = archived
             ? { ...shown.json, ...extras, archived: true }
             : { ...shown.json, ...extras };
-          emitJson(result);
+          emitTaskJson(context, result);
           return;
         }
-        writeOut(renderShow(shown, { ...extras, archived }));
+        writeOut(
+          renderShow(shown, { ...extras, archived, custom_fields: task.extra }),
+        );
       },
     );
 }

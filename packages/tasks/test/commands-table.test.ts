@@ -58,9 +58,9 @@ const DEP_ROW =
 const ARCHIVE_ROW =
   "archive <task> [--force], archive --resolved-before [<when>] | --all-resolved, restore <path>, purge <path>";
 const LOG_ROW =
-  'log <task> "<text>", log <task> [--archived], log --since <duration|timestamp> [--local] [--archived]';
+  'log <task> "<text>", log <task> [--since <when>] [--actor <actor>] [--archived], log --since <duration|timestamp> [--actor <actor>] [--scope <path>] [--local] [--archived]';
 const OVERVIEW_ROW =
-  "list [--<situation>] [--active] [--depth <n> | --top], tree [--depth <n> | --top]";
+  "list [--<situation>] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--depth <n> | --top], tree [--sort created|updated] [--reverse] [--depth <n> | --top]";
 
 /** A transition that requires a message, `--force` on all twelve. */
 function transition(name: string, args: string[], message: boolean): Entry {
@@ -68,7 +68,11 @@ function transition(name: string, args: string[], message: boolean): Entry {
     row: TRANSITION_ROW,
     path: [name],
     args,
-    options: [...(message ? ["-m, --message <text>"] : []), "--force"],
+    options: [
+      ...(message ? ["-m, --message <text>"] : []),
+      "--force",
+      "--fields <list>",
+    ],
   };
 }
 
@@ -78,26 +82,42 @@ const TABLE: Entry[] = [
     row: "new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]",
     path: ["new"],
     args: ["<path>", "<title...>"],
-    options: ["--backlog", "--assign <actor>", "--priority <level>"],
+    options: [
+      "--backlog",
+      "--assign <actor>",
+      "--priority <level>",
+      "--fields <list>",
+    ],
   },
   {
     row: "show <task> [--archived]",
     path: ["show"],
     args: ["<task>"],
-    options: ["--archived"],
+    options: ["--archived", "--fields <list>"],
   },
-  { row: "resume <task>", path: ["resume"], args: ["<task>"], options: [] },
   {
-    row: "ready [--scope <path>] [--all] [--local]",
+    row: "resume <task>",
+    path: ["resume"],
+    args: ["<task>"],
+    options: ["--fields <list>"],
+  },
+  {
+    row: "ready [--scope <path>] [--all] [--local] [--priority <level>]",
     path: ["ready"],
     args: [],
-    options: ["--scope <path>", "--all", "--local"],
+    options: [
+      "--scope <path>",
+      "--all",
+      "--local",
+      "--priority <level>",
+      "--fields <list>",
+    ],
   },
   {
     row: "mine [--as <actor>] [--local]",
     path: ["mine"],
     args: [],
-    options: ["--local"],
+    options: ["--local", "--fields <list>"],
   },
   {
     row: "actors [--local]",
@@ -112,15 +132,27 @@ const TABLE: Entry[] = [
     options: [
       ...SITUATIONS.map((word) => `--${word}`),
       "--active",
+      "--priority <level>",
+      "--updated-before <when>",
+      "--created-since <when>",
+      "--sort <key>",
+      "--reverse",
       "--depth <n>",
       "--top",
+      "--fields <list>",
     ],
   },
   {
     row: OVERVIEW_ROW,
     path: ["tree"],
     args: [],
-    options: ["--depth <n>", "--top"],
+    options: [
+      "--sort <key>",
+      "--reverse",
+      "--depth <n>",
+      "--top",
+      "--fields <list>",
+    ],
   },
   transition("schedule", ["<task>"], false),
   transition("defer", ["<task>"], false),
@@ -128,7 +160,7 @@ const TABLE: Entry[] = [
     row: TRANSITION_ROW,
     path: ["claim"],
     args: ["[task]"],
-    options: ["--next", "--scope <path>", "--force"],
+    options: ["--next", "--scope <path>", "--force", "--fields <list>"],
   },
   transition("pause", ["<task>"], true),
   transition("release", ["<task>"], false),
@@ -144,13 +176,13 @@ const TABLE: Entry[] = [
       row: DEP_ROW,
       path: [name, "add"],
       args: ["<task>", "<ref...>"],
-      options: [],
+      options: ["--force", "--fields <list>"],
     },
     {
       row: DEP_ROW,
       path: [name, "rm"],
       args: ["<task>", "<ref...>"],
-      options: [],
+      options: ["--force", "--fields <list>"],
     },
     { row: DEP_ROW, path: [name, "list"], args: ["<task>"], options: [] },
   ]),
@@ -166,20 +198,31 @@ const TABLE: Entry[] = [
     args: ["[task]"],
     options: ["--force", "--resolved-before [when]", "--all-resolved"],
   },
-  { row: ARCHIVE_ROW, path: ["restore"], args: ["<path>"], options: [] },
+  {
+    row: ARCHIVE_ROW,
+    path: ["restore"],
+    args: ["<path>"],
+    options: ["--fields <list>"],
+  },
   { row: ARCHIVE_ROW, path: ["purge"], args: ["<path>"], options: [] },
   { row: "delete <task>", path: ["delete"], args: ["<task>"], options: [] },
   {
     row: LOG_ROW,
     path: ["log"],
     args: ["[task]", "[text...]"],
-    options: ["--since <when>", "--local", "--archived"],
+    options: [
+      "--since <when>",
+      "--actor <actor>",
+      "--scope <path>",
+      "--local",
+      "--archived",
+    ],
   },
   {
     row: 'note <task> "<text>"',
     path: ["note"],
     args: ["<task>", "<text...>"],
-    options: [],
+    options: ["--fields <list>"],
   },
   {
     row: "state <task> [--edit]",
@@ -198,10 +241,10 @@ const TABLE: Entry[] = [
   { row: "validate [--fix]", path: ["validate"], args: [], options: ["--fix"] },
   { row: "reindex", path: ["reindex"], args: [], options: [] },
   {
-    row: "migrate [<alias>] [--map OLD=NEW …] [--map-phase OLD=NEW …]",
+    row: "migrate [<alias>] [--dry-run] [--map OLD=NEW …] [--map-phase OLD=NEW …]",
     path: ["migrate"],
     args: ["[alias]"],
-    options: ["--map <mapping>", "--map-phase <mapping>"],
+    options: ["--map <mapping>", "--map-phase <mapping>", "--dry-run"],
   },
 ];
 

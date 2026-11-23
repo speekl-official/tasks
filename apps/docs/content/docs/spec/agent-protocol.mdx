@@ -28,10 +28,20 @@ everyone else and may be taken over.
 
 ## Entry
 
-1. Run `mine`. Continue any task claimed by this session; then take, among the orphaned tasks
-   claimed by this actor and the tasks assigned to it, the one with the highest effective priority
+1. Run `mine`, once per tree, as the right actor and session: where the harness ran it at session
+   start ([Harness integration](/docs/spec/harness)), its output is this step for the tree, actor
+   and session that produced it when its rows carry `last_entry` (an older hook's do not, and
+   the agent runs `mine` once in its place), and the agent does not run it again there.
+   Continue any task claimed by this session (its `yours` is `this-session`); then
+   take, among the orphaned tasks claimed by this actor (`orphaned`) and the tasks assigned to it
+   (`inbox`), the one with the highest effective priority
    — at equal priority an orphan before an assigned task — unless a person's instruction names
-   what comes first; only then new work. An orphan is taken over one at a time, only what the agent
+   what comes first: the candidates' last entries are read before the choice, since an instruction
+   given with a transition (an assignment, a handoff) or as a note stands there until the claim,
+   or any later entry, displaces it; the task an instruction names is claimed by id, and input
+   given only in a transition's message is preserved under `## Notes` before the claim, where a
+   note already is; only then new work. An orphan is
+   taken over one at a time, only what the agent
    will work on now; a task held by another live session is not the agent's, a claim of unknown
    liveness is reported to the person, never forced, and another actor's orphaned claim is taken
    over only on the person's instruction.
@@ -39,15 +49,20 @@ everyone else and may be taken over.
    restores the hold) and resumed after; new work is claimed with `claim --next` and then resumed,
    or resumed and then claimed by id when the agent chooses among candidates. When a claim
    conflicts, another agent was first: the agent moves on to the next ready task.
-3. For the task at hand, run `resume` and read, in order, `task.md`, `state.md`, `design.md`,
-   `plan.md`, then for each ancestor as far as needed its `task.md`, `design.md` and `plan.md` —
-   an epic's design and plan live on the epic. Do not read `log.md` on entry.
+3. For the task at hand, run `resume`. Its answer carries the definition, `state.md` in full, the
+   gates, the ancestors with the workspace files each has, the children, the documentation
+   locations and the last log entry (`body` and `state` in the JSON, [Task object](/docs/spec/cli#task-object)):
+   what it carried is not read again from the files. Then read `design.md` and `plan.md` where
+   `workspace` lists them, and for each ancestor as far as needed its `task.md`, `design.md` and
+   `plan.md` — an epic's design and plan live on the epic. Do not read `log.md` on entry.
 4. A listed project the commands cannot read — not checked out, a v1 tree — is reported to the
    person once and left alone: migration and checkout are a person's actions.
 
 ## During work
 
-- Never hand-edit frontmatter; every field has a command. Never move a task directory by hand.
+- The frontmatter fields this specification defines change only through the CLI; every field has
+  a command. A key of the project's own ([Task file](/docs/spec/task-file#serialization)) is edited by hand only on the
+  project's explicit instructions. Never move a task directory by hand.
 - `state.md` is written through `state` wherever the implementation offers it, so the write is
   fenced like a transition; only without that command is the file written directly.
 - A clarification of the statement changes `Description` / `Acceptance criteria`; an input
@@ -67,8 +82,9 @@ everyone else and may be taken over.
 - `--as` is used only on an explicit instruction from that actor given in the current session,
   and the message quotes it. An agent MUST NOT use `--as` to satisfy an assignee rule on its own
   initiative.
-- **Freshness rule:** every turn in which the work progressed ends with `state.md` updated. The
-  status stays `IN_PROGRESS` between turns.
+- **Freshness rule:** every turn in which the work progressed ends with `state.md` updated —
+  rewritten as the short resume point it is ([`state.md`](/docs/spec/workspace#statemd)), not
+  extended by the turn's steps. The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 
@@ -117,7 +133,7 @@ everyone else and may be taken over.
   | being worked | `IN_PROGRESS` | working, live |
   | session ended deliberately, work unfinished | `pause` → `PAUSED` (an agent's pause leaves the task free) | ready · started, first in `ready` |
   | a person stops, meaning to come back | `pause` → `PAUSED` + assignee (a person's pause keeps the task) | waiting for alice; her `unassign` or `handoff` releases it |
-  | session ended without `pause`, or crashed | `IN_PROGRESS` | working, orphaned since T — at once when the harness reported the end, after the timeout otherwise; the same actor's next session takes over |
+  | session ended without `pause`, or crashed | `IN_PROGRESS` | working, orphaned with the age of the last heartbeat (`orphaned 3d`) — at once when the harness reported the end, after the timeout otherwise; the same actor's next session takes over |
   | started, waits for a task — another agent's, a person's, or an external event modelled as a task assigned to whoever observes it | `pause` + `dep add` → `PAUSED` | blocked by X · started |
   | started, needs a decision or review | `handoff alice` → `PAUSED` | waiting for alice |
   | started, deferred until after Y | `pause` + `dep add Y` | blocked by Y · started |

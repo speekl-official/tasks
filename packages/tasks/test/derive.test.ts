@@ -67,11 +67,27 @@ function unsatisfiedRef(
   reason: GateReason = "not-done",
   status: Status | null = "TODO",
 ): ResolvedRef {
-  return { ref, project: null, id: ref, satisfied: false, reason, status };
+  return {
+    ref,
+    task: ref,
+    project: null,
+    id: ref,
+    satisfied: false,
+    reason,
+    status,
+  };
 }
 
 function satisfiedRef(ref: string, status: Status = "DONE"): ResolvedRef {
-  return { ref, project: null, id: ref, satisfied: true, reason: null, status };
+  return {
+    ref,
+    task: ref,
+    project: null,
+    id: ref,
+    satisfied: true,
+    reason: null,
+    status,
+  };
 }
 
 function blockedBy(...refs: ResolvedRef[]): StartGate {
@@ -134,6 +150,8 @@ function snapshotOf(
 interface DeriveOptions {
   /** Defaults to the fixture actor; `null` derives as `index.md` does. */
   actor?: string | null;
+  /** The viewer's session token; none by default. */
+  session?: string | null;
   overrides?: Overrides;
   /** Ids at which to write an unparseable `task.md`. */
   malformed?: string[];
@@ -151,6 +169,7 @@ async function derive(
   return deriveTree(
     snapshotOf(tree, options.overrides),
     options.actor === undefined ? "tester" : options.actor,
+    options.session ?? null,
   );
 }
 
@@ -161,8 +180,11 @@ function get(derived: Map<string, DerivedTask>, id: string): DerivedTask {
 }
 
 /** The situation and its labels, as one overview line reads them. */
+/** The instant the ages in labels count from, in these tests. */
+const LABEL_NOW = new Date("2026-09-22T12:00:00Z");
+
 function shown(d: DerivedTask): string {
-  return [situationText(d), ...labels(d)].join(" · ");
+  return [situationText(d), ...labels(d, LABEL_NOW)].join(" · ");
 }
 
 const LIVE: ClaimLiveness = {
@@ -283,7 +305,7 @@ describe("the situation table", () => {
     );
     expect(situationText(get(derived, "b"))).toBe("blocked by gone (missing)");
     expect(get(derived, "c").derived.blocked_by).toEqual([
-      { ref: "y", reason: "not-done", status: "TODO" },
+      { ref: "y", task: "y", reason: "not-done", status: "TODO" },
     ]);
   });
 
@@ -295,6 +317,7 @@ describe("the situation table", () => {
           start: {
             a: blockedBy({
               ref: "../backend:api/tokens",
+              task: "backend:api/tokens",
               project: "backend",
               id: "api/tokens",
               satisfied: false,
@@ -309,8 +332,11 @@ describe("the situation table", () => {
     expect(situationText(d)).toBe(
       "blocked by backend:api/tokens (not-checked-out)",
     );
-    // The JSON keeps the stored form.
-    expect(d.derived.blocked_by[0]!.ref).toBe("../backend:api/tokens");
+    // The JSON keeps the stored form, and names the target beside it.
+    expect(d.derived.blocked_by[0]).toMatchObject({
+      ref: "../backend:api/tokens",
+      task: "backend:api/tokens",
+    });
   });
 });
 
@@ -592,6 +618,80 @@ describe("derived fields", () => {
 /* ------------------------------------------------------------------------ */
 /* Hold                                                                     */
 /* ------------------------------------------------------------------------ */
+
+describe("yours", () => {
+  const YOURS: TreeSpec = {
+    tasks: {
+      here: { status: "IN_PROGRESS", claimed_session: "s1", state: true },
+      elsewhere: { status: "IN_PROGRESS", claimed_session: "s0", state: true },
+      gone: { status: "IN_PROGRESS", claimed_session: "s9", state: true },
+      terminal: { status: "IN_PROGRESS", state: true },
+      // A claim left on a task that is not in progress: inconsistent, and
+      // still the actor's.
+      stale: { status: "TODO", claimed_by: "tester" },
+      inbox: { assignee: "tester" },
+      handoff: { status: "PAUSED", assignee: "tester", state: true },
+      "assigned-done": { status: "DONE", assignee: "tester" },
+      theirs: {
+        status: "IN_PROGRESS",
+        claimed_by: "alice",
+        claimed_session: "s2",
+      },
+      free: {},
+    },
+  };
+  const liveness = {
+    here: LIVE,
+    elsewhere: LIVE,
+    gone: ORPHANED,
+    theirs: LIVE,
+  };
+  const yoursOf = (
+    derived: Map<string, DerivedTask>,
+  ): Record<string, unknown> =>
+    Object.fromEntries(
+      [...derived.values()].map((d) => [d.snapshot.task.id, d.derived.yours]),
+    );
+
+  it("names the case of each task for an actor with a session", async () => {
+    const derived = await derive(YOURS, {
+      session: "s1",
+      overrides: { liveness },
+    });
+    expect(yoursOf(derived)).toEqual({
+      here: "this-session",
+      elsewhere: "elsewhere",
+      gone: "orphaned",
+      // A claim without a token is nobody's session: unknown liveness.
+      terminal: "elsewhere",
+      stale: "elsewhere",
+      inbox: "inbox",
+      handoff: "inbox",
+      "assigned-done": null,
+      theirs: null,
+      free: null,
+    });
+    expect(get(derived, "here").json.yours).toBe("this-session");
+  });
+
+  it("counts a claim without a session as this session's for an actor without one", async () => {
+    const derived = await derive(YOURS, { overrides: { liveness } });
+    expect(yoursOf(derived)).toMatchObject({
+      terminal: "this-session",
+      here: "elsewhere",
+      gone: "orphaned",
+      inbox: "inbox",
+    });
+  });
+
+  it("is null throughout for the actor-independent view", async () => {
+    const derived = await derive(YOURS, {
+      actor: null,
+      overrides: { liveness },
+    });
+    expect(new Set(Object.values(yoursOf(derived)))).toEqual(new Set([null]));
+  });
+});
 
 describe("held_by", () => {
   it("names the nearest holder, through groups", async () => {
@@ -971,6 +1071,30 @@ describe("situationFilter", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("labels", () => {
+  it("counts the waiting and blocked tasks beneath a parent as labels, outside the JSON", async () => {
+    const derived = await derive(
+      {
+        tasks: {
+          epic: {},
+          "epic/a": { status: "PAUSED", assignee: "bob", state: true },
+          "epic/b": {},
+          "epic/b/c": { status: "PAUSED", assignee: "ann", state: true },
+          "epic/d": {},
+          other: {},
+        },
+      },
+      { overrides: { start: { "epic/b": blockedBy(unsatisfiedRef("x")) } } },
+    );
+    expect(shown(get(derived, "epic"))).toBe(
+      "open 0/3 · 2 waiting · 1 blocked",
+    );
+    // Its own situation is the blocked one; the count is what lies beneath.
+    expect(shown(get(derived, "epic/b"))).toBe("blocked by x · 1 waiting");
+    expect(labels(get(derived, "epic/d"))).toEqual([]);
+    expect(labels(get(derived, "other"))).toEqual([]);
+    expect(get(derived, "epic").json).not.toHaveProperty("below");
+  });
+
   it("come in the fixed order", async () => {
     const derived = await derive(
       {
@@ -1032,8 +1156,9 @@ describe("labels", () => {
       },
     );
     expect(labels(get(derived, "live"))).toEqual(["live"]);
-    expect(labels(get(derived, "orphaned"))).toEqual([
-      "orphaned since 2026-09-21T16:40:12Z",
+    // The age of the last heartbeat; show and resume carry the timestamp.
+    expect(labels(get(derived, "orphaned"), LABEL_NOW)).toEqual([
+      "orphaned 19h",
     ]);
     expect(labels(get(derived, "unknown"))).toEqual(["liveness unknown"]);
     expect(labels(get(derived, "sessionless"))).toEqual([]);
@@ -1126,7 +1251,7 @@ describe("the agent protocol's Shown column", () => {
       deploy: "assigned alice",
       worked: "working by tester · live",
       paused: "ready · started",
-      crashed: "working by tester · orphaned since 2026-09-21T16:40:12Z",
+      crashed: "working by tester · orphaned 19h",
       "paused-waits": "blocked by x · started",
       review: "waiting for alice",
       "after-y": "blocked by y · started",

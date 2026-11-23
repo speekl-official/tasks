@@ -17,6 +17,7 @@ import {
   DEFAULT_HOOKS_ACTOR,
   SETTINGS_RELATIVE_PATH,
   installHooks,
+  installedHooksActor,
 } from "../core/hooks.js";
 import { assertActor } from "../core/sessions.js";
 import { TaskError } from "../errors.js";
@@ -38,7 +39,7 @@ export interface HooksInstallJson {
 }
 
 interface InstallOptions {
-  actor: string;
+  actor?: string;
   force?: boolean;
   json?: boolean;
 }
@@ -72,8 +73,7 @@ export function hooksCommand(): Command {
     )
     .option(
       "--actor <name>",
-      "the actor the hooks act as, set as TASKS_ACTOR in each command",
-      DEFAULT_HOOKS_ACTOR,
+      `the actor the hooks act as, set as TASKS_ACTOR in each command; a fresh install defaults to ${DEFAULT_HOOKS_ACTOR}, hooks already in the file keep their actor when it is a complete literal, else --actor is required before adding or replacing hooks`,
     )
     .option(
       "--force",
@@ -81,13 +81,34 @@ export function hooksCommand(): Command {
     )
     .option("--json", "emit machine-readable JSON")
     .action(async (options: InstallOptions, command: Command) => {
-      const actor = assertActor(options.actor, "--actor");
+      if (options.actor !== undefined) assertActor(options.actor, "--actor");
       const global = globalOptions(command);
       // The settings belong to the repository the tree is in: they sit at
       // the root of the discovered tree, wherever below it this runs.
       const project = await requireProject(
         startDirectory(global),
         discoveryOptions(global),
+      );
+      // A write beside hooks already in the file acts as their actor: an
+      // upgrade must not change whose tasks a session sees. Hooks whose actor
+      // cannot be read as a complete literal leave the choice to --actor
+      // before anything is added or replaced; with nothing to write, nothing
+      // is asked.
+      const installed = await installedHooksActor(project.root);
+      if (
+        options.actor === undefined &&
+        installed.installed &&
+        installed.actor === null &&
+        (options.force === true || installed.missing.length > 0)
+      ) {
+        throw TaskError.usage(
+          `Could not determine the actor of the installed tasks hooks. Run tasks hooks install${options.force === true ? " --force" : ""} --actor <name> to choose the actor.`,
+          { file: path.join(project.root, SETTINGS_RELATIVE_PATH) },
+        );
+      }
+      const actor = assertActor(
+        options.actor ?? installed.actor ?? DEFAULT_HOOKS_ACTOR,
+        "--actor",
       );
 
       // The hooks will write under this name: a v2 tree with a roster must

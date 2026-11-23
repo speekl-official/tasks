@@ -396,6 +396,47 @@ describe("migrate: the repository's own v1 tree", () => {
     );
   });
 
+  it("previews everything with --dry-run and writes nothing, not even the lock", async () => {
+    const s = await fixtureSandbox();
+    const before = await snapshotFiles(s.tasksDir);
+
+    const result = migrated(await s.run("migrate", "--dry-run", "--json"));
+    expect(Object.keys(result)[0]).toBe("dry_run");
+    expect(result).toMatchObject({
+      dry_run: true,
+      tree: s.tasksDir,
+      tasks: 15,
+      statuses: { PENDING: "TODO", IN_PROGRESS: "IN_PROGRESS", DONE: "DONE" },
+      readme: "replaced",
+      scope: null,
+    });
+    expect(result.rewritten).toHaveLength(6);
+    expect(result.unrewritten).toEqual([
+      {
+        project: null,
+        task: "release/publish-v1",
+        field: "depends_on",
+        ref: "cross-platform-ci",
+      },
+    ]);
+    expect(result.consequences.at(-1)).toContain("not previewed");
+    expect(await snapshotFiles(s.tasksDir)).toEqual(before);
+    await expect(
+      fs.stat(path.join(s.tasksDir, ".locks")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    const human = plain((await s.run("migrate", "--dry-run")).stdout);
+    expect(human).toContain("Dry run: migrating");
+    expect(human).toContain("would move 15 tasks; the tree was left untouched");
+    expect(human).toContain("6 to rewrite, 1 kept as written");
+    expect(human).toContain("to be replaced with the v2 scaffold");
+    expect(human).toContain("to be generated; _index.md to be removed");
+    expect(await snapshotFiles(s.tasksDir)).toEqual(before);
+
+    // The preview changed nothing the real run depends on.
+    expect(migrated(await s.run("migrate", "--json")).tasks).toBe(15);
+  });
+
   it("prints a summary and the kept reference as a ! line", async () => {
     const s = await fixtureSandbox();
     const result = await s.run("migrate");
@@ -526,6 +567,21 @@ describe("migrate: refusals before anything is written", () => {
       (await manifest(s, ".tasks/my-phase/beta/task.md")).frontmatter,
     ).toMatchObject({ depends_on: ["v1-0/alpha"] });
     expect(await s.exists(".tasks/v1-0/alpha/task.md")).toBe(true);
+  });
+
+  it("refuses in a dry run as it would for real, with the same problems and nothing written", async () => {
+    const s = await v1Sandbox({
+      tasks: { "v1.0/alpha": {}, "fine/gamma": { depends_on: ["alpha"] } },
+    });
+    const before = await snapshotFiles(s.tasksDir);
+
+    const refused = await s.run("migrate", "--dry-run", "--json");
+    expect(problemsOf(refused).map((p) => p.kind)).toEqual(["unmapped-phase"]);
+    expect(errorOf(refused).message).toContain("nothing was written");
+    expect(await snapshotFiles(s.tasksDir)).toEqual(before);
+    await expect(
+      fs.stat(path.join(s.tasksDir, ".locks")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses a --map-phase for a phase the tree does not have, and one onto an existing phase", async () => {
@@ -780,6 +836,31 @@ describe("migrate: refusals before anything is written", () => {
     expect(problems[2]).toMatchObject({
       path: path.join(s.tasksDir, "index.md"),
     });
+  });
+
+  it("refuses an archive path that would cross a file, in the dry run and the real run alike", async () => {
+    const s = await v1Sandbox({
+      tasks: { "work/kept": {} },
+      archived: { old: { phase: "work", status: "DONE" } },
+    });
+    // Where `.archive/work/` must be created, a file stands.
+    await s.write(".tasks/.archive/work", "not a directory\n");
+    const before = await snapshotFiles(s.tasksDir);
+
+    for (const argv of [
+      ["migrate", "--dry-run", "--json"],
+      ["migrate", "--json"],
+    ]) {
+      const problems = problemsOf(await s.run(...argv));
+      expect(problems).toEqual([
+        expect.objectContaining({
+          kind: "collision",
+          path: path.join(s.tasksDir, ".archive", "work"),
+        }),
+      ]);
+      expect(problems[0]!.message).toContain("is not a directory");
+    }
+    expect(await snapshotFiles(s.tasksDir)).toEqual(before);
   });
 
   it("refuses two live tasks with one id, and an archived task at a live task's path", async () => {
@@ -1076,6 +1157,88 @@ describe("migrate: references to and from other trees", () => {
     expect(result.consequences[0]).toContain(
       "../lib:lib-task depends_on ../repo:alpha",
     );
+  });
+
+  it("previews a listed project's migration with --dry-run, the tracker's references included, and writes nothing", async () => {
+    sandbox = await makeSandbox();
+    const s = sandbox;
+    await s.tree({
+      tasks: {
+        epic: {
+          depends_on: ["../backend:publish-v1"],
+          finishes_after: ["../backend:cross-tree"],
+        },
+      },
+    });
+    const backend = path.join(s.root, "backend", ".tasks");
+    await fs.cp(FIXTURE, backend, { recursive: true });
+    await addProjectAlias(s.tasksDir, "backend", "../backend");
+    const before = {
+      backend: await snapshotFiles(backend),
+      epic: await s.read(".tasks/epic/task.md"),
+    };
+
+    const result = migrated(
+      await s.run("migrate", "backend", "--dry-run", "--json"),
+    );
+    expect(result).toMatchObject({ dry_run: true, tree: backend, tasks: 15 });
+    expect(result.rewritten.filter((ref) => ref.project === null)).toEqual([
+      {
+        project: null,
+        task: "epic",
+        field: "depends_on",
+        from: "../backend:publish-v1",
+        to: "../backend:release/publish-v1",
+      },
+      {
+        project: null,
+        task: "epic",
+        field: "finishes_after",
+        from: "../backend:cross-tree",
+        to: "../backend:monorepo/cross-tree",
+      },
+    ]);
+    expect(
+      result.rewritten.filter((ref) => ref.project === "backend"),
+    ).toHaveLength(6);
+    expect(result.consequences.join("\n")).not.toContain("not previewed");
+
+    expect(await snapshotFiles(backend)).toEqual(before.backend);
+    expect(await s.read(".tasks/epic/task.md")).toBe(before.epic);
+  });
+
+  it("previews the references a read-only tree reached only through the migrating project holds into it", async () => {
+    sandbox = await makeSandbox();
+    const s = sandbox;
+    await s.tree({ tasks: { t: {} } });
+    // The tracker lists legacy (v1); legacy points at lib (v2, unlisted);
+    // lib points back into legacy as v1 named it.
+    await writeV1Tree(path.join(s.root, "legacy", ".tasks"), {
+      tasks: { "work/alpha": { depends_on: ["../lib:lib-task"] } },
+    });
+    await addProjectAlias(s.tasksDir, "legacy", "../legacy");
+    const lib = path.join(s.root, "lib", ".tasks");
+    await fs.mkdir(path.join(lib, "lib-task"), { recursive: true });
+    await fs.writeFile(path.join(lib, "config.yml"), "version: 2\n");
+    await fs.writeFile(
+      path.join(lib, "lib-task", "task.md"),
+      `---\nstatus: TODO\npriority: normal\ndepends_on: ["../legacy:alpha"]\nfinishes_after: []\nassignee: null\nclaimed_by: null\nclaimed_at: null\nclaimed_session: null\ncreated: "${FIXTURE_TIME}"\nupdated: "${FIXTURE_TIME}"\n---\n`,
+    );
+
+    const expected = [
+      {
+        project: "../lib",
+        task: "lib-task",
+        field: "depends_on",
+        ref: "../legacy:alpha",
+      },
+    ];
+    const preview = migrated(
+      await s.run("migrate", "legacy", "--dry-run", "--json"),
+    );
+    expect(preview.unrewritten).toEqual(expected);
+    const real = migrated(await s.run("migrate", "legacy", "--json"));
+    expect(real.unrewritten).toEqual(expected);
   });
 
   it("migrates a listed v1 project from a v2 tracker and rewrites the tracker's references into it", async () => {

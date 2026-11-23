@@ -43,6 +43,11 @@ version: 2
 # docs:
 #   engineering: docs/engineering
 
+# The project's own frontmatter keys, beside the ten the convention defines.
+# Once any is listed, validate reports a key outside the list as an error and
+# the listed ones not at all; a task object carries them as custom_fields.
+# custom_fields: [review_ticket, estimate_days]
+
 # Sibling trees by alias, as paths relative to this project's root.
 # projects:
 #   backend: ../backend
@@ -84,6 +89,12 @@ version: 2
         "Where the project's documentation lives, by name, as paths relative to the project root: what an agent brings up to date before done. resume reports the locations, validate warns about an absent one.",
       type: "map of name → relative path",
       default: "{}",
+    },
+    custom_fields: {
+      description:
+        "The project's own frontmatter keys, beside the ten the convention defines. Once any is listed, validate reports a key outside the list as an error and a listed one not at all; without the list an undefined key is a warning. A task object carries them as custom_fields.",
+      type: "list of key names",
+      default: "[]",
     },
     projects: {
       description:
@@ -217,6 +228,27 @@ clone. The key changes what an agent owes before `done`, not what the CLI allows
 
 Without the key, the protocol's general rule still applies: knowledge that must outlive the
 task goes into the project's documentation, wherever that is.
+
+### `custom_fields`
+
+```yaml
+custom_fields: [review_ticket, estimate_days]
+```
+
+The frontmatter keys of the project's own that its manifests carry beside the ten the
+convention defines ([file format](/docs/reference/file-format#taskmd)). A name is letters,
+digits, `_` and `-`, starting with a letter or `_`, and not one of the defined fields. The
+CLI never reads or writes these keys: it preserves them on every write and carries them in
+the task object as [`custom_fields`](/docs/reference/json-contract#the-task-object), which
+`show` and `resume` print as a `custom fields` block after the fields. The key changes what `tasks validate` says:
+
+- Without it, every key the convention does not define is a warning (`unknown-key`), since
+  the CLI cannot tell a project's key from a misspelt field.
+- Once any is listed, a listed key is not reported, and a key outside the list is an error
+  (`undeclared-key`): a typo, or a list that is behind.
+
+A `config.yml` that lists it is read by this version and later only: 1.0.0 refuses a
+`config.yml` key it does not know.
 
 ### `projects`
 

@@ -69,8 +69,9 @@ updated: "2026-09-21T16:40:12Z"
 ## Notes
 ```
 
-The frontmatter is **machine-owned**: every field has a command, and the CLI rewrites
-the block in canonical form. The markdown body is **yours** — edit it freely.
+The CLI writes the frontmatter in canonical form: the convention's fields change through
+it (every field has a command), and a key of the project's own is edited by hand only on
+the project's explicit instructions. The markdown body is **yours** — edit it freely.
 
 | Field             | Type                                 | Default  | Meaning                                                                                       |
 | ----------------- | ------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
@@ -110,8 +111,13 @@ produce identical bytes and a diff shows only a change of meaning:
 finishes_after: ["../acme-api:auth-rework/wire-refresh"]
 ```
 
-Comments in the frontmatter are not kept. A key the convention does not define survives
-every write and is reported by `validate` as a warning (`unknown-key`).
+Comments in the frontmatter are not kept. A key the convention does not define is the
+project's own: it survives every write, is reported by `validate` as a warning
+(`unknown-key`) unless `config.yml` lists it under
+[`custom_fields`](/docs/reference/configuration#custom_fields) — then a key outside the
+list is an error (`undeclared-key`) and a listed one is not reported — and comes with the
+task object as [`custom_fields`](/docs/reference/json-contract#the-task-object), which
+`show` and `resume` print as a `custom fields` block after the fields.
 
 ### The body
 
@@ -135,7 +141,7 @@ whitespace when it writes the file.
 
 | File        | Concern                                         | Mode                                                        |
 | ----------- | ----------------------------------------------- | ----------------------------------------------------------- |
-| `task.md`   | Definition and acceptance; later inputs in Notes | Body edited in place; frontmatter machine-owned             |
+| `task.md`   | Definition and acceptance; later inputs in Notes | Body edited in place; the convention's fields through the CLI |
 | `state.md`  | Where the work is now: done, verified, open, next | Replaced in full through `tasks state` — never appended     |
 | `design.md` | Decisions and why; rejected alternatives        | Edited in place                                             |
 | `plan.md`   | How: steps, files, verification                 | Edited in place; may be superseded                          |
@@ -169,7 +175,9 @@ recommended structure is four sections:
 ```
 
 _Open_ names every uncommitted file and branch the work leaves behind — anything a
-reader would otherwise find unexplained in the working tree. Its presence drives three
+reader would otherwise find unexplained in the working tree. The file stays short — a
+screen, about twenty lines — naming results and the commits that carry them rather than
+the steps that produced them, which are `log.md`'s; each write replaces it whole. Its presence drives three
 rules: `pause` and `handoff` need it, `release` refuses it, and `schedule` and `reopen`
 return a task to `PAUSED` rather than `TODO` when it exists. A `BACKLOG` task with a
 `state.md` at or beneath it is **parked**: started, then set aside.

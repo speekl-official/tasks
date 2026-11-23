@@ -2,6 +2,7 @@ import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
+import stringWidth from "string-width";
 
 import type {
   DerivedTask,
@@ -31,6 +32,7 @@ import {
   renderShow,
   renderTransitionResult,
   renderTree,
+  treeSequence,
   renderValidation,
 } from "../src/output.js";
 import type { Sandbox } from "./helpers.js";
@@ -59,6 +61,7 @@ const ENTRY: LastEntryJson = {
 function ref(stored: string, fields: Partial<ResolvedRef> = {}): ResolvedRef {
   return {
     ref: stored,
+    task: stored,
     project: null,
     id: stored,
     satisfied: false,
@@ -201,6 +204,128 @@ describe("renderOverview", () => {
       "Nothing ready.",
     );
   });
+
+  it("shows the age since the last update after the situation, and since creation on request", async () => {
+    const { local } = await fixture();
+    const rows = [...local.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const lines = plain(renderOverview(rows, { now })).split("\n");
+    expect(lines[0]).toMatch(
+      /^ID\s+SITUATION\s+UPDATED\s+PRIORITY\s+LABELS\s+TITLE/,
+    );
+    expect(lines[0]).not.toContain("CREATED");
+    for (const line of lines.slice(1)) {
+      expect(line).toMatch(/\s(now|\d+(m|h|d|w|mo|y))\s/);
+    }
+    const both = plain(renderOverview(rows, { now, created: true })).split(
+      "\n",
+    );
+    expect(both[0]).toMatch(/SITUATION\s+CREATED\s+UPDATED\s+PRIORITY/);
+  });
+
+  it("fits a terminal's width by cutting the title, then the situation, then the labels, and cuts nothing otherwise", async () => {
+    const { local, foreign } = await fixture();
+    const rows = [...local.values(), ...foreign.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const full = plain(renderOverview(rows, { now, project: true })).split(
+      "\n",
+    );
+    const widest = Math.max(...full.map((line) => line.length));
+    const longest = rows
+      .map((d) => d.snapshot.task.title)
+      .sort((a, b) => b.length - a.length)[0]!;
+    expect(full.join("\n")).toContain(longest);
+
+    // Eight columns narrower: the title alone gives way, above its floor.
+    const width = widest - 8;
+    const fitted = plain(
+      renderOverview(rows, { now, project: true, width }),
+    ).split("\n");
+    expect(fitted).toHaveLength(full.length);
+    for (const line of fitted) expect(line.length).toBeLessThanOrEqual(width);
+    expect(fitted.join("\n")).toContain("backend:api/tokens/tests");
+    expect(fitted.join("\n")).not.toContain(longest);
+    expect(fitted.join("\n")).toContain(`${longest.slice(0, -9)}…`);
+
+    // Colour codes survive the cut: only the closers follow the ellipsis.
+    const coloured = renderOverview(rows, { now, project: true, width });
+    const row = coloured.split("\n").find((line) => line.includes("…"))!;
+    expect(stripVTControlCharacters(row).length).toBeLessThanOrEqual(width);
+    expect(stripVTControlCharacters(row.slice(row.lastIndexOf("…") + 1))).toBe(
+      "",
+    );
+  });
+
+  it("measures and cuts by display cells, so emoji and CJK titles neither overrun nor break", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        rocket: { title: "🚀".repeat(30) },
+        cjk: { title: "数据".repeat(20) },
+        plain: { title: "a".repeat(60) },
+      },
+    });
+    const rows = [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+    ];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const width = 60;
+    const lines = plain(renderOverview(rows, { now, width })).split("\n");
+    for (const line of lines) {
+      expect(stringWidth(line)).toBeLessThanOrEqual(width);
+      // No half of a surrogate pair, no replacement character.
+      expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|\uFFFD/u);
+    }
+    const rocket = lines.find((line) => line.startsWith("rocket"))!;
+    expect(rocket).toMatch(/🚀…$/u);
+    const cjk = lines.find((line) => line.startsWith("cjk"))!;
+    expect(cjk).toMatch(/数据…$|数…$/u);
+    // Nothing is cut when the output is not fitted.
+    const free = plain(renderOverview(rows, { now }));
+    expect(free).toContain("🚀".repeat(30));
+    expect(free).toContain("数据".repeat(20));
+  });
+
+  it("keeps a tab and a colon-form colour code in a title from overrunning the width", async () => {
+    const esc = String.fromCharCode(27);
+    sandbox = await treeSandbox({
+      tasks: {
+        tabbed: { title: `x\t${"y".repeat(40)}\t${"z".repeat(40)}` },
+        coloured: { title: `${esc}[38:2::255:0:0m${"w".repeat(95)}${esc}[0m` },
+      },
+    });
+    const rows = [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+    ];
+    const width = 65;
+    // Node's own stripper stops at the colon, so the colour code is removed
+    // here before the picocolors codes are.
+    const sgr = new RegExp(`${esc}\\[[0-9;:]*m`, "g");
+    const raw = renderOverview(rows, { now: new Date(), width }).split("\n");
+    for (const line of raw) {
+      const visible = stripVTControlCharacters(line.replace(sgr, ""));
+      expect(visible).not.toContain("\t");
+      const fits = stringWidth(visible) <= width;
+      expect({ line: visible, fits }).toEqual({ line: visible, fits: true });
+    }
+  });
+
+  it("never cuts below a column's floor: a very narrow width wraps instead", async () => {
+    const { local } = await fixture();
+    const now = new Date("2027-01-01T00:00:00Z");
+    const text = plain(renderOverview([...local.values()], { now, width: 20 }));
+    // Every row keeps a readable title stub of at least twelve characters.
+    for (const line of text.split("\n").slice(1)) {
+      const title = line.slice(line.lastIndexOf("  ") + 2);
+      expect(title.length).toBeGreaterThanOrEqual(Math.min(12, title.length));
+    }
+    expect(text).toContain("auth-rework");
+  });
 });
 
 describe("renderTree", () => {
@@ -240,26 +365,162 @@ describe("renderTree", () => {
     expect(text).toContain("\nauth-rework/phase/impl ");
     expect(plain(renderTree([]))).toBe("No tasks.");
   });
+
+  it("orders siblings as asked and keeps the nesting", async () => {
+    const { local } = await fixture();
+    const lines = plain(
+      renderTree([...local.values()], {
+        order: (a, b) => b.snapshot.task.id.localeCompare(a.snapshot.task.id),
+      }),
+    ).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(lines[0]).toMatch(/^TASK\s+SITUATION\s+UPDATED\s+PRIORITY/);
+    // Reversed by id: deploy before auth-rework, token-schema before audit.
+    expect(at(/^deploy /)).toBeLessThan(at(/^auth-rework /));
+    expect(at(/^auth-rework /)).toBeLessThan(at(/^ {2}token-schema /));
+    expect(at(/^ {2}token-schema /)).toBeLessThan(at(/^ {2}audit /));
+  });
+
+  it("fits a terminal's width like the flat overview, the free lines untouched", async () => {
+    const { local, foreign } = await fixture();
+    const rows = [...local.values(), ...foreign.values()];
+    const now = new Date("2027-01-01T00:00:00Z");
+    const full = plain(renderTree(rows, { now, project: true })).split("\n");
+    const width = Math.max(...full.map((line) => line.length)) - 8;
+    const lines = plain(renderTree(rows, { now, project: true, width })).split(
+      "\n",
+    );
+    for (const line of lines) {
+      if (line.includes("↳")) continue;
+      expect(line.length).toBeLessThanOrEqual(width);
+    }
+    expect(lines.some((line) => line.endsWith("…"))).toBe(true);
+    expect(lines).toContain("  ↳ after backend:api/tokens (not-done)");
+  });
+
+  /** Groups of two, a group of one, a group inside a task, two projects. */
+  async function grouped(): Promise<DerivedTask[]> {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: {},
+        "epic/phase/x": {},
+        "epic/phase/y": {},
+        "infra/db/reindex": {},
+        "infra/db/vacuum": {},
+        "ops/a": {},
+        "ops/b": {},
+        "platform/ci": {},
+        solo: {},
+      },
+    });
+    const api = await sandbox.project("api", "../api", {
+      tasks: { k: {}, m: {} },
+    });
+    const web = await sandbox.project("web", "../web", {
+      tasks: { one: {} },
+    });
+    const foreign = async (root: string, alias: string) =>
+      deriveTree(
+        snapshotOf(
+          await loadTree({ root, tasksDir: path.join(root, TASKS_DIRNAME) }),
+          alias,
+        ),
+        "tester",
+      );
+    return [
+      ...deriveTree(
+        snapshotOf(await sandbox.loadTree(), null),
+        "tester",
+      ).values(),
+      ...(await foreign(api, "api")).values(),
+      ...(await foreign(web, "web")).values(),
+    ];
+  }
+
+  it("gathers siblings under the group or project they share, a prefix one shows alone left on its line", async () => {
+    const lines = plain(renderTree(await grouped(), { project: true })).split(
+      "\n",
+    );
+    expect(lines).toEqual([
+      expect.stringMatching(/^TASK\s+SITUATION/),
+      expect.stringMatching(/^epic\s+open 0\/2/),
+      "  phase/",
+      expect.stringMatching(/^ {4}x\s+ready/),
+      expect.stringMatching(/^ {4}y\s+ready/),
+      "infra/db/",
+      expect.stringMatching(/^ {2}reindex\s+ready/),
+      expect.stringMatching(/^ {2}vacuum\s+ready/),
+      "ops/",
+      expect.stringMatching(/^ {2}a\s+ready/),
+      expect.stringMatching(/^ {2}b\s+ready/),
+      expect.stringMatching(/^platform\/ci\s+ready/),
+      expect.stringMatching(/^solo\s+ready/),
+      "api:",
+      expect.stringMatching(/^ {2}k\s+ready/),
+      expect.stringMatching(/^ {2}m\s+ready/),
+      expect.stringMatching(/^web:one\s+ready/),
+    ]);
+  });
+
+  it("places a shared line where its first member sorts; the JSON sequence has no such line", async () => {
+    const rows = await grouped();
+    const order = (a: DerivedTask, b: DerivedTask) =>
+      b.snapshot.task.id.localeCompare(a.snapshot.task.id);
+    const lines = plain(renderTree(rows, { project: true, order })).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(at(/^solo /)).toBeLessThan(at(/^platform\/ci /));
+    expect(at(/^platform\/ci /)).toBeLessThan(at(/^ops\/$/));
+    expect(at(/^ops\/$/)).toBeLessThan(at(/^ {2}b /));
+    expect(at(/^ {2}b /)).toBeLessThan(at(/^ {2}a /));
+    expect(at(/^ {2}a /)).toBeLessThan(at(/^infra\/db\/$/));
+    expect(at(/^epic /)).toBeLessThan(at(/^ {2}phase\/$/));
+    expect(at(/^ {2}phase\/$/)).toBeLessThan(at(/^ {4}y /));
+    expect(at(/^api:$/)).toBeLessThan(at(/^ {2}m /));
+    expect(
+      treeSequence(rows, { project: true, order }).map((d) => d.json.id),
+    ).toEqual([
+      "solo",
+      "platform/ci",
+      "ops/b",
+      "ops/a",
+      "infra/db/vacuum",
+      "infra/db/reindex",
+      "epic",
+      "epic/phase/y",
+      "epic/phase/x",
+      "api:m",
+      "api:k",
+      "web:one",
+    ]);
+  });
 });
 
 describe("renderMine", () => {
   it("puts each task's last entry, in full, beneath it", async () => {
     const { local } = await fixture();
+    const now = new Date("2026-09-22T12:00:00Z");
+    const schema = get(local, "auth-rework/token-schema");
     const lines = plain(
-      renderMine([
-        get(local, "auth-rework/token-schema"),
-        get(local, "auth-rework/phase/impl"),
-      ]),
+      renderMine([schema, get(local, "auth-rework/phase/impl")], { now }),
     ).split("\n");
     const row = lines.findIndex((line) =>
       line.startsWith("auth-rework/token-schema"),
     );
-    expect(lines.slice(row + 1, row + 4)).toEqual([
-      "    2026-09-21T16:40:12Z agent s:s0",
-      "    handoff alice: IN_PROGRESS → PAUSED",
+    expect(lines.slice(row + 1, row + 3)).toEqual([
+      "    handoff alice: IN_PROGRESS → PAUSED  (agent, 19h)",
       "    Schema drafted; decide the rotation.",
     ]);
-    expect(lines[row + 4]).toMatch(/^auth-rework\/phase\/impl\s+working/);
+    expect(lines[row + 3]).toMatch(/^auth-rework\/phase\/impl\s+working/);
+
+    // An entry made on someone's behalf names the operator too.
+    const entry = schema.derived.last_entry!;
+    const onBehalf = {
+      ...schema,
+      derived: { ...schema.derived, last_entry: { ...entry, via: "ops" } },
+    };
+    expect(plain(renderMine([onBehalf], { now }))).toContain(
+      "    handoff alice: IN_PROGRESS → PAUSED  (agent via ops, 19h)",
+    );
     expect(plain(renderMine([]))).toContain("Nothing");
   });
 });
@@ -310,10 +571,11 @@ describe("renderShow", () => {
 });
 
 describe("renderResume", () => {
-  it("prints ancestors, children, workspace, state.md and the last entry", async () => {
+  it("prints the definition, ancestors, children, workspace, state.md and the last entry", async () => {
     const { local } = await fixture();
     const text = plain(
       renderResume(get(local, "auth-rework/token-schema"), {
+        body: "## Description\n\nThe claims of the new token.\n",
         ancestors: [
           {
             id: "auth-rework",
@@ -334,6 +596,7 @@ describe("renderResume", () => {
     );
     const order = [
       "Design the token schema  auth-rework/token-schema",
+      "The claims of the new token.",
       "Ancestors",
       "auth-rework  TODO  Rework authentication  design.md, plan.md",
       "Children",
@@ -349,14 +612,42 @@ describe("renderResume", () => {
     ].map((words) => text.indexOf(words));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The entry reads as in `mine`: its text, then who and how long ago.
+    expect(text).toMatch(
+      /handoff alice: IN_PROGRESS → PAUSED {2}\(agent, \S+\)/,
+    );
+    expect(text).not.toContain("s:s0");
     expect(text).toMatch(/\.\.\/api-docs\s+absent here/);
     expect(text).not.toMatch(/docs\/engineering\s+absent here/);
+  });
+
+  it("keeps the indentation of a definition that opens with code", async () => {
+    const { local } = await fixture();
+    const body = "    SELECT 1;\n    SELECT 2;\n\nThe probe queries.\n";
+    const extras = { workspace: [], referenced_by: [] };
+    const shown = plain(renderShow(get(local, "deploy"), { body, ...extras }));
+    const resumed = plain(
+      renderResume(get(local, "auth-rework/token-schema"), {
+        body,
+        ancestors: [],
+        children: [],
+        state: null,
+        docs: [],
+        ...extras,
+      }),
+    );
+    for (const text of [shown, resumed]) {
+      expect(text).toContain(
+        "\n    SELECT 1;\n    SELECT 2;\n\nThe probe queries.",
+      );
+    }
   });
 
   it("says when there is no state.md yet", async () => {
     const { local } = await fixture();
     const text = plain(
       renderResume(get(local, "deploy"), {
+        body: "",
         ancestors: [],
         children: [],
         workspace: [],
@@ -391,7 +682,8 @@ describe("renderLogEntries", () => {
         },
       ]),
     );
-    expect(text).toContain("2026-09-21T16:40:12Z agent s:s0  auth/x");
+    expect(text).toContain("2026-09-21T16:40:12Z agent  auth/x");
+    expect(text).not.toContain("s:s0");
     expect(text).toContain(
       "2026-09-22T08:02:41Z alice via agent  backend:api/y",
     );

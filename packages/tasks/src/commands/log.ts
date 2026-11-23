@@ -1,9 +1,9 @@
 import { Command } from "commander";
 
 import type { CommandContext } from "../context.js";
-import { openContext } from "../context.js";
+import { assertLocalScope, openContext } from "../context.js";
 import { addressTree, readArchivedTask } from "../core/archive.js";
-import { compareIds } from "../core/ids.js";
+import { compareIds, isWithin } from "../core/ids.js";
 import { withMutation } from "../core/mutate.js";
 import type { LoadedTree } from "../core/projects.js";
 import { parseSince } from "../core/time.js";
@@ -22,10 +22,27 @@ import { emitJson, renderLogEntries, ui, writeOut } from "../output.js";
 
 interface LogOptions {
   since?: string;
+  /** Keep one actor's entries, in a listing or in a task's history. */
+  actor?: string;
+  /** With `--since`: a task or group of the local tree and all beneath it. */
+  scope?: string;
   local?: boolean;
   /** Read an archived task's log, or include the archive in `--since`. */
   archived?: boolean;
   json?: boolean;
+}
+
+/** What narrows a task's history: a lower time bound, one actor's entries. */
+interface EntryFilter {
+  since: string | null;
+  actor: string | null;
+}
+
+function passes(entry: LogEntry, filter: EntryFilter): boolean {
+  return (
+    (filter.since === null || entry.time >= filter.since) &&
+    (filter.actor === null || entry.actor === filter.actor)
+  );
 }
 
 /** The narrative is the caller's words; only what would corrupt the log is refused. */
@@ -72,24 +89,22 @@ async function appendNarrative(
     emitJson(entry);
     return;
   }
-  const via = entry.via === null ? "" : ` via ${entry.via}`;
-  const session = entry.session === null ? "" : ` s:${entry.session}`;
-  writeOut(
-    ui.success(
-      `log ${entry.task}: ${entry.time} ${entry.actor}${via}${session}`,
-    ),
-  );
+  // The confirmation repeats what was written, as `note` does; the heading
+  // the file got is for `tasks log <task>` and the JSON.
+  writeOut(ui.success(`log ${entry.task}: ${entry.text.split("\n")[0]}`));
 }
 
 /**
  * `tasks log <task>` without text: one task's entries, oldest first, as the
- * entries object; with `--archived`, a task under `.archive/` by its former
- * path in full. A read, so no lock and no `updated`.
+ * entries object, narrowed by `--since` and `--actor` on request; with
+ * `--archived`, a task under `.archive/` by its former path in full. A read,
+ * so no lock and no `updated`.
  */
 async function readTaskLog(
   context: CommandContext,
   taskArg: string,
   archived: boolean,
+  filter: EntryFilter,
 ): Promise<void> {
   const { load, path } = await addressTree(
     context,
@@ -100,9 +115,9 @@ async function readTaskLog(
     ? readArchivedTask(context, load, path)
     : resolveTaskArg(load.tree, path);
   const id = context.projects.qualify(load, task.id);
-  const entries = (await readLog(task.dir)).map((entry) =>
-    toLogEntryJson(entry, id),
-  );
+  const entries = (await readLog(task.dir))
+    .filter((entry) => passes(entry, filter))
+    .map((entry) => toLogEntryJson(entry, id));
   const result: LogEntriesJson = { count: entries.length, entries };
 
   if (context.json) {
@@ -137,13 +152,15 @@ interface Since {
 /**
  * Entries at or after `since` from every live task of `trees` — and, with
  * `archived`, from every archived task too, under its former id — oldest
- * first. Equal times order by tree (local first, then listed projects in
- * configuration order), then task id, then position in the log.
+ * first, one actor's only and under one scope only on request. Equal times
+ * order by tree (local first, then listed projects in configuration order),
+ * then task id, then position in the log.
  */
 async function collectEntries(
   context: CommandContext,
   trees: LoadedTree[],
-  since: string,
+  filter: EntryFilter,
+  scope: string | null,
   archived: boolean,
 ): Promise<Since> {
   const found: Collected[] = [];
@@ -167,9 +184,10 @@ async function collectEntries(
       }
     }
     for (const { id, dir } of dirs) {
+      if (scope !== null && !isWithin(id, scope)) continue;
       const task = context.projects.qualify(load, id);
       (await readLog(dir)).forEach((entry, index) => {
-        if (entry.time >= since) {
+        if (passes(entry, filter)) {
           found.push({ entry, task, tree: rank, id, index });
         }
       });
@@ -191,15 +209,25 @@ async function collectEntries(
 async function listSince(
   context: CommandContext,
   arg: string,
+  actor: string | null,
   options: LogOptions,
 ): Promise<void> {
-  const since = parseSince(arg);
+  const filter: EntryFilter = { since: parseSince(arg), actor };
+  // A scope is a path of the local tree, so it keeps the listing to that
+  // tree, as a scope keeps an overview.
+  const scope =
+    options.scope === undefined
+      ? null
+      : assertLocalScope(context, options.scope);
   const trees =
-    options.local === true ? [context.projects.local] : await context.trees();
+    options.local === true || scope !== null
+      ? [context.projects.local]
+      : await context.trees();
   const { entries, archived } = await collectEntries(
     context,
     trees,
-    since,
+    filter,
+    scope,
     options.archived === true,
   );
   const result: LogEntriesJson = { count: entries.length, entries };
@@ -214,13 +242,14 @@ async function listSince(
 export function logCommand(): Command {
   return new Command("log")
     .summary(
-      "append a narrative log entry to a task, read a task's log, or list entries since a time (--since)",
+      "append a narrative log entry to a task, read a task's log, or list entries since a time (--since), one actor's or one scope's on request",
     )
     .description(
       'append a narrative entry to a task\'s log.md (tasks log <task> "<text>"),\n' +
-        "print a task's entries (tasks log <task>), or list the entries since a\n" +
-        "time across the local tree and every listed project, oldest first\n" +
-        "(tasks log --since 7d)",
+        "print a task's entries (tasks log <task>, since a time with --since),\n" +
+        "or list the entries since a time across the local tree and every\n" +
+        "listed project, oldest first (tasks log --since 7d); --actor keeps one\n" +
+        "actor's entries, --scope those under one task or group",
     )
     .argument(
       "[task]",
@@ -230,6 +259,14 @@ export function logCommand(): Command {
     .option(
       "--since <when>",
       "list entries since a timestamp, a date, or a duration back from now (30m, 12h, 7d, 2w)",
+    )
+    .option(
+      "--actor <actor>",
+      "only the entries this actor wrote, in a listing or in a task's log",
+    )
+    .option(
+      "--scope <path>",
+      "with --since: only the entries of this task or group of the local tree and everything beneath it; keeps to that tree",
     )
     .option("--local", "with --since: the local tree only")
     .option(
@@ -245,33 +282,63 @@ export function logCommand(): Command {
         options: LogOptions,
         command: Command,
       ) => {
-        if (options.since !== undefined) {
-          if (task !== undefined) {
+        const actor = options.actor ?? null;
+        if (task === undefined) {
+          if (options.since === undefined) {
             throw TaskError.usage(
-              "Give a task and text to append an entry, or --since to list entries; not both.",
-              { task, since: options.since },
+              'Name a task and the text to append (tasks log <task> "<text>"), or list entries with --since.',
             );
           }
-          await listSince(await openContext(command), options.since, options);
-          return;
-        }
-        if (task === undefined) {
-          throw TaskError.usage(
-            'Name a task and the text to append (tasks log <task> "<text>"), or list entries with --since.',
+          // The tree first, the bound after: a missing or v1 tree is reported
+          // as for every command, whatever the bound says.
+          await listSince(
+            await openContext(command),
+            options.since,
+            actor,
+            options,
           );
+          return;
         }
         if (options.local === true) {
           throw TaskError.usage("--local applies to log --since only.", {
             task,
+            ...(options.since === undefined ? {} : { since: options.since }),
           });
+        }
+        if (options.scope !== undefined) {
+          throw TaskError.usage("--scope applies to log --since only.", {
+            task,
+            scope: options.scope,
+          });
+        }
+        if (options.since !== undefined) {
+          if (words.length > 0) {
+            throw TaskError.usage(
+              "--since lists entries: drop the text to read the task's history since a time, or drop --since to append.",
+              { task, since: options.since },
+            );
+          }
+          const context = await openContext(command);
+          await readTaskLog(context, task, options.archived === true, {
+            since: parseSince(options.since),
+            actor,
+          });
+          return;
         }
         if (words.length === 0) {
           await readTaskLog(
             await openContext(command),
             task,
             options.archived === true,
+            { since: null, actor },
           );
           return;
+        }
+        if (actor !== null) {
+          throw TaskError.usage(
+            "--actor filters a listing; an entry is written under the acting identity (--as names someone else).",
+            { task, actor },
+          );
         }
         if (options.archived === true) {
           throw TaskError.usage(

@@ -18,7 +18,14 @@ import {
 } from "../core/archive.js";
 import { daysBefore, parseSince } from "../core/time.js";
 import { TaskError } from "../errors.js";
-import { emitJson, renderTransitionResult, ui, writeOut } from "../output.js";
+import {
+  emitJson,
+  emitTaskJson,
+  renderTransitionResult,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 interface ForceOptions {
   force?: boolean;
@@ -207,6 +214,7 @@ export function restoreCommand(): Command {
       "the task's full path under .archive/ (no suffixes); alias:path for a listed project",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .exitOverride()
     .action(async (arg: string, _options: JsonOptions, command: Command) => {
       const context = await openContext(command);
@@ -219,7 +227,7 @@ export function restoreCommand(): Command {
       const json = await derivedTaskJson(context, load, result.id);
 
       if (context.json) {
-        emitJson(json);
+        emitTaskJson(context, json);
         return;
       }
       const lines = [

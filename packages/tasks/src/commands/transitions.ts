@@ -10,8 +10,15 @@ import {
   transitionJson,
 } from "../core/transitions.js";
 import type { TransitionCommand } from "../core/types.js";
+import { compactAge } from "../core/time.js";
 import { TaskError } from "../errors.js";
-import { emitJson, renderTransitionResult, ui, writeOut } from "../output.js";
+import {
+  emitTaskJson,
+  renderTransitionResult,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /**
  * The twelve transition commands of the spec's table. Each is a thin shell
@@ -157,6 +164,7 @@ function withCommonOptions(command: Command, force: string): Command {
     .option("-m, --message <text>", messageHelp(command.name()))
     .option("--force", force)
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .configureHelp({ showGlobalOptions: true })
     .exitOverride();
 }
@@ -279,14 +287,19 @@ const FIELD_COMMANDS: ReadonlySet<string> = new Set([
   "priority",
 ]);
 
+/** Whose claim the takeover ended; the token and the timestamp are in the log. */
 function supersededText(claim: SupersededClaim): string {
-  const session = claim.session === null ? "" : ` s:${claim.session}`;
-  return `superseded ${claim.claimant}${session} on ${claim.id} (${claim.liveness}, last seen ${claim.last_seen ?? "unknown"})`;
+  const age = claim.last_seen === null ? null : compactAge(claim.last_seen);
+  const seen =
+    age === null
+      ? claim.liveness
+      : `${claim.liveness}, last seen ${age === "now" ? "just now" : `${age} ago`}`;
+  return `superseded ${claim.claimant} on ${claim.id} (${seen})`;
 }
 
 function report(context: CommandContext, result: TransitionResult): void {
   if (context.json) {
-    emitJson(transitionJson(result));
+    emitTaskJson(context, transitionJson(result));
     return;
   }
   const field = FIELD_COMMANDS.has(result.command);

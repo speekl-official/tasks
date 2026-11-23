@@ -38,7 +38,9 @@ tasks new backend:kernel/rate-limit "Rate-limit the claims API"
 In files, a reference into another tree is stored with the project path, not the alias,
 so it means the same thing to anyone reading the file: `tasks dep add launch
 backend:claims-api` stores `../backend:kernel/claims-api`. An alias exists only in the
-tree that configured it.
+tree that configured it. `show`, `resume` and `dep list` print the reference back as
+`backend:kernel/claims-api`, the form the command line takes; a reference into a tree that
+is not listed prints as stored, and the JSON always carries the stored form.
 
 ## Aggregated overviews
 
@@ -47,10 +49,10 @@ local tree and every listed project, every foreign id carries its alias, and the
 how many rows the projects contributed:
 
 ```txt
- ID                      SITUATION   PRIORITY           LABELS   TITLE
- api:search/index-docs   ready       high (inherited)            Index documents
- api:scratch/try-it      ready                                   Try it
- launch                  ready                                   Launch the public API
+ID                     SITUATION  UPDATED  PRIORITY          LABELS  TITLE
+api:search/index-docs  ready      3d       high (inherited)          Index documents
+api:scratch/try-it     ready      1w                                 Try it
+launch                 ready      2h                                 Launch the public API
 
 3 tasks · 2 from projects api
 ```
@@ -65,9 +67,11 @@ the aliases spanned.
 | `--local` | Restrict the overview to the local tree.                                  |
 | `--scope` | A path of the local tree. While a scope is in force, given or configured, `ready`, `list`, `tree` and `claim --next` keep to the local tree; `--all` lifts a configured scope and spans again. `mine` and `log --since` are not scoped. |
 
-A listed project that is not checked out, or is a v1 tree, is left out of the overview
-with a line saying so — under `--json`, the collection's `unavailable` names it with the
-reason — and `validate` reports it as `project-unavailable`.
+A listed project that is not checked out, or is a v1 tree, is left out of the overview,
+and the footer names it with the reason in a word (`3 tasks · 2 from projects api · not
+shown: legacy (v1), mobile (not checked out)`); under `--json`, the collection's
+`unavailable` names it with the reason, and `validate` reports it as `project-unavailable`
+with the full sentence and the remedy.
 
 ## Writes into listed trees
 

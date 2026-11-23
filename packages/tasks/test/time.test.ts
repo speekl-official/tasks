@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  compactAge,
   formatIso,
   isIsoTimestamp,
   minutesSince,
@@ -94,5 +95,40 @@ describe("--since", () => {
     "soon",
   ])("refuses %j as a usage error", (arg) => {
     usageError(() => parseSince(arg, NOW));
+  });
+
+  it("refuses a duration no date can hold instead of failing inside", () => {
+    usageError(() => parseSince("999999999999999999999w", NOW));
+    usageError(() =>
+      parseSince("999999999999999999999w", NOW, "--updated-before"),
+    );
+  });
+});
+
+describe("compactAge", () => {
+  it.each([
+    ["2026-09-22T11:59:30Z", "now"],
+    ["2026-09-22T12:00:30Z", "now"],
+    ["2026-09-22T11:55:00Z", "5m"],
+    ["2026-09-22T11:00:01Z", "59m"],
+    ["2026-09-22T09:00:00Z", "3h"],
+    ["2026-09-20T12:00:01Z", "47h"],
+    ["2026-09-20T12:00:00Z", "2d"],
+    ["2026-09-09T00:00:00Z", "13d"],
+    ["2026-09-08T12:00:00Z", "2w"],
+    ["2026-07-29T00:00:00Z", "7w"],
+    ["2026-07-27T00:00:00Z", "1mo"],
+    ["2026-05-22T12:00:00Z", "4mo"],
+    ["2025-10-01T00:00:00Z", "11mo"],
+    ["2025-09-22T12:00:00Z", "1y"],
+    ["2025-03-22T12:00:00Z", "1y"],
+    ["2021-09-22T12:00:00Z", "5y"],
+  ])("reads %s as %s", (timestamp, expected) => {
+    expect(compactAge(timestamp, NOW)).toBe(expected);
+  });
+
+  it("rounds down and leaves a timestamp it cannot read as it is", () => {
+    expect(compactAge("2026-09-22T10:00:01Z", NOW)).toBe("1h");
+    expect(compactAge("not a time", NOW)).toBe("not a time");
   });
 });

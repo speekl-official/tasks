@@ -76,6 +76,11 @@ ${roster}
 # docs:
 #   engineering: docs/engineering
 
+# The project's own frontmatter keys, beside the ten the convention defines.
+# Once any is listed, validate reports a key outside the list as an error and
+# the listed ones not at all; a task object carries them as custom_fields.
+# custom_fields: [review_ticket, estimate_days]
+
 # Sibling trees by alias, as paths relative to this project's root.
 # projects:
 #   backend: ../backend

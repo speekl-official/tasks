@@ -83,8 +83,10 @@ updated: "2026-09-21T16:40:12Z"
 - The claim fields are set and cleared together: non-null exactly while
   `IN_PROGRESS` (`claimed_session` may stay `null`), `null` otherwise.
 - Actors and session tokens match `^[A-Za-z0-9][A-Za-z0-9._@+-]*$`.
-- **Canonical form:** the ten fields in this order, then unknown keys in the
-  order read, values unchanged; lists as flow sequences (`[a, b]`, `[]`);
+- **Canonical form:** the ten fields in this order, then the project's own
+  keys (unknown to the convention; a task object carries them as
+  `custom_fields`) in the order read, values unchanged; lists as flow
+  sequences (`[a, b]`, `[]`);
   timestamps double-quoted ISO 8601 UTC with `Z`; other scalars quoted only when
   plain YAML would be ambiguous (an external reference, with its colon, is
   quoted). Comments are not kept. Repeated writes produce identical bytes.
@@ -109,10 +111,14 @@ Overviews show one **situation** per task, the first that holds: `done`,
 (`PAUSED` with an assignee), `assigned X`, `blocked by X`, `closable` (children
 and joins all resolved), `open N/M` (a parent with open children),
 `ready`. Secondary labels follow, in this order: `started` (the task's own
-`state.md`), `blocked by X`, `active`, liveness, the assignee, `held by X` and
-`closable` — the last three only when they are not the situation itself. The
+`state.md`), `blocked by X`, `active`, `N waiting` and `N blocked` (open
+descendants in those situations, which `--top` would otherwise hide), liveness,
+the assignee, `held by X` and `closable` — the last three only when they are not
+the situation itself. The
 effective priority has a column of its own: blank for `normal`,
-`high (inherited)` when it is an ancestor's.
+`high (inherited)` when it is an ancestor's. UPDATED, after the situation, is the
+time since the manifest was last written by the tool, as a compact age (`3h`,
+`2d`, `5w`, `4mo`, `1y`); `state` and a narrative `log` entry do not move it.
 
 A task is **ready** for an actor when it is `TODO` or `PAUSED`, every
 `depends_on` reference is `DONE`, it is assigned to nobody or to that actor, it
@@ -157,13 +163,13 @@ is effective priority, then `PAUSED` before `TODO`, then `created`.
 
 ## Workspace files
 
-| File        | Concern                                          | Mode                                     |
-| ----------- | ------------------------------------------------ | ---------------------------------------- |
-| `task.md`   | definition and acceptance; later inputs in Notes | body in place; frontmatter machine-owned |
-| `state.md`  | where the work is: done, verified, open, next    | replaced in full through `tasks state`   |
-| `design.md` | decisions and why; rejected alternatives         | edited in place                          |
-| `plan.md`   | steps, files, verification                       | edited in place                          |
-| `log.md`    | what happened, who, when                         | append-only, by the CLI                  |
+| File        | Concern                                          | Mode                                                                                                |
+| ----------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `task.md`   | definition and acceptance; later inputs in Notes | body in place; the convention's fields through the CLI, a project's key by hand on its instructions |
+| `state.md`  | where the work is: done, verified, open, next    | replaced in full through `tasks state`                                                              |
+| `design.md` | decisions and why; rejected alternatives         | edited in place                                                                                     |
+| `plan.md`   | steps, files, verification                       | edited in place                                                                                     |
+| `log.md`    | what happened, who, when                         | append-only, by the CLI                                                                             |
 
 `log.md` entries are a heading and free text:
 
@@ -206,6 +212,7 @@ actors: # who tasks may be assigned to, each with a line on who they are
 docs: # where the project's documentation lives; brought up to date before done
   engineering: docs/engineering
   api: ../api-docs
+custom_fields: [review_ticket] # the project's own frontmatter keys; once listed, a key outside the list is an error
 projects: # sibling trees by alias, relative to the project root
   backend: ../backend
 ```
@@ -213,8 +220,13 @@ projects: # sibling trees by alias, relative to the project root
 `version` is required; every other key is optional. Unknown keys are rejected
 (exit `2`): v1's `active_phase` is `scope` now, and `statuses`, `roles` and
 `transitions` are gone. A tree without `version: 2` is a v1 tree, refused by
-every command that opens it; `tasks migrate` upgrades it, and `skill install` and
+every command that opens it; `tasks migrate` upgrades it (`--dry-run` previews), and `skill install` and
 `hooks install` only write beside it.
+
+`custom_fields` lists the project's own frontmatter keys: once any is listed,
+`validate` reports a key outside the list as an error (`undeclared-key`) and a
+listed one not at all; without the list every undefined key is a warning
+(`unknown-key`).
 
 Once `actors` lists anyone, `assign`, `handoff`, `new --assign` and `--as` (on a
 command that opens the tree) refuse other names (exit `2`; `details.actors` lists
@@ -250,8 +262,8 @@ Split on the **last** colon. `project-path` is relative to the project root of
 the tree that stores the reference, never absolute. On the command line a
 reference is a full id, an unambiguous suffix, or `alias:path` for a project
 listed in `config.yml`; it is stored in full, with the alias translated into the
-relative path. Writes reach only listed trees; a tree reached by a bare path is
-read-only.
+relative path, and `show`, `resume` and `dep list` print it back in the alias
+form. Writes reach only listed trees; a tree reached by a bare path is read-only.
 
 ## Gate reasons
 
@@ -276,7 +288,7 @@ ancestor and a reference that would close a cycle.
 Errors (exit `4`): `malformed`, `unknown-status`, `unknown-priority`,
 `claim-fields`, `malformed-ref`, `cycle`, `ancestor-dependency`,
 `resolved-with-open-descendant`, `backlog-invariant`, `archived-path-conflict`,
-`duplicate-id`, `log-conflict-markers`.
+`duplicate-id`, `log-conflict-markers`, `undeclared-key`.
 
 Warnings (exit `0`): `paused-without-state`, `todo-with-state`,
 `unsatisfiable-ref`, `claim-liveness`, `unknown-key`, `unknown-actor`,

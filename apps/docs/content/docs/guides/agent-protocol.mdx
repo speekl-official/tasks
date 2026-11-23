@@ -19,8 +19,9 @@ current, and leave through `pause`, `handoff` or `done`.
 
 `tasks init` installs an [agent skill](https://agentskills.io) into
 `.claude/skills/tasks/`. It is what makes an agent reach for this CLI on its own rather
-than inventing a `TODO.md`: it carries the protocol on this page, the command table, the
-JSON contract, and what to do when something looks wrong.
+than inventing a `TODO.md`: it carries the protocol on this page, an index of the commands,
+the JSON contract, and what to do when something looks wrong; the full command table and
+the convention are its reference files, read on demand.
 
 ```sh
 tasks skill install [--force]
@@ -68,26 +69,44 @@ command; a `state` write counts.
 
 <Step>
 
-### Run `tasks mine`
+### Your tasks: `tasks mine`, once
+
+With the [harness hooks](/docs/guides/harness) this step is done before your first
+prompt: the SessionStart hook prints `mine`, trimmed to the keys the decision below reads
+and each task's last entry, headed `Your tasks`. Do not run it again for the tree, actor
+and session that produced it; a tree the person points you at with `-C` gets its own. A
+row without the `last_entry` key (`null` is one) comes from a hook older than this
+protocol: run the `mine` below once in its place (the hooks set your name and token, so
+without the prefix and `--session`), and tell the person that
+`tasks hooks install --force` brings the hook up to date. Without the hooks, set your name
+and token as above, then run it yourself, the prefix only when `TASKS_ACTOR` is not set
+already:
 
 ```sh
-tasks mine --json
+TASKS_ACTOR=agent tasks mine --json --fields id,title,yours,situation,liveness,effective_priority,last_entry --session <token>
 ```
 
 It lists your claims first — this session's, then older ones — and then the tasks merely
-assigned to you — your inbox — each with its last log entry, its last activity. What was left
-for you is in the task's files: `## Notes` of `task.md`, `design.md`, `state.md`; `resume`
-shows them.
+assigned to you — your inbox — each with its last log entry, its last activity. What was
+left for you is in the task's files: `## Notes` of `task.md`, `design.md`, `state.md`;
+`resume` shows them.
 
-- **Continue** a task claimed by this session.
-- **Then the highest effective priority** among your orphaned claims (`liveness:
-  "orphaned"`, from an older session of yours) and your inbox; at equal priority finish
-  your orphan before starting inbox work, and a person's instruction — in the conversation
-  or under `## Notes` — names what comes first. **Take over** an orphan with an ordinary
+- **Continue** a task claimed by this session (`yours: "this-session"`).
+- **Then the highest effective priority** among your orphaned claims (`yours:
+  "orphaned"`, from an older session of yours) and your inbox (`yours: "inbox"`); at equal priority finish
+  your orphan before starting inbox work, and a person's instruction — in the conversation,
+  under `## Notes`, or in a candidate's last entry (an `assign -m`, a `note`) — names what
+  comes first: read the candidates' `last_entry` before choosing, and claim the task an
+  instruction names by id (`claim --next` takes the first ready task instead). An
+  instruction that reached you only in a transition's message (`assign -m`, `handoff -m`)
+  lives in the log alone, where the claim, or any later entry, displaces it: copy what the
+  work needs under `## Notes` with `tasks note` before the claim; a `note` is there
+  already. **Take over** an orphan with an ordinary
   `tasks claim <task>`, which records the takeover: one at a time, only what you will work
   on now; the others stay orphaned, which is no breakage.
-- A task held by another **live** session is not yours.
-- A claim of **unknown** liveness is reported to the person, never forced.
+- Your claim in another **live** session (`yours: "elsewhere"`) stays there.
+- A claim of **unknown** liveness (`elsewhere` as well, with `liveness: "unknown"`) is
+  reported to the person, never forced.
 - Another actor's orphaned claim is taken over only on the person's instruction.
 - **New work** comes last: `tasks claim --next`.
 
@@ -95,16 +114,24 @@ shows them.
 
 <Step>
 
-### Run `tasks resume` and read in order
+### Run `tasks resume`, then read what it does not carry
 
 ```sh
 tasks resume <task>
 ```
 
-Read, in this order: `task.md`, `state.md`, `design.md`, `plan.md` — then, for each
-ancestor as far as needed, its `task.md`, `design.md` and `plan.md`. An epic's design and
-plan live on the epic. `resume` lists the ancestors outermost first, with the workspace
-files each one has.
+`resume` is the reading of `task.md` and `state.md`: it prints the definition, the gates
+and ownership, the ancestors outermost first with the workspace files each one has, the
+children with their status and situation, the documentation locations, `state.md` in full
+and the last log entry; under `--json` the same, as `body`, `state` and the full objects.
+Do not read those two files again: the project's own frontmatter keys, when it has any,
+are printed as a `custom fields` block after the fields and come as `custom_fields` in the
+JSON. Then read, in this order, `design.md` and `plan.md` where the workspace lists them —
+then, for each ancestor as far as needed, its `task.md`, `design.md` and `plan.md`. An
+epic's design and plan live on the epic. On entry read `resume` whole: `--fields` trims
+the children to the same keys, and a projection made for the task hides their names,
+holders and gates (`id`, `title`, `situation`, `status`, `assignee`, `claimed_by`,
+`held_by`, `depends_on`, `blocked_by`, `finishes_after`).
 
 **Do not read `log.md` on entry.** The present is fully described by the other files;
 the last entry — the last activity — is already in the `resume` output. If a person's text
@@ -134,8 +161,8 @@ reach for `--force` to win a claim.
 
 ### Leave unavailable projects to the person
 
-A listed project the commands cannot read — `not shown` on stderr, `unavailable` in the
-JSON: a v1 tree, a repository not checked out here — is a person's to migrate or check
+A listed project the commands cannot read — `not shown` in an overview's footer,
+`unavailable` in the JSON: a v1 tree, a repository not checked out here — is a person's to migrate or check
 out. Say so once in your report and go on.
 
 </Step>
@@ -144,13 +171,18 @@ out. Say so once in your report and go on.
 
 ## During work
 
-- **Never hand-edit frontmatter.** Every field has a command. The body below it is
-  yours; edit it with ordinary file tools.
+- **The convention's frontmatter fields change only through the CLI.** Every field has
+  a command; a key of the project's own (`custom_fields`) is edited by hand only on the
+  project's explicit instructions. The body below the frontmatter is yours; edit it with
+  ordinary file tools.
 - **Never move a task directory by hand.** Its id is its path; use `tasks move`, which
   rewrites the references.
 - **Write `state.md` through `tasks state`**, so the write is fenced like a transition: a
   session whose claim was taken over learns of it before it overwrites the new claimant's
-  file.
+  file. Keep it a short resume point — a screen, about twenty lines — naming results and
+  the commits that carry them, not the steps that produced them; what happened along the
+  way is `log.md`'s. Each write replaces it whole; a file that grows turn by turn is being
+  appended to.
 
   ```sh
   tasks state <task> < state.md
@@ -176,7 +208,8 @@ out. Say so once in your report and go on.
   session, and the message quotes it. Never use `--as` to satisfy an assignee rule on
   your own initiative.
 - **The freshness rule:** every turn in which the work progressed ends with `state.md`
-  updated. The status stays `IN_PROGRESS` between turns.
+  updated — rewritten as the short resume point above, not extended by the turn's steps.
+  The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 
@@ -254,7 +287,7 @@ Every case maps to a stored status plus what overviews show:
 | being worked                                              | `IN_PROGRESS`                         | `working by agent · live`                     |
 | session ended deliberately, work unfinished               | `pause` → `PAUSED`                    | `ready · started`, first in `ready`           |
 | a person stops, meaning to come back                      | `pause` → `PAUSED` + assignee         | `waiting for alice`; her `unassign` or `handoff` releases it |
-| session ended without `pause`, or crashed                 | `IN_PROGRESS`                         | `working by agent · orphaned since T`; the next session takes over |
+| session ended without `pause`, or crashed                 | `IN_PROGRESS`                         | `working by agent · orphaned 3d`; the next session takes over |
 | started, waits for a task                                 | `pause` + `dep add` → `PAUSED`        | `blocked by X · started`                      |
 | started, needs a decision or review                       | `handoff alice` → `PAUSED`            | `waiting for alice`                           |
 | started, set aside                                        | `pause`, then `defer` → `BACKLOG`     | `parked`; `schedule` brings it back to `PAUSED` |
@@ -271,8 +304,9 @@ Every case maps to a stored status plus what overviews show:
   takeover of your own stale session. Re-read with `tasks resume` and move on.
 - **Never `--force` on your own initiative.** It is for a person's explicit decision, and
   the log records every forced transition (a forced `state` write is not logged).
-- **Never hand-edit frontmatter, never `mv` a task directory.** Both bypass the checks
-  that keep the tree trustworthy.
+- **Never change the convention's frontmatter fields except through the CLI, never `mv`
+  a task directory.** Both bypass the checks that keep the tree trustworthy; a project's
+  own key is the one hand edit, on the project's explicit instructions.
 - If `tasks` is not on `PATH`, use `npx @speekl/tasks` in its place. Exit `3` with no
   `.tasks/` found means the project is not set up: **ask before running `tasks init`** —
   creating a tree is a project-level decision — and ask whom to list as actors:

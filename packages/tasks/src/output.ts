@@ -1,21 +1,26 @@
 import { stripVTControlCharacters } from "node:util";
 
-import Table from "cli-table3";
 import pc from "picocolors";
+import stringWidth from "string-width";
 
 import type { DerivedTask } from "./core/derive.js";
+import { pickFields } from "./core/fields.js";
 import {
   labels,
   priorityLabel,
   referenceText,
   situationText,
 } from "./core/derive.js";
+import { customFieldText, normalizeBody } from "./core/frontmatter.js";
 import { ancestorPaths, compareIds, qualifyId } from "./core/ids.js";
+import type { UnavailableTree } from "./core/projects.js";
+import { compactAge } from "./core/time.js";
 import type {
   ActorsJson,
   BlockedByJson,
   CollectionJson,
   DocsLocationJson,
+  ExtraKeys,
   FindingJson,
   LastEntryJson,
   LogEntryJson,
@@ -45,29 +50,38 @@ export function emitJson(value: unknown): void {
   writeOut(JSON.stringify(value, null, 2));
 }
 
-/** A borderless table; the renderers build on it. */
-export function table(head: string[]): Table.Table {
-  return new Table({
-    head: head.map((h) => pc.bold(h)),
-    style: { head: [], border: [], "padding-left": 1, "padding-right": 1 },
-    chars: {
-      top: "",
-      "top-mid": "",
-      "top-left": "",
-      "top-right": "",
-      bottom: "",
-      "bottom-mid": "",
-      "bottom-left": "",
-      "bottom-right": "",
-      left: "",
-      "left-mid": "",
-      mid: "",
-      "mid-mid": "",
-      right: "",
-      "right-mid": "",
-      middle: " ",
-    },
+/** Whose `--fields` the emitters honour. */
+interface Fielded {
+  fields: readonly string[] | null;
+}
+
+/** A task object under `--json`, trimmed to `--fields` when given. */
+export function emitTaskJson(context: Fielded, document: object): void {
+  emitJson(
+    context.fields === null ? document : pickFields(document, context.fields),
+  );
+}
+
+/** A collection under `--json`: rows trimmed to `--fields`, its own keys kept. */
+export function emitCollectionJson(
+  context: Fielded,
+  collection: CollectionJson,
+): void {
+  const { fields } = context;
+  if (fields === null) {
+    emitJson(collection);
+    return;
+  }
+  emitJson({
+    ...collection,
+    tasks: collection.tasks.map((task) => pickFields(task, fields)),
   });
+}
+
+/** A borderless table; the renderers build on it. */
+/** The width of the terminal on stdout, or `null` when stdout is not one. */
+export function terminalWidth(): number | null {
+  return process.stdout.isTTY ? (process.stdout.columns ?? null) : null;
 }
 
 export const ui = {
@@ -91,17 +105,93 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Display width of a cell, colour codes excluded. */
+const ESC = String.fromCharCode(27);
+/** Every SGR sequence, the colon-separated forms (`38:2::r:g:b`) included. */
+const SGR_ALL = new RegExp(`${ESC}\\[[0-9;:]*m`, "g");
+
+/**
+ * Display width of a cell in terminal columns, colour codes excluded: a
+ * wide character counts two, a combining mark none, so a title in CJK or
+ * emoji is measured as the terminal lays it out.
+ */
 function visibleWidth(text: string): number {
-  return stripVTControlCharacters(text).length;
+  return stringWidth(stripVTControlCharacters(text.replace(SGR_ALL, "")));
+}
+
+/** Cuts fall between graphemes, never inside a surrogate pair or a sequence. */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** How a grid is fitted into a width: which columns give way, down to what. */
+interface Fit {
+  width: number;
+  /** In the order they shrink; a column is never cut below its floor. */
+  shrink: ReadonlyArray<{ column: number; floor: number }>;
+}
+
+/** Narrow the columns that may give way until the rows fit, or stop at the floors. */
+function fitWidths(widths: number[], fit: Fit): void {
+  const gaps = 2 * Math.max(0, widths.length - 1);
+  let excess = widths.reduce((sum, width) => sum + width, 0) + gaps - fit.width;
+  for (const { column, floor } of fit.shrink) {
+    if (excess <= 0) return;
+    const current = widths[column] ?? 0;
+    const take = Math.min(excess, Math.max(0, current - floor));
+    widths[column] = current - take;
+    excess -= take;
+  }
+}
+
+/** Splits text into visible runs and the colour codes between them. */
+const ANSI_SPLIT = new RegExp(`(${ESC}\\[[0-9;:]*m)`);
+
+/**
+ * `text` cut to `width` visible characters with an ellipsis, colour codes
+ * kept: the ones before the cut stay in place and the ones after it (the
+ * closers) follow the ellipsis, so a coloured cell closes as it did.
+ */
+function cutVisible(text: string, width: number): string {
+  if (visibleWidth(text) <= width) return text;
+  const keep = Math.max(0, width - 1);
+  let kept = "";
+  let closers = "";
+  let seen = 0;
+  for (const token of text.split(ANSI_SPLIT)) {
+    if (token.startsWith(`${ESC}[`)) {
+      if (seen < keep) kept += token;
+      else closers += token;
+    } else if (seen < keep) {
+      for (const { segment } of GRAPHEMES.segment(token)) {
+        const width = stringWidth(segment);
+        // A wide character that does not fit the last cell stays out; the
+        // cell ends a column early rather than a column late.
+        if (seen + width > keep) {
+          seen = keep;
+          break;
+        }
+        kept += segment;
+        seen += width;
+      }
+    }
+  }
+  return `${kept}…${closers}`;
 }
 
 /**
  * Rows aligned into columns two spaces apart. A plain string is a free line,
  * printed as it is without widening any column, so a long note under one
- * row cannot push every other row apart the way a table cell would.
+ * row cannot push every other row apart the way a table cell would. With a
+ * `fit`, the columns it names give way until the rows fit its width, their
+ * cells cut with an ellipsis; without one nothing is cut.
  */
-function aligned(rows: ReadonlyArray<readonly string[] | string>): string {
+function aligned(
+  input: ReadonlyArray<readonly string[] | string>,
+  fit?: Fit,
+): string {
+  // A tab in a cell would reach the next tab stop of the terminal, past any
+  // width this arithmetic knows; it shows as one space.
+  const rows = input.map((row) =>
+    typeof row === "string" ? row : row.map((cell) => cell.replace(/\t/g, " ")),
+  );
   const widths: number[] = [];
   for (const row of rows) {
     if (typeof row === "string") continue;
@@ -109,15 +199,17 @@ function aligned(rows: ReadonlyArray<readonly string[] | string>): string {
       widths[index] = Math.max(widths[index] ?? 0, visibleWidth(cell));
     });
   }
+  if (fit !== undefined) fitWidths(widths, fit);
   return rows
     .map((row) => {
       if (typeof row === "string") return row.trimEnd();
       return row
-        .map((cell, index) =>
-          index === row.length - 1
-            ? cell
-            : cell + " ".repeat(widths[index]! - visibleWidth(cell) + 2),
-        )
+        .map((cell, index) => {
+          const shown = cutVisible(cell, widths[index]!);
+          return index === row.length - 1
+            ? shown
+            : shown + " ".repeat(widths[index]! - visibleWidth(shown) + 2);
+        })
         .join("")
         .trimEnd();
     })
@@ -160,10 +252,13 @@ function shownId(d: DerivedTask, qualified: boolean | undefined): string {
 }
 
 /** The heading of a log entry, in the grammar `log.md` uses. */
+/**
+ * The heading of a listed entry: when and who. The session token stays in
+ * the file and in the JSON; a person reading a listing never needs it.
+ */
 function entryHeading(entry: LastEntryJson): string {
   const via = entry.via === null ? "" : ` via ${entry.via}`;
-  const session = entry.session === null ? "" : ` s:${entry.session}`;
-  return `${entry.time} ${entry.actor}${via}${session}`;
+  return `${entry.time} ${entry.actor}${via}`;
 }
 
 function blockedDetail(blocked: BlockedByJson): string {
@@ -177,6 +272,59 @@ export interface OverviewOptions {
   project?: boolean;
   /** Printed instead of an empty table. */
   empty?: string;
+  /** The instant the ages count from (default: the clock). */
+  now?: Date;
+  /** Add the CREATED column before UPDATED. */
+  created?: boolean;
+  /** `tree`: the order of siblings (default: by id). */
+  order?: (a: DerivedTask, b: DerivedTask) => number;
+  /** The width to fit, a terminal's; `null` or absent cuts nothing. */
+  width?: number | null;
+}
+
+/**
+ * The columns an overview lets give way, in order, and their floors. The
+ * title is free text and goes first; the situation and the labels are words
+ * that lose their meaning when cut, so only an extreme one (a `blocked by`
+ * naming several long ids) is touched, and never the ids, ages or priority.
+ */
+const GIVES_WAY: ReadonlyArray<readonly [string, number]> = [
+  ["TITLE", 12],
+  ["SITUATION", 40],
+  ["LABELS", 40],
+];
+
+/** The fit for an overview with these headings, or none outside a terminal. */
+function fitFor(
+  head: readonly string[],
+  options: OverviewOptions,
+): Fit | undefined {
+  if (options.width === undefined || options.width === null) return undefined;
+  return {
+    width: options.width,
+    shrink: GIVES_WAY.flatMap(([name, floor]) => {
+      const column = head.indexOf(name);
+      return column === -1 ? [] : [{ column, floor }];
+    }),
+  };
+}
+
+/** The heading row of an overview, in bold. */
+function headingRow(head: readonly string[]): string[] {
+  return head.map((name) => pc.bold(name));
+}
+
+/** The time columns: UPDATED always, CREATED before it on request. */
+function timeHeads(options: OverviewOptions): string[] {
+  return options.created ? ["CREATED", "UPDATED"] : ["UPDATED"];
+}
+
+/** The ages of a row's time columns, as `timeHeads` orders them. */
+function timeCells(d: DerivedTask, options: OverviewOptions): string[] {
+  const { created, updated } = d.snapshot.task.frontmatter;
+  const now = options.now ?? new Date();
+  const age = (timestamp: string) => pc.dim(compactAge(timestamp, now));
+  return options.created ? [age(created), age(updated)] : [age(updated)];
 }
 
 /** The PRIORITY column: a level other than `normal`, marked when inherited. */
@@ -190,17 +338,27 @@ export function renderOverview(
   options: OverviewOptions = {},
 ): string {
   if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
-  const out = table(["ID", "SITUATION", "PRIORITY", "LABELS", "TITLE"]);
+  const now = options.now ?? new Date();
+  const head = [
+    "ID",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
+  ];
+  const lines: Array<string[] | string> = [headingRow(head)];
   for (const d of rows) {
-    out.push([
+    lines.push([
       shownId(d, options.project),
       situationCell(d),
+      ...timeCells(d, options),
       priorityCell(d),
-      labels(d).join(" · "),
+      labels(d, now).join(" · "),
       d.snapshot.task.title,
     ]);
   }
-  return out.toString();
+  return aligned(lines, fitFor(head, options));
 }
 
 interface TreeNode {
@@ -227,17 +385,13 @@ function finishesAfterLines(d: DerivedTask, indent: string): string[] {
 }
 
 /**
- * `tree`: the rows nested by containment. A task nests under its nearest
- * ancestor that is itself among the rows and is named by the path below it,
- * so a filtered or scoped tree still reads correctly; `finishes_after`
- * entries follow their task.
+ * `tree`: the rows nested by containment, in display order. A task nests
+ * under its nearest ancestor that is itself among the rows and is named by
+ * the path below it, so a filtered or scoped tree still reads correctly;
+ * the local tree comes first, then projects as the rows first name them,
+ * siblings by `order` (ids by default) at every level.
  */
-export function renderTree(
-  rows: DerivedTask[],
-  options: OverviewOptions = {},
-): string {
-  if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
-
+function nestRows(rows: DerivedTask[], options: OverviewOptions): TreeNode[] {
   const shown = new Map(rows.map((d) => [d.json.id, d]));
   const nodes = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
@@ -271,31 +425,196 @@ export function renderTree(
     node.d.snapshot.project === null
       ? -1
       : firstSeen.get(node.d.snapshot.project)!;
-  const byId = (a: TreeNode, b: TreeNode) =>
-    compareIds(a.d.snapshot.task.id, b.d.snapshot.task.id);
-  roots.sort((a, b) => projectRank(a) - projectRank(b) || byId(a, b));
+  const order =
+    options.order ??
+    ((a: DerivedTask, b: DerivedTask) =>
+      compareIds(a.snapshot.task.id, b.snapshot.task.id));
+  const bySiblings = (a: TreeNode, b: TreeNode) => order(a.d, b.d);
+  roots.sort((a, b) => projectRank(a) - projectRank(b) || bySiblings(a, b));
+  const sortBeneath = (node: TreeNode) => {
+    node.children.sort(bySiblings);
+    node.children.forEach(sortBeneath);
+  };
+  roots.forEach(sortBeneath);
+  return roots;
+}
 
-  const lines: Array<string[] | string> = [
-    ["TASK", "SITUATION", "PRIORITY", "LABELS", "TITLE"].map((head) =>
-      pc.bold(head),
-    ),
-  ];
-  const walk = (list: TreeNode[], depth: number) => {
-    const indent = "  ".repeat(depth);
+/**
+ * The rows in the order `renderTree` lists them: depth first, siblings as
+ * `order` has them. `tree --json` emits this sequence, so the flat list and
+ * the nesting agree under `--sort`.
+ */
+export function treeSequence(
+  rows: DerivedTask[],
+  options: OverviewOptions = {},
+): DerivedTask[] {
+  const out: DerivedTask[] = [];
+  const walk = (list: TreeNode[]) => {
     for (const node of list) {
-      lines.push([
-        `${indent}${node.name}`,
-        situationCell(node.d),
-        priorityCell(node.d),
-        labels(node.d).join(" · "),
-        node.d.snapshot.task.title,
-      ]);
-      lines.push(...finishesAfterLines(node.d, `${indent}  `));
-      walk(node.children.sort(byId), depth + 1);
+      out.push(node.d);
+      walk(node.children);
     }
   };
-  walk(roots, 0);
-  return aligned(lines);
+  walk(nestRows(rows, options));
+  return out;
+}
+
+/**
+ * A line of the human tree: a task, named below the line above it, or the
+ * group directory or project alias that two or more siblings share, named
+ * once above them. The JSON knows no such line; `treeSequence` walks the
+ * nesting itself.
+ */
+interface TreeLine {
+  name: string;
+  task: TreeNode | null;
+  children: TreeLine[];
+}
+
+interface Folding {
+  node: TreeNode;
+  /** The segments of the name still to show: the alias with its colon first. */
+  segments: string[];
+}
+
+/** The project alias with its colon, then the path, segment by segment. */
+function nameSegments(name: string): string[] {
+  const colon = name.indexOf(":");
+  if (colon === -1) return name.split("/");
+  return [name.slice(0, colon + 1), ...name.slice(colon + 1).split("/")];
+}
+
+function joinSegments(segments: string[]): string {
+  const [first = "", ...rest] = segments;
+  return first.endsWith(":") ? `${first}${rest.join("/")}` : segments.join("/");
+}
+
+function foldingOf(node: TreeNode): Folding {
+  return { node, segments: nameSegments(node.name) };
+}
+
+type Slot =
+  | { kind: "one"; entry: Folding }
+  | { kind: "shared"; key: string; members: Folding[] };
+
+/**
+ * Siblings that share a leading group directory or project alias gather
+ * under one line naming it, as `index.md` lists a group, when two or more
+ * of them are shown; the line takes the place of the first of them, so a
+ * sort still reads top-down, and it swallows the next segment while every
+ * member shares that too (`ops/db/`, `api:webhooks/`). A prefix one sibling
+ * shows alone stays on its line, as a file browser compacts a folder with
+ * a single entry.
+ */
+function foldSiblings(entries: Folding[]): TreeLine[] {
+  const slots: Slot[] = [];
+  const shared = new Map<string, Folding[]>();
+  for (const entry of entries) {
+    const key = entry.segments.length > 1 ? entry.segments[0]! : null;
+    const members = key === null ? undefined : shared.get(key);
+    if (key === null) {
+      slots.push({ kind: "one", entry });
+    } else if (members === undefined) {
+      const list = [entry];
+      shared.set(key, list);
+      slots.push({ kind: "shared", key, members: list });
+    } else {
+      members.push(entry);
+    }
+  }
+  return slots.map((slot) =>
+    slot.kind === "one"
+      ? taskLine(slot.entry)
+      : slot.members.length === 1
+        ? taskLine(slot.members[0]!)
+        : headingLine(slot.key, slot.members),
+  );
+}
+
+function taskLine(entry: Folding): TreeLine {
+  return {
+    name: joinSegments(entry.segments),
+    task: entry.node,
+    children: foldSiblings(entry.node.children.map(foldingOf)),
+  };
+}
+
+function headingLine(key: string, members: Folding[]): TreeLine {
+  const heading = [key];
+  let rest = members.map((m) => ({ ...m, segments: m.segments.slice(1) }));
+  while (
+    rest.every((m) => m.segments.length > 1) &&
+    new Set(rest.map((m) => m.segments[0])).size === 1
+  ) {
+    heading.push(rest[0]!.segments[0]!);
+    rest = rest.map((m) => ({ ...m, segments: m.segments.slice(1) }));
+  }
+  return {
+    name: heading.map((s) => (s.endsWith(":") ? s : `${s}/`)).join(""),
+    task: null,
+    children: foldSiblings(rest),
+  };
+}
+
+export function renderTree(
+  rows: DerivedTask[],
+  options: OverviewOptions = {},
+): string {
+  if (rows.length === 0) return ui.dim(options.empty ?? "No tasks.");
+  const roots = nestRows(rows, options);
+  const now = options.now ?? new Date();
+  const head = [
+    "TASK",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
+  ];
+  const lines: Array<string[] | string> = [headingRow(head)];
+  const walk = (list: TreeLine[], depth: number) => {
+    const indent = "  ".repeat(depth);
+    for (const line of list) {
+      if (line.task === null) {
+        // A group or project line: the name alone, dimmed, nothing beside it.
+        lines.push([`${indent}${pc.dim(line.name)}`]);
+      } else {
+        const { d } = line.task;
+        lines.push([
+          `${indent}${line.name}`,
+          situationCell(d),
+          ...timeCells(d, options),
+          priorityCell(d),
+          labels(d, now).join(" · "),
+          d.snapshot.task.title,
+        ]);
+        lines.push(...finishesAfterLines(d, `${indent}  `));
+      }
+      walk(line.children, depth + 1);
+    }
+  };
+  walk(foldSiblings(roots.map(foldingOf)), 0);
+  return aligned(lines, fitFor(head, options));
+}
+
+/**
+ * A task's last log entry beneath its row: what happened, then who and how
+ * long ago, dimmed; the entry's further lines follow as written. The
+ * heading's timestamp and session token stay in the JSON and in `log`.
+ */
+function entryLines(
+  entry: LastEntryJson,
+  now: Date,
+  indent = "    ",
+): string[] {
+  const [first = "", ...rest] = entry.text.split("\n");
+  const who =
+    entry.via === null ? entry.actor : `${entry.actor} via ${entry.via}`;
+  const stamp = pc.dim(`(${who}, ${compactAge(entry.time, now)})`);
+  return [
+    `${indent}${first === "" ? stamp : `${first}  ${stamp}`}`,
+    ...(rest.length === 0 ? [] : indentLines(rest.join("\n"), indent)),
+  ];
 }
 
 /**
@@ -309,26 +628,29 @@ export function renderMine(
   if (rows.length === 0) {
     return ui.dim(options.empty ?? "Nothing claimed by or assigned to you.");
   }
-  const lines: Array<string[] | string> = [
-    ["ID", "SITUATION", "PRIORITY", "LABELS", "TITLE"].map((head) =>
-      pc.bold(head),
-    ),
+  const now = options.now ?? new Date();
+  const head = [
+    "ID",
+    "SITUATION",
+    ...timeHeads(options),
+    "PRIORITY",
+    "LABELS",
+    "TITLE",
   ];
+  const lines: Array<string[] | string> = [headingRow(head)];
   for (const d of rows) {
     lines.push([
       shownId(d, options.project),
       situationCell(d),
+      ...timeCells(d, options),
       priorityCell(d),
-      labels(d).join(" · "),
+      labels(d, now).join(" · "),
       d.snapshot.task.title,
     ]);
     const entry = d.derived.last_entry;
-    if (entry !== null) {
-      lines.push(`    ${pc.dim(entryHeading(entry))}`);
-      lines.push(...indentLines(entry.text, "    "));
-    }
+    if (entry !== null) lines.push(...entryLines(entry, now));
   }
-  return aligned(lines);
+  return aligned(lines, fitFor(head, options));
 }
 
 /**
@@ -383,8 +705,36 @@ function fieldLines(fields: ReadonlyArray<readonly [string, string | null]>) {
   );
 }
 
+/**
+ * The project's own keys as a block of their own after the fields, headed
+ * `custom fields` and indented beneath it, so a key named like a field or a
+ * condition (`situation`, `path`) is never taken for one.
+ */
+function customFieldLines(fields: ExtraKeys | undefined): string[] {
+  const entries = (fields ?? []).filter(([, value]) => value !== undefined);
+  if (entries.length === 0) return [];
+  const rows = fieldLines(
+    entries.map(([key, value]) => [key, customFieldText(value)] as const),
+  );
+  return [`  ${pc.dim("custom fields")}`, ...rows.map((row) => `  ${row}`)];
+}
+
 function listOrNull(values: readonly string[]): string | null {
   return values.length === 0 ? null : values.join(", ");
+}
+
+/** A gate's stored references, each as the command line takes it. */
+function referenceList(
+  d: DerivedTask,
+  raws: readonly string[],
+  refs: readonly ResolvedRef[],
+): string | null {
+  const byRef = new Map(refs.map((ref) => [ref.ref, ref]));
+  return listOrNull(
+    raws.map((raw) =>
+      referenceText(byRef.get(raw) ?? null, raw, d.snapshot.project),
+    ),
+  );
 }
 
 function headerLine(d: DerivedTask): string {
@@ -433,6 +783,11 @@ function blockedSection(d: DerivedTask): string[] {
 }
 
 export interface ShowExtras {
+  /**
+   * The project's own keys as read, printed as the file spells them; the
+   * JSON form spells a non-finite number as a string.
+   */
+  custom_fields?: ExtraKeys;
   body: string;
   workspace: string[];
   referenced_by: string[];
@@ -451,8 +806,11 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
       ["priority", priorityField(d)],
       ["assignee", json.assignee],
       ["claimed by", claimField(d)],
-      ["depends on", listOrNull(json.depends_on)],
-      ["finishes after", listOrNull(json.finishes_after)],
+      ["depends on", referenceList(d, json.depends_on, d.snapshot.start.refs)],
+      [
+        "finishes after",
+        referenceList(d, json.finishes_after, d.snapshot.finish.refs),
+      ],
       ["children", childrenField(d)],
       ["referenced by", listOrNull(extras.referenced_by)],
       ["workspace", listOrNull(extras.workspace)],
@@ -466,9 +824,12 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
           : null,
       ],
     ]),
+    ...customFieldLines(extras.custom_fields),
     ...blockedSection(d),
   ];
-  const body = extras.body.trim();
+  // The body as the file holds it: a first line that is indented, a code
+  // block for instance, keeps its indentation.
+  const body = normalizeBody(extras.body);
   if (body.length > 0) lines.push("", body);
   return lines.join("\n");
 }
@@ -481,6 +842,10 @@ export interface ResumeAncestor {
 }
 
 export interface ResumeExtras {
+  /** The project's own keys as read, printed as the file spells them. */
+  custom_fields?: ExtraKeys;
+  /** The task's markdown body: its definition. */
+  body: string;
   ancestors: ResumeAncestor[];
   children: DerivedTask[];
   workspace: string[];
@@ -492,9 +857,9 @@ export interface ResumeExtras {
 
 /**
  * `resume`: everything the next session reads to continue, in reading
- * order: the task, its ancestors (in the order given), its children,
- * the workspace, where the project's documentation lives, `state.md` in
- * full, and the last log entry.
+ * order: the task, its definition, its ancestors (in the order given), its
+ * children, the workspace, where the project's documentation lives,
+ * `state.md` in full, and the last log entry.
  */
 export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
   const { json } = d;
@@ -507,14 +872,24 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
         ["priority", priorityField(d)],
         ["assignee", json.assignee],
         ["claimed by", claimField(d)],
-        ["depends on", listOrNull(json.depends_on)],
-        ["finishes after", listOrNull(json.finishes_after)],
+        [
+          "depends on",
+          referenceList(d, json.depends_on, d.snapshot.start.refs),
+        ],
+        [
+          "finishes after",
+          referenceList(d, json.finishes_after, d.snapshot.finish.refs),
+        ],
         ["referenced by", listOrNull(extras.referenced_by)],
         ["path", json.path],
       ]),
+      ...customFieldLines(extras.custom_fields),
       ...blockedSection(d),
     ].join("\n"),
   ];
+
+  const body = normalizeBody(extras.body);
+  if (body.length > 0) sections.push(body);
 
   if (extras.ancestors.length > 0) {
     sections.push(
@@ -585,11 +960,9 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
   const entry = d.derived.last_entry;
   if (entry !== null) {
     sections.push(
-      [
-        pc.bold("Last entry"),
-        `  ${pc.dim(entryHeading(entry))}`,
-        ...indentLines(entry.text, "  "),
-      ].join("\n"),
+      [pc.bold("Last entry"), ...entryLines(entry, new Date(), "  ")].join(
+        "\n",
+      ),
     );
   }
   return sections.join("\n\n");
@@ -680,24 +1053,30 @@ export function renderSessionEnd(result: SessionEndJson): string {
     : `${head}\n  orphaned claims: ${result.claims.join(", ")}`;
 }
 
-/** `dep list` and `after list`: each reference and whether it is satisfied. */
+/**
+ * `dep list` and `after list`: each reference, named as the command line
+ * takes it, and whether it is satisfied.
+ */
 export function renderDepList(refs: ResolvedRef[]): string {
   if (refs.length === 0) return ui.dim("No references.");
-  const out = table(["REFERENCE", "SATISFIED", "DETAIL"]);
+  const lines: Array<string[] | string> = [
+    headingRow(["REFERENCE", "SATISFIED", "DETAIL"]),
+  ];
   for (const ref of refs) {
-    out.push([
-      ref.ref,
+    lines.push([
+      qualifyId(ref.project, ref.id),
       ref.satisfied ? pc.green("yes") : pc.red("no"),
       ref.satisfied
         ? pc.dim(ref.status ?? "")
         : blockedDetail({
             ref: ref.ref,
+            task: ref.task,
             reason: ref.reason ?? "missing",
             status: ref.status,
           }),
     ]);
   }
-  return out.toString();
+  return aligned(lines);
 }
 
 /** The rows that came from listed projects: those whose `project` is an alias. */
@@ -710,13 +1089,29 @@ function foreignRows(tasks: readonly unknown[]): number {
   ).length;
 }
 
+/** Why a listed project is left out, in a word or two; `validate` says the rest. */
+function unavailableWord(load: UnavailableTree): string {
+  switch (load.kind) {
+    case "not-checked-out":
+      return "not checked out";
+    case "unsupported-version":
+      return load.version === 1 ? "v1" : `v${load.version} unsupported`;
+    case "unresolved":
+      return load.cause === null ? "no tree" : "unreadable";
+  }
+}
+
 /**
  * The line under an overview: the count, the scope, the depth and, when
- * projects were spanned, how many rows came from them; then malformed.
+ * projects were spanned, how many rows came from them and which listed
+ * projects could not be shown, each with the reason in a word (the full
+ * sentence, with the remedy, is `validate`'s `project-unavailable`); then
+ * malformed.
  */
 export function renderCollectionFooter(
   collection: CollectionJson<unknown>,
   depth: number | null = null,
+  unavailable: readonly UnavailableTree[] = [],
 ): string {
   const parts = [plural(collection.count, "task")];
   if (collection.scope !== null) parts.push(`scope ${collection.scope}`);
@@ -724,6 +1119,15 @@ export function renderCollectionFooter(
   if (collection.projects.length > 0) {
     parts.push(
       `${foreignRows(collection.tasks)} from projects ${collection.projects.join(", ")}`,
+    );
+  }
+  if (unavailable.length > 0) {
+    parts.push(
+      `not shown: ${unavailable
+        .map(
+          (load) => `${load.alias ?? load.relPath} (${unavailableWord(load)})`,
+        )
+        .join(", ")}`,
     );
   }
   return [

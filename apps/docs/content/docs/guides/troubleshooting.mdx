@@ -83,9 +83,10 @@ If the claim is your own older session's, it becomes **orphaned** once that sess
 
 </Accordion>
 
-<Accordion title="A task shows `working by agent · orphaned since …`">
+<Accordion title="A task shows `working by agent · orphaned 3d`">
 
-Its claimant's session ended or went silent, so the claim protects nothing. The actor's
+Its claimant's session ended or went silent, so the claim protects nothing; the label says
+how long ago the session was last seen, and `show` gives the timestamp. The actor's
 next session takes it over with an ordinary claim, which records the superseded session
 and when it was last seen:
 
@@ -96,7 +97,7 @@ tasks claim wire-refresh
 
 ```txt
 ✓ claim auth-rework/wire-refresh: IN_PROGRESS → IN_PROGRESS
-  superseded agent s:s1 on auth-rework/wire-refresh (orphaned, last seen 2026-10-26T02:36:33Z)
+  superseded agent on auth-rework/wire-refresh (orphaned, last seen 2h ago)
 ```
 
 Another actor's orphaned claim is taken over only when a person says so. Should the

@@ -226,6 +226,11 @@ export type GateReason = (typeof GATE_REASONS)[number];
  */
 export interface ResolvedRef {
   ref: string;
+  /**
+   * The target as the command line names it: `alias:path` for a listed
+   * project, bare for the local tree; `null` when no alias names its tree.
+   */
+  task: string | null;
   project: string | null;
   /** The target id inside its own tree. */
   id: string;
@@ -239,6 +244,8 @@ export interface ResolvedRef {
 /** An unsatisfied reference as the JSON `blocked_by` list carries it. */
 export interface BlockedByJson {
   ref: string;
+  /** The target as the command line names it, or `null`. */
+  task: string | null;
   reason: GateReason;
   status: Status | null;
 }
@@ -261,6 +268,15 @@ export interface FinishGate {
 /* ------------------------------------------------------------------------ */
 
 export type Liveness = "live" | "orphaned" | "unknown";
+
+/**
+ * How a task is the calling actor's: a claim of this session (or one
+ * without a session when the caller has none), the actor's claim whose
+ * session is gone, the actor's claim held elsewhere (another live session,
+ * or unknown liveness), or an open task assigned to the actor and not
+ * claimed by them.
+ */
+export type Yours = "this-session" | "orphaned" | "elsewhere" | "inbox";
 
 export interface ClaimLiveness {
   liveness: Liveness;
@@ -331,6 +347,8 @@ export interface Derived {
   liveness: Liveness | null;
   /** `IN_PROGRESS` with a session only; `null` otherwise. */
   last_seen: string | null;
+  /** How the task is the calling actor's, or `null`. */
+  yours: Yours | null;
   last_entry: LastEntryJson | null;
 }
 
@@ -367,11 +385,56 @@ export interface TaskJson extends Frontmatter {
   /** The alias of the task's tree, or `null` for the local tree. */
   project: string | null;
   title: string;
+  /**
+   * The manifest's keys the convention does not define — the project's own —
+   * as read, in read order. Absent when there are none, so a tree without
+   * keys of its own keeps the shape it had.
+   */
+  custom_fields?: Record<string, unknown>;
   /** Absolute path of the task directory. */
   path: string;
 }
 
 export type TaskWithDerivedJson = TaskJson & Derived;
+
+/**
+ * The keys of a task object, in the order `toTaskJson` writes them;
+ * `custom_fields` only when the manifest has keys of its own.
+ */
+export const TASK_JSON_KEYS: readonly (keyof TaskJson)[] = [
+  "id",
+  "name",
+  "parent",
+  "project",
+  "title",
+  ...FRONTMATTER_KEYS,
+  "custom_fields",
+  "path",
+];
+
+/** The derived conditions, in the order a task object carries them. */
+export const DERIVED_KEYS: readonly (keyof Derived)[] = [
+  "situation",
+  "blocked_by",
+  "ready",
+  "effective_priority",
+  "held_by",
+  "started",
+  "children",
+  "active",
+  "waiting_for",
+  "closable",
+  "liveness",
+  "last_seen",
+  "yours",
+  "last_entry",
+];
+
+/** Every key of a task object with its conditions: what `--fields` names. */
+export const TASK_OBJECT_KEYS: readonly string[] = [
+  ...TASK_JSON_KEYS,
+  ...DERIVED_KEYS,
+];
 
 export interface MalformedJson {
   path: string;
@@ -451,6 +514,7 @@ export const FINDING_KINDS = [
   "archived-path-conflict",
   "duplicate-id",
   "log-conflict-markers",
+  "undeclared-key",
   "paused-without-state",
   "todo-with-state",
   "unsatisfiable-ref",

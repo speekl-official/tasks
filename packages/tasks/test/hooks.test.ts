@@ -6,6 +6,8 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { HooksInstallJson } from "../src/commands/hooks.js";
+import { SESSION_START_FIELDS } from "../src/core/hooks.js";
+import { TASK_OBJECT_KEYS } from "../src/core/types.js";
 import { ExitCode } from "../src/errors.js";
 import type { CliResult, Sandbox } from "./helpers.js";
 import { makeSandbox, treeSandbox } from "./helpers.js";
@@ -110,6 +112,24 @@ describe("hooks install", () => {
     const text = await guideText();
     expect(await settings(sandbox)).toEqual(JSON.parse(text));
     expect(await sandbox.read(SETTINGS)).toBe(`${text}\n`);
+  });
+
+  it("prints on SessionStart keys mine accepts, so the hook never goes silent", async () => {
+    // A name `--fields` refuses makes `mine` exit 2, and the hook prints nothing.
+    const [entry] = await documented("SessionStart");
+    const fields = /--fields (\S+)/.exec(entry!.hooks[0]!.command)?.at(1);
+    expect(fields).toBe(SESSION_START_FIELDS);
+    for (const field of SESSION_START_FIELDS.split(",")) {
+      expect(TASK_OBJECT_KEYS).toContain(field);
+    }
+    sandbox = await treeSandbox({});
+    const result = await sandbox.run(
+      "mine",
+      "--json",
+      "--fields",
+      SESSION_START_FIELDS,
+    );
+    expect(result.code).toBe(ExitCode.Success);
   });
 
   it("creates .claude/settings.json with the four events, and says so", async () => {
@@ -254,7 +274,8 @@ describe("hooks install", () => {
     const file = path.join(sandbox.dir, SETTINGS);
     const first = command("say first");
     const last = command("say last");
-    // A local install and another actor: still the Stop event's tasks hook.
+    // A local install and another actor: still the Stop event's tasks hook,
+    // and the actor the other hooks are then written for.
     const edited = command(
       "TASKS_ACTOR=bot ./node_modules/.bin/tasks session-check --json; exit 0",
     );
@@ -266,7 +287,7 @@ describe("hooks install", () => {
     const partial = await install(sandbox);
     expect(partial.code).toBe(ExitCode.Success);
     expect(plain(partial.stdout)).toBe(
-      "✓ Installed the SessionStart, PostToolUse and SessionEnd hooks in .claude/settings.json for actor agent; kept the existing Stop hook (--force replaces it)\n",
+      "✓ Installed the SessionStart, PostToolUse and SessionEnd hooks in .claude/settings.json for actor bot; kept the existing Stop hook (--force replaces it)\n",
     );
     expect((await settings(sandbox)).hooks.Stop).toEqual([first, edited, last]);
     const unforced = await sandbox.read(SETTINGS);
@@ -276,21 +297,21 @@ describe("hooks install", () => {
     expect(forced.json<HooksInstallJson>()).toEqual({
       installed: true,
       file,
-      actor: "agent",
+      actor: "bot",
       written: ["Stop"],
       kept: ["SessionStart", "PostToolUse", "SessionEnd"],
     });
     // In the place of the entry it replaces, between the same neighbours.
     expect((await settings(sandbox)).hooks.Stop).toEqual([
       first,
-      ...(await documented("Stop")),
+      ...(await documented("Stop", "bot")),
       last,
     ]);
 
     await sandbox.write(SETTINGS, unforced);
     const human = await install(sandbox, "--force");
     expect(plain(human.stdout)).toBe(
-      "✓ Installed the Stop hook in .claude/settings.json for actor agent; the SessionStart, PostToolUse and SessionEnd hooks were up to date\n",
+      "✓ Installed the Stop hook in .claude/settings.json for actor bot; the SessionStart, PostToolUse and SessionEnd hooks were up to date\n",
     );
   });
 
@@ -312,7 +333,8 @@ describe("hooks install", () => {
       JSON.stringify({ hooks: { PostToolUse: [foreign, shared, duplicate] } }),
     );
 
-    const kept = await install(sandbox, "--json");
+    // The hand-written hook names no actor, so adding the rest needs one.
+    const kept = await install(sandbox, "--actor", "agent", "--json");
     expect(kept.json<HooksInstallJson>()).toMatchObject({
       written: ["SessionStart", "Stop", "SessionEnd"],
       kept: ["PostToolUse"],
@@ -382,6 +404,142 @@ describe("hooks install", () => {
       kept: [],
     });
     expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+  });
+
+  it("refreshes the hooks for the actor they have, unless --actor names another", async () => {
+    sandbox = await treeSandbox({});
+    await install(sandbox, "--actor", "claude");
+
+    // Up to date already: nothing is written, and nothing changes hands.
+    const current = await install(sandbox, "--force", "--json");
+    expect(current.json<HooksInstallJson>()).toMatchObject({
+      installed: false,
+      actor: "claude",
+      kept: EVENTS,
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+
+    // An older hook of that actor is replaced by the current one, for the
+    // same actor.
+    const file = await settings(sandbox);
+    const start = file.hooks.SessionStart?.[0]?.hooks[0];
+    if (start === undefined) throw new Error("no SessionStart hook");
+    start.command = "TASKS_ACTOR=claude tasks mine --json";
+    await sandbox.write(SETTINGS, `${JSON.stringify(file, null, 2)}\n`);
+    const refreshed = await install(sandbox, "--force", "--json");
+    expect(refreshed.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "claude",
+      written: ["SessionStart"],
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+
+    // Only --actor renames them.
+    const renamed = await install(
+      sandbox,
+      "--force",
+      "--actor",
+      "agent",
+      "--json",
+    );
+    expect(renamed.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "agent",
+      written: EVENTS,
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("agent"));
+  });
+
+  it("reads a quoted actor from the hooks, and asks for --actor when they name none", async () => {
+    sandbox = await treeSandbox({});
+    for (const quoted of ['"claude"', "'claude'"]) {
+      await sandbox.write(
+        SETTINGS,
+        JSON.stringify({
+          hooks: {
+            SessionStart: [
+              command(`TASKS_ACTOR=${quoted} tasks mine --json; exit 0`),
+            ],
+          },
+        }),
+      );
+      const refreshed = await install(sandbox, "--force", "--json");
+      expect(refreshed.json<HooksInstallJson>()).toMatchObject({
+        installed: true,
+        actor: "claude",
+      });
+      expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+    }
+
+    // A computed name is no literal: the prefix before `$` is not the actor.
+    await sandbox.write(
+      SETTINGS,
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            command(
+              "TASKS_ACTOR=review${ROLE_SUFFIX} tasks mine --json; exit 0",
+            ),
+          ],
+        },
+      }),
+    );
+    const computed = await install(sandbox, "--force", "--json");
+    expect(computed.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(computed.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.",
+    );
+
+    // Hooks that name no actor: a refresh would choose one for them, and so
+    // would a plain install that adds the missing events beside them.
+    const bare = {
+      hooks: { Stop: [command("tasks session-check --json; exit 0")] },
+    };
+    await sandbox.write(SETTINGS, JSON.stringify(bare));
+    const refused = await install(sandbox, "--force", "--json");
+    expect(refused.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(refused.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.",
+    );
+    expect(JSON.parse(await sandbox.read(SETTINGS))).toEqual(bare);
+    const plain = await install(sandbox, "--json");
+    expect(plain.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(plain.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --actor <name> to choose the actor.",
+    );
+    expect(JSON.parse(await sandbox.read(SETTINGS))).toEqual(bare);
+    // With every event's hook in place and no --force, nothing is written
+    // and nothing is asked.
+    const complete = {
+      hooks: Object.fromEntries(
+        EVENTS.map((event) => [
+          event,
+          [
+            command(
+              `tasks ${event === "SessionStart" ? "mine" : event === "PostToolUse" ? "heartbeat" : event === "Stop" ? "session-check" : "session-end"} --json; exit 0`,
+            ),
+          ],
+        ]),
+      ),
+    };
+    await sandbox.write(SETTINGS, JSON.stringify(complete));
+    const untouched = await install(sandbox, "--json");
+    expect(untouched.json<HooksInstallJson>()).toMatchObject({
+      installed: false,
+      skipped: "exists",
+    });
+    await sandbox.write(SETTINGS, JSON.stringify(bare));
+    const chosen = await install(
+      sandbox,
+      "--force",
+      "--actor",
+      "bot",
+      "--json",
+    );
+    expect(chosen.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "bot",
+    });
   });
 
   it("refuses an --actor that is not an actor, and writes nothing", async () => {

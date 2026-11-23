@@ -63,7 +63,9 @@ describe("dep add", () => {
       id: "x/a",
       depends_on: ["y/b"],
       situation: "blocked",
-      blocked_by: [{ ref: "y/b", reason: "not-done", status: "TODO" }],
+      blocked_by: [
+        { ref: "y/b", task: "y/b", reason: "not-done", status: "TODO" },
+      ],
     });
     expect(json.updated).not.toBe(FIXTURE_TIME);
     expect(json.created).toBe(FIXTURE_TIME);
@@ -120,7 +122,12 @@ describe("dep add", () => {
     expect(result.json<TaskWithDerivedJson>()).toMatchObject({
       depends_on: ["../backend:kernel/tests"],
       blocked_by: [
-        { ref: "../backend:kernel/tests", reason: "not-done", status: "TODO" },
+        {
+          ref: "../backend:kernel/tests",
+          task: "backend:kernel/tests",
+          reason: "not-done",
+          status: "TODO",
+        },
       ],
     });
   });
@@ -262,6 +269,37 @@ describe("dep rm", () => {
       "dep add: y/b, y/done",
       "dep rm: y/b",
     ]);
+  });
+
+  it("names a reference as list prints it, so the caller's x and a project's x stay apart", async () => {
+    const s = await box({ tasks: { x: {} } });
+    await s.project("api", "../api", { tasks: { x: {}, holder: {} } });
+    expect((await s.run("dep", "add", "api:holder", "x", "api:x")).code).toBe(
+      0,
+    );
+    const names = async () =>
+      (await s.run("dep", "list", "api:holder", "--json"))
+        .json<{ refs: ResolvedRef[] }>()
+        .refs.map((ref) => ref.task);
+    expect(await names()).toEqual(["x", "api:x"]);
+    // The caller's `x` is the local tree's, as the listing says.
+    expect((await s.run("dep", "rm", "api:holder", "x", "--json")).code).toBe(
+      0,
+    );
+    expect(await names()).toEqual(["api:x"]);
+  });
+
+  it("finds a stored path spelt another way by the target it names", async () => {
+    const s = await box({
+      tasks: { a: { depends_on: ["../backend/.:kernel/tests"] } },
+    });
+    await s.project("backend", "../backend", { tasks: { "kernel/tests": {} } });
+    expect((await s.run("dep", "rm", "a", "backend:kernel/tests")).code).toBe(
+      0,
+    );
+    expect((await s.loadTree()).byId.get("a")?.frontmatter.depends_on).toEqual(
+      [],
+    );
   });
 
   it("refuses a reference that is not there as not found", async () => {

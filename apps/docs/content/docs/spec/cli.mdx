@@ -18,6 +18,15 @@ unspecified and MUST NOT be parsed. `validate` and `session-check` report a fail
 their result document on stdout with exit `4`, not as an error (see
 [their output](/docs/spec/cli#validation-session-check-and-session-end-output)).
 
+A command whose document is a task object, or a collection of them, SHOULD accept `--fields <list>`
+beside `--json`: a comma-separated list of keys, under which each task object carries only those
+keys, in that order (the task objects under `child_tasks` included), and a collection keeps its own keys
+around the trimmed rows. The names are the
+task object's keys (`id`, `situation`, …) and the extras the command adds (`body`, `state`,
+`cascaded`, …); a name no document has is a usage error, raised before any write; a key this
+document happens not to carry is left out. `--fields` without `--json` is a usage error. The whole
+document stays the contract; `--fields` only trims it.
+
 | Code | Name | Meaning |
 | --- | --- | --- |
 | `0` | success | The command completed. An empty result set is success. |
@@ -97,12 +106,21 @@ A command returning a single task MUST emit at least:
 task belongs to, or `null` for the local tree; ids of foreign tasks in aggregated output MUST be
 qualified as `alias:path`.
 
+When the manifest carries keys this specification does not define ([Serialization](/docs/spec/task-file#serialization)),
+the object MUST carry `custom_fields` after `updated`: those keys in read order, each with its
+value as read. When it carries none, the key MUST be absent, so a tree without keys of its own
+keeps the shape above. An implementation MUST NOT interpret them there any more than in the file. A number YAML reads as infinite or not a number, which JSON cannot carry, comes as the string
+`.inf`, `-.inf` or `.nan`, inside lists and mappings too; YAML `null` stays `null`.
+
 Commands that report state (`show`, `resume`, `ready`, `list`, `tree`, `mine`) MUST add the
 derived conditions: `situation` (the word of the [Situation](/docs/spec/lifecycle#situation) table), `blocked_by` (a
-list of `{ref, reason, status}`; empty for a resolved task), `ready` (for the calling actor), `effective_priority`, `held_by` (the nearest claimed or assigned ancestor — or a malformed one, which holds for all anyone can tell — or `null`; `null` for a resolved task), `started`, `children`
+list of `{ref, task, reason, status}`: the reference as stored, the target as the command line names it, `alias:path` for a listed project and bare for the local tree, or `null` when no alias names its tree, the reason and the target's status; empty for a resolved task), `ready` (for the calling actor), `effective_priority`, `held_by` (the nearest claimed or assigned ancestor — or a malformed one, which holds for all anyone can tell — or `null`; `null` for a resolved task), `started`, `children`
 (`{open, resolved}`), `active` (an `IN_PROGRESS` descendant exists), `waiting_for`, `closable`,
 `liveness` and `last_seen` (`null` unless the task is `IN_PROGRESS`; `last_seen` is `null` too for a
-claim without a session), and `last_entry`: the task's most recent log entry
+claim without a session), `yours` (how the task is the calling actor's: `this-session` for a claim of this session, a claim
+without a session counting as this session's when the caller has none; `orphaned` for the actor's
+claim whose session is gone; `elsewhere` for the actor's claim in another live session or of unknown
+liveness; `inbox` for an open task assigned to the actor and not claimed by them; else `null`), and `last_entry`: the task's most recent log entry
 in the shape of [log entries](/docs/spec/cli#log-entries) without `task`, or `null`: the task's last
 activity, not a message channel (see [`log.md`](/docs/spec/workspace)). `mine` MUST render
 `last_entry`. `cancel` adds `dependents`: the open tasks,
@@ -132,8 +150,8 @@ manifest could not be parsed (see [Structure](/docs/spec/task-file#structure)); 
 `{ "alias", "reason" }` for every listed project the query could not read — `not-checked-out`,
 `unresolved-project` or `unsupported-version` — so an empty project is told from an unread one.
 `tree` emits this same object: a flat
-list in which every task carries `parent`; nesting is how the human-readable rendering presents
-it, not a property of the JSON.
+list in which every task carries `parent`; the nesting and the lines that name a group or a
+project are how the human-readable rendering presents it, not a property of the JSON.
 
 ## Log entries
 
@@ -171,17 +189,17 @@ directory for [discovery](/docs/spec/layout#discovery).
 | `init` | Scaffold a tree: `config.yml` with `version: 2`, `README.md`, `.gitignore`. The caller asks before creating; the command never prompts. Print the resolved actor; MAY write the roster on request (`--actors`). |
 | `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]` | Create a task; groups on demand; an existing group at the path becomes the task; refuse an existing task, a resolved parent, a reserved path; `--assign` names a listed actor when the tree lists actors. |
 | `show <task> [--archived]` | The task object with derived conditions and the body; `--archived` reads a task under `.archive/` by its former path in full, the object carrying `archived: true`. |
-| `resume <task>` | The task object; one line per ancestor (id, title, status, workspace files); children with statuses and conditions; the workspace file list; the documentation locations `config.yml` lists, each with whether it exists here; `state.md` in full; the last log entry. |
-| `ready [--scope <path>] [--all] [--local]` | The ready set for the calling actor in ready order: effective priority, `PAUSED` first, oldest first. |
-| `mine [--as <actor>] [--local]` | Open tasks whose assignee or claimant is the actor, each with its situation, liveness and last log entry. |
+| `resume <task>` | The task object; its body, the definition; one line per ancestor (id, title, status, workspace files); children with statuses and conditions; the workspace file list; the documentation locations `config.yml` lists, each with whether it exists here; `state.md` in full; the last log entry. |
+| `ready [--scope <path>] [--all] [--local] [--priority <level>]` | The ready set for the calling actor in ready order: effective priority, `PAUSED` first, oldest first; `--priority <level>` keeps the tasks whose effective priority is at least that level. |
+| `mine [--as <actor>] [--local]` | Open tasks whose assignee or claimant is the actor (the tasks whose `yours` is not `null`), each with its situation, liveness and last log entry. |
 | `actors [--local]` | OPTIONAL, RECOMMENDED: the actors `config.yml` lists, each with its description and its open tasks, then every other actor an open task names, and the caller: the [actors object](/docs/spec/cli#actors-object). |
-| `list [--<situation>] [--active] [--depth <n> \| --top]`, `tree [--depth <n> \| --top]` | Overviews by [situation](/docs/spec/lifecycle#situation); `list` filters by situation (`--parked`, `--blocked`, `--waiting`, …) and by the `active` label (`--active`: an `IN_PROGRESS` task beneath); `tree` nests by containment in its human output and renders `finishes_after` entries under their task, tagged with their project; its JSON is the flat [collection object](/docs/spec/cli#collection-object). `--depth <n>` keeps the tasks whose containment depth is at most *n*, a task's depth being one more than the number of task ancestors it has within the scope (a listed tree counts from its root); `--top` is `--depth 1`: the tasks with no task ancestor there. |
+| `list [--<situation>] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created\|updated] [--reverse] [--depth <n> \| --top]`, `tree [--sort created\|updated] [--reverse] [--depth <n> \| --top]` | Overviews by [situation](/docs/spec/lifecycle#situation); `list` filters by situation (`--parked`, `--blocked`, `--waiting`, …), by the `active` label (`--active`: an `IN_PROGRESS` task beneath), by effective priority (`--priority <level>`: that level or above, narrowing what the other filters select) and by time (`--updated-before`, `--created-since`: bounds in the grammar of `--since`, narrowing likewise); `--sort created\|updated` orders by that timestamp, newest first, `--reverse` oldest first, among siblings in `tree`; `tree` nests by containment in its human output, gathers two or more siblings that share a group directory or a project alias under one line naming it (`ops/`, `api:`), and renders `finishes_after` entries under their task, tagged with their project; its JSON is the flat [collection object](/docs/spec/cli#collection-object). `--depth <n>` keeps the tasks whose containment depth is at most *n*, a task's depth being one more than the number of task ancestors it has within the scope (a listed tree counts from its root); `--top` is `--depth 1`: the tasks with no task ancestor there. |
 | `schedule`, `defer`, `claim [--next [--scope <path>]]`, `pause -m`, `release`, `done -m`, `cancel -m`, `reopen -m`, `handoff <actor> -m`, `assign <actor>`, `unassign`, `priority <level>` | The [transitions](/docs/spec/lifecycle#transitions); `--force` as defined under [Force](/docs/spec/lifecycle#force). |
 | `dep add\|rm\|list <task> [<ref>…]` and `after add\|rm\|list <task> [<ref>…]` | Edit and inspect `depends_on` and `finishes_after` with the [mutation constraints](/docs/spec/dependencies#cycles); `<ref>` resolves like `<task>` ([addressing](/docs/spec/identity#command-line-addressing)) and is stored in full. |
 | `move <task\|group> <destination>` | Relocate with reference rewriting in this tree and in listed trees; list the trees it could not write and the references it could not rewrite. |
 | `archive <task> [--force]`, `archive --resolved-before [<when>] \| --all-resolved`, `restore <path>`, `purge <path>` | Archive a resolved subtree, or every resolved subtree of this tree whose root was resolved before a time (a timestamp, a date or a duration back from now), skipping and naming the roots open tasks reference; restore one to a free path, never under a resolved parent; purge an archive entry (see [`.archive/`](/docs/spec/layout#archive)). |
 | `delete <task>` | OPTIONAL: remove a never-worked task without archiving it, under the conditions in [`.archive/`](/docs/spec/layout#archive). |
-| `log <task> "<text>"`, `log <task> [--archived]`, `log --since <duration\|timestamp> [--local] [--archived]` | Append a narrative entry; print one task's entries; list entries across the tree(s) by time as [log entries](/docs/spec/cli#log-entries), the archive's included on request. |
+| `log <task> "<text>"`, `log <task> [--since <when>] [--actor <actor>] [--archived]`, `log --since <duration\|timestamp> [--actor <actor>] [--scope <path>] [--local] [--archived]` | Append a narrative entry; print one task's entries, since a time or one actor's on request; list entries across the tree(s) by time as [log entries](/docs/spec/cli#log-entries), narrowed on request to one actor's and to a scope (a task or group path of the local tree and everything beneath it, which keeps the listing to that tree), the archive's included on request. |
 | `note <task> "<text>"` | Append a dated, attributed note under `## Notes` of the task's body — an input for whoever works on it next — and log it as `note`; no transition, no authorization (see [Body](/docs/spec/task-file)). |
 | `state <task> [--edit]` | OPTIONAL, RECOMMENDED: replace `state.md` with standard input, or open it in the caller's editor with `--edit`; no transition, no log entry (see [`state.md`](/docs/spec/workspace#statemd)). |
 | `heartbeat` | Touch the current session's registry file; usage error without a session. |
@@ -189,7 +207,7 @@ directory for [discovery](/docs/spec/layout#discovery).
 | `session-check [--as <actor>]` | The [exit invariant](/docs/spec/sessions#session-check); exit `4` on violations. |
 | `validate [--fix]` | The [validation](/docs/spec/task-file#validation) findings; `--fix` regenerates `index.md` only. |
 | `reindex` | Regenerate `index.md`. |
-| `migrate [<alias>] [--map OLD=NEW …] [--map-phase OLD=NEW …]` | The one-time [upgrade from v1](/docs/spec/migration) of this tree, or of a listed project. |
+| `migrate [<alias>] [--dry-run] [--map OLD=NEW …] [--map-phase OLD=NEW …]` | The one-time [upgrade from v1](/docs/spec/migration) of this tree, or of a listed project; `--dry-run` performs every check and reports the plan without writing into the tree. |
 
 ## Validation, session-check and session-end output
 

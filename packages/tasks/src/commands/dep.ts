@@ -17,7 +17,14 @@ import {
   passedOverLine,
 } from "../core/workspace.js";
 import { TaskError, isTaskError } from "../errors.js";
-import { emitJson, renderDepList, ui, writeOut } from "../output.js";
+import {
+  emitJson,
+  emitTaskJson,
+  renderDepList,
+  ui,
+  writeOut,
+} from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 
 /** What distinguishes `dep` from `after`: the field and how to speak of it. */
 interface GateSpec {
@@ -67,22 +74,25 @@ interface ListOptions {
 type EditAction = "add" | "rm";
 
 /**
- * The stored form of a reference argument. It resolves like a task argument
- * — an alias prefix names a listed project, a bare path the local tree, and
- * the path is an exact id or an unambiguous suffix within that tree — and is
- * then written as `holder` must store it.
+ * A reference argument resolved like a task argument — an alias prefix names
+ * a listed project, a bare path the local tree, and the path is an exact id
+ * or an unambiguous suffix within that tree — as `holder` must store it, and
+ * as the command line names it (what `list` prints).
  */
-async function storedForm(
+async function resolvedForm(
   context: CommandContext,
   holder: LoadedTree,
   arg: string,
-): Promise<string> {
+): Promise<{ stored: string; name: string }> {
   const { load, path } = await addressTree(context, arg, "reference");
   // The holder's own tree is read as of the lock the edit runs under.
   const target =
     load.key === holder.key ? holder : context.projects.latest(load);
   const id = resolveTaskId(target.tree, path);
-  return context.projects.storedReference(holder, target, id);
+  return {
+    stored: context.projects.storedReference(holder, target, id),
+    name: context.projects.qualify(target, id),
+  };
 }
 
 /**
@@ -118,9 +128,14 @@ async function literalForm(
 }
 
 /**
- * The entry of `stored` that `arg` names for removal: the argument exactly as
- * stored (how `list` prints it), else what it resolves to like `add`, else —
- * when its target no longer resolves — the argument taken as a full id.
+ * The entry of `stored` that `arg` names for removal, in this order: what it
+ * resolves to like `add` (the form `list` prints), matched by the target it
+ * names so a stored path spelt another way is found too; the argument
+ * exactly as stored, for a reference that resolves to nothing; else — when
+ * its target is gone — the argument taken as a full id. Resolution comes
+ * first because `list` prints the caller's names: in a listed project's
+ * task, a bare `x` stored there is that project's `x`, while the caller's
+ * bare `x` is the local tree's.
  */
 async function storedEntry(
   context: CommandContext,
@@ -128,20 +143,27 @@ async function storedEntry(
   stored: readonly string[],
   arg: string,
 ): Promise<string | null> {
-  if (stored.includes(arg)) return arg;
-
   let knownId: string | null = null;
   try {
-    const form = await storedForm(context, holder, arg);
+    const { stored: form, name } = await resolvedForm(context, holder, arg);
     if (stored.includes(form)) return form;
+    for (const entry of stored) {
+      if ((await context.gates.resolveRef(holder, entry)).task === name) {
+        return entry;
+      }
+    }
   } catch (err) {
-    if (!isTaskError(err) || err.code !== "NOT_FOUND") throw err;
+    if (!isTaskError(err)) throw err;
+    // An ambiguous suffix that is also stored verbatim means the stored one.
+    if (err.code === "USAGE" && stored.includes(arg)) return arg;
+    if (err.code !== "NOT_FOUND") throw err;
     // An archived target is named in full by the error.
     const details = err.details ?? {};
     if (details.archived === true && typeof details.id === "string") {
       knownId = details.id;
     }
   }
+  if (stored.includes(arg)) return arg;
 
   const literal = await literalForm(context, holder, arg, knownId);
   return literal !== null && stored.includes(literal) ? literal : null;
@@ -203,7 +225,7 @@ async function editGate(
 
       if (action === "add") {
         for (const arg of refArgs) {
-          const stored = await storedForm(context, fresh.load, arg);
+          const { stored } = await resolvedForm(context, fresh.load, arg);
           // Adding what is there is no change: the edit is idempotent.
           if (current.includes(stored) || changed.includes(stored)) {
             if (!unchanged.includes(stored)) unchanged.push(stored);
@@ -265,7 +287,7 @@ async function editGate(
 
   const json = await derivedTaskJson(context, load, outcome.id);
   if (context.json) {
-    emitJson(json);
+    emitTaskJson(context, json);
     return;
   }
 
@@ -362,6 +384,7 @@ function gateCommand(spec: GateSpec): Command {
       "override authorization (another session's live claim, an assignee); logged",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       (task: string, refs: string[], options: EditOptions, command: Command) =>
         editGate(spec, "add", task, refs, options, command),
@@ -370,7 +393,7 @@ function gateCommand(spec: GateSpec): Command {
   group
     .command("rm")
     .description(
-      "remove references from the task, named as stored or as for add",
+      "remove references from the task, named as dep list prints them (as for add) or as stored",
     )
     .argument("<task>", "the task to edit")
     .argument("<refs...>", "the references to remove")
@@ -379,6 +402,7 @@ function gateCommand(spec: GateSpec): Command {
       "override authorization (another session's live claim, an assignee); logged",
     )
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(
       (task: string, refs: string[], options: EditOptions, command: Command) =>
         editGate(spec, "rm", task, refs, options, command),

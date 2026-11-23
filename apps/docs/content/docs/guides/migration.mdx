@@ -30,6 +30,15 @@ the point: run it on a clean working tree and review the result as a diff.
 
 ## Run it
 
+Preview it first: `--dry-run` runs every check and prints the same report with nothing
+written into the tree, a refusal included.
+
+```sh
+tasks migrate --dry-run
+```
+
+Then run it:
+
 ```sh
 tasks migrate
 ```

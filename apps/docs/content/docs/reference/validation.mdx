@@ -46,6 +46,7 @@ status survives in a `task.md` is a person's decision.
 | `archived-path-conflict`         | A live task sits at a path an archived task reserves.                                                  |
 | `duplicate-id`                   | An interrupted cross-filesystem move left the same task twice, recorded by a `.moving` marker: keep one copy, then delete the marker. |
 | `log-conflict-markers`           | A `log.md` holds version-control conflict markers: keep both entries, in time order.                  |
+| `undeclared-key`                 | A frontmatter key outside the `custom_fields` that `config.yml` declares: a typo, or a list that is behind. Add it to the list, or take it out of the file. Only once the list is set. |
 
 ## Warnings
 
@@ -55,7 +56,7 @@ status survives in a `task.md` is a person's decision.
 | `todo-with-state`      | A `TODO` task has a `state.md`: started work is `PAUSED`, not `TODO`.                                       |
 | `unsatisfiable-ref`    | A reference of an open task can never be satisfied: missing, archived, cancelled (for `depends_on`), in a project that does not resolve, is not checked out, or has an unsupported version. A malformed target is reported as `malformed` on the target itself, not here. |
 | `claim-liveness`       | An `IN_PROGRESS` claim is orphaned and may be taken over, or its session has no heartbeat file here (another machine, or a cleaned `.locks/`). A claim without a session is normal and not reported. |
-| `unknown-key`          | A frontmatter key the convention does not define. It is kept on every write; v1's `id` and `phase` are named as such. |
+| `unknown-key`          | A frontmatter key the convention does not define, in a tree whose `config.yml` declares no `custom_fields`: the project's own, kept on every write and carried by the task object as `custom_fields`, or a misspelt field; v1's `id` and `phase` are named as such. Declare the project's keys and the warning becomes a check. |
 | `unknown-actor`        | An open task's `assignee` or `claimed_by` is not under `actors:` in `config.yml`: a misspelt name, or a roster that is behind. `tasks assign` a listed actor, or add the name. Only with a roster. |
 | `project-unavailable`  | A project listed in `config.yml` is not checked out, leads to no tree, or is a v1 or unsupported-version tree. |
 | `duplicate-project`    | Two aliases in `config.yml` lead to the same tree, which is then listed once under each. Drop one alias. |

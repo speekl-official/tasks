@@ -136,6 +136,7 @@ export async function derivedTaskJson(
     snapshotFromContext(context),
     context.projects.latest(load),
     context.identity.actor,
+    context.identity.session,
   );
   const entry = derived.get(id);
   if (entry === undefined) {

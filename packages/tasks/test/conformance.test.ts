@@ -25,6 +25,7 @@ import type {
   ValidationJson,
 } from "../src/core/types.js";
 import { SITUATIONS } from "../src/core/types.js";
+import { compactAge } from "../src/core/time.js";
 import { isTaskError } from "../src/errors.js";
 import type { TreeSpec } from "./fixtures.js";
 import { DEFAULT_STATE, FIXTURE_TIME, writeTree } from "./fixtures.js";
@@ -392,9 +393,10 @@ describe("Self-checking", () => {
         started: false,
         liveness: null,
         last_seen: null,
+        yours: null,
       };
       const notDone = (ref: string): BlockedByJson[] => [
-        { ref, reason: "not-done", status: "TODO" },
+        { ref, task: ref, reason: "not-done", status: "TODO" },
       ];
       const expected: Record<string, Partial<TaskWithDerivedJson>> = {
         shipped: { situation: "done" },
@@ -466,7 +468,12 @@ describe("Self-checking", () => {
           blocked_by: notDone("free"),
         },
         deploy: { situation: "assigned", assignee: "alice" },
-        "my-deploy": { situation: "assigned", assignee: "tester", ready: true },
+        "my-deploy": {
+          situation: "assigned",
+          assignee: "tester",
+          ready: true,
+          yours: "inbox",
+        },
         "assigned-blocked": {
           situation: "assigned",
           assignee: "alice",
@@ -476,7 +483,12 @@ describe("Self-checking", () => {
         stranded: {
           situation: "blocked",
           blocked_by: [
-            { ref: "dropped", reason: "cancelled", status: "CANCELLED" },
+            {
+              ref: "dropped",
+              task: "dropped",
+              reason: "cancelled",
+              status: "CANCELLED",
+            },
           ],
         },
         "paused-waits": {
@@ -620,8 +632,8 @@ describe("Self-checking", () => {
       const labels: Record<string, string[]> = {
         worked: ["live"],
         "epic/c": ["live"],
-        crashed: [`orphaned since ${gone}`],
-        quit: [`orphaned since ${quit}`],
+        crashed: [`orphaned ${compactAge(gone)}`],
+        quit: [`orphaned ${compactAge(quit)}`],
         remote: ["unknown"],
         paused: ["started"],
         "paused-waits": ["started"],
@@ -1528,12 +1540,26 @@ describe("Self-checking", () => {
     expect((await frontmatterOf(s, "uses-epic")).status).toBe("TODO");
     expect(
       success<ShowJson>(await s.run("show", "uses-api", "--json")).blocked_by,
-    ).toEqual([{ ref: "epic/api", reason: "cancelled", status: "CANCELLED" }]);
+    ).toEqual([
+      {
+        ref: "epic/api",
+        task: "epic/api",
+        reason: "cancelled",
+        status: "CANCELLED",
+      },
+    ]);
+    // Seen from here, the backend's reference leads back into this tree,
+    // so the command line names its target bare.
     expect(
       success<ShowJson>(await s.run("show", "backend:client", "--json"))
         .blocked_by,
     ).toEqual([
-      { ref: "../repo:epic/api", reason: "cancelled", status: "CANCELLED" },
+      {
+        ref: "../repo:epic/api",
+        task: "epic/api",
+        reason: "cancelled",
+        status: "CANCELLED",
+      },
     ]);
   });
 
@@ -1682,7 +1708,12 @@ describe("Self-checking", () => {
         success<ShowJson>(await s.run("show", "uses-tokens", "--json"))
           .blocked_by,
       ).toEqual([
-        { ref: "identity/tokens", reason: "not-done", status: "TODO" },
+        {
+          ref: "identity/tokens",
+          task: "identity/tokens",
+          reason: "not-done",
+          status: "TODO",
+        },
       ]);
       expect(
         success<ShowJson>(await s.run("show", "backend:client", "--json"))
@@ -1690,6 +1721,7 @@ describe("Self-checking", () => {
       ).toEqual([
         {
           ref: "../repo:identity/tokens",
+          task: "identity/tokens",
           reason: "not-done",
           status: "TODO",
         },

@@ -81,10 +81,7 @@ export function unavailableReason(load: UnavailableTree): GateReason {
  * `argument`, `project`, `reason` and `dir`, plus `version` for a tree of
  * another version and `upgrade` for a listed v1 tree.
  */
-export function requireAvailable(
-  target: ProjectLoad,
-  arg: string,
-): LoadedTree {
+export function requireAvailable(target: ProjectLoad, arg: string): LoadedTree {
   if (target.kind === "ok") return target;
   const project = target.alias ?? target.relPath;
   const details = {
@@ -151,8 +148,21 @@ export interface ReferenceSite {
 /** Where a reference leads, independent of any status: what is cached. */
 type Address =
   | { kind: "unparseable" }
-  | { kind: "unavailable"; reason: GateReason; project: string; id: string }
-  | { kind: "tree"; tree: LoadedTree; id: string; project: string | null };
+  | {
+      kind: "unavailable";
+      reason: GateReason;
+      project: string;
+      id: string;
+      task: string | null;
+    }
+  | {
+      kind: "tree";
+      tree: LoadedTree;
+      id: string;
+      project: string | null;
+      /** The target as the command line names it, or `null`. */
+      task: string | null;
+    };
 
 interface Resolution {
   resolved: ResolvedRef;
@@ -517,20 +527,24 @@ export class GateResolver {
         tree: holder,
         id: parsed.ref.path,
         project: this.projects.qualifier(holder),
+        task: nameOf(holder, parsed.ref.path),
       };
     }
     const { projectPath, path: id } = parsed.ref;
     const load = await this.projects.byPath(holder, projectPath);
+    // The command line names a tree by its alias alone: a tree reached by
+    // path only cannot be named, so its target has no `task`.
     if (load.kind !== "ok") {
       return {
         kind: "unavailable",
         reason: unavailableReason(load),
         project: load.alias ?? projectPath,
         id,
+        task: load.alias === null ? null : qualifyId(load.alias, id),
       };
     }
     const project = load.local ? null : (load.alias ?? projectPath);
-    return { kind: "tree", tree: load, id, project };
+    return { kind: "tree", tree: load, id, project, task: nameOf(load, id) };
   }
 
   private lookup(
@@ -541,12 +555,18 @@ export class GateResolver {
     switch (address.kind) {
       case "unparseable":
         return {
-          resolved: blocked(ref, null, ref, "missing"),
+          resolved: blocked(ref, null, null, ref, "missing"),
           target: null,
         };
       case "unavailable":
         return {
-          resolved: blocked(ref, address.project, address.id, address.reason),
+          resolved: blocked(
+            ref,
+            address.task,
+            address.project,
+            address.id,
+            address.reason,
+          ),
           target: null,
         };
       case "tree": {
@@ -560,6 +580,7 @@ export class GateResolver {
         return {
           resolved: {
             ref,
+            task: address.task,
             project: address.project,
             id: address.id,
             satisfied: reason === null,
@@ -636,7 +657,14 @@ export function toBlockedBy(refs: ResolvedRef[]): BlockedByJson[] {
   return refs.flatMap((ref) =>
     ref.satisfied || ref.reason === null
       ? []
-      : [{ ref: ref.ref, reason: ref.reason, status: ref.status }],
+      : [
+          {
+            ref: ref.ref,
+            task: ref.task,
+            reason: ref.reason,
+            status: ref.status,
+          },
+        ],
   );
 }
 
@@ -675,13 +703,24 @@ function reasonText(ref: ResolvedRef): string {
   }
 }
 
+/**
+ * A task as the command line names it: bare in the local tree, `alias:path`
+ * in a listed project, and nothing in a tree reached by path alone, which
+ * no command can address.
+ */
+function nameOf(tree: LoadedTree, id: string): string | null {
+  if (tree.local) return id;
+  return tree.alias === null ? null : qualifyId(tree.alias, id);
+}
+
 function blocked(
   ref: string,
+  task: string | null,
   project: string | null,
   id: string,
   reason: GateReason,
 ): ResolvedRef {
-  return { ref, project, id, satisfied: false, reason, status: null };
+  return { ref, task, project, id, satisfied: false, reason, status: null };
 }
 
 /**

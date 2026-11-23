@@ -171,6 +171,21 @@ export class Projects {
   }
 
   /**
+   * The tree at an absolute directory, for a reference held by a tree this
+   * command cannot load as v2: a project under migration, whose own
+   * references lead to trees the real run meets once the project is v2.
+   */
+  async byDirectory(dir: string): Promise<ProjectLoad> {
+    const relPath = relativeProjectPath(this.current.key, dir) ?? dir;
+    const state = await this.dirState(dir);
+    if (state.kind === "tree") return this.treeAt(state.key, relPath, dir);
+    const alias = await this.aliasOfDir(dir);
+    return state.kind === "absent"
+      ? { kind: "not-checked-out", alias, relPath, dir }
+      : { kind: "unresolved", alias, relPath, dir, cause: null };
+  }
+
+  /**
    * A command-line task argument: `alias:path` addresses a listed project,
    * a bare path the local tree. The path is returned as typed; suffixes are
    * resolved by the caller against the target's tree.

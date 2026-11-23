@@ -11,7 +11,8 @@ import type {
 } from "../core/types.js";
 import { readState, workspaceFiles } from "../core/workspace.js";
 import type { ResumeAncestor } from "../output.js";
-import { emitJson, renderResume, writeOut } from "../output.js";
+import { emitTaskJson, renderResume, writeOut } from "../output.js";
+import { FIELDS_FLAG, FIELDS_HELP } from "./options.js";
 import { TASK_ARGUMENT_HELP } from "./show.js";
 
 /** What `resume --json` prints: the task object and its reading context. */
@@ -35,10 +36,11 @@ export interface ResumeJson extends TaskWithDerivedJson {
 export function resumeCommand(): Command {
   return new Command("resume")
     .description(
-      "everything the next session reads to continue a task: its ancestors, children, workspace files, state.md in full, the last log entry and where the project's documentation lives",
+      "everything the next session reads to continue a task: its definition, ancestors, children, workspace files, state.md in full, the last log entry and where the project's documentation lives",
     )
     .argument("<task>", TASK_ARGUMENT_HELP)
     .option("--json", "emit machine-readable JSON")
+    .option(FIELDS_FLAG, FIELDS_HELP)
     .action(async (arg: string, _options: unknown, command: Command) => {
       const context = await openContext(command);
       const { load, task } = await resolveTaskArgument(context, arg);
@@ -82,11 +84,13 @@ export function resumeCommand(): Command {
           docs,
           body: task.body,
         };
-        emitJson(result);
+        emitTaskJson(context, result);
         return;
       }
       writeOut(
         renderResume(shown, {
+          body: task.body,
+          custom_fields: task.extra,
           ancestors,
           children,
           workspace,

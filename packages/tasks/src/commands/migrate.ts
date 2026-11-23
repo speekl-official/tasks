@@ -10,12 +10,17 @@ import {
 } from "../context.js";
 import type { Project } from "../core/discovery.js";
 import { findProject, requireProject } from "../core/discovery.js";
-import type { MigrateJson, Migration } from "../core/migrate/migrate.js";
+import type {
+  MigrateJson,
+  Migration,
+  ReferencesInto,
+} from "../core/migrate/migrate.js";
 import {
   migrateJson,
   migrateTree,
   parsePhaseMappings,
   parseStatusMappings,
+  previewReferencesInto,
   rewriteReferencesInto,
 } from "../core/migrate/migrate.js";
 import { CONVENTION_VERSION, STATUSES } from "../core/types.js";
@@ -26,6 +31,7 @@ interface MigrateCommandOptions {
   /** Absent until the option is given once; no default, so help shows none. */
   map?: string[];
   mapPhase?: string[];
+  dryRun?: boolean;
   json?: boolean;
 }
 
@@ -88,7 +94,11 @@ async function listedV1Project(
   }
 }
 
-function renderMigration(result: MigrateJson, migration: Migration): string {
+function renderMigration(
+  result: MigrateJson,
+  migration: Migration,
+  dryRun: boolean,
+): string {
   const name =
     migration.qualifier === null
       ? result.tree
@@ -104,30 +114,41 @@ function renderMigration(result: MigrateJson, migration: Migration): string {
     ([from, to]) => `${from} → ${to}`,
   );
   const readme = {
-    replaced: "replaced with the v2 scaffold",
+    replaced: dryRun
+      ? "to be replaced with the v2 scaffold"
+      : "replaced with the v2 scaffold",
     kept: "kept: it was edited",
     absent: "none",
   }[result.readme];
+  const index = dryRun
+    ? migration.legacyIndex
+      ? "to be generated; _index.md to be removed"
+      : "to be generated"
+    : migration.legacyIndex
+      ? "generated; _index.md removed"
+      : "generated";
   const rows: Array<[string, string]> = [
     ["phases", phases.join(", ") || "none"],
     ["statuses", statuses.join(", ") || "none"],
     ["scope", result.scope ?? "none"],
     [
       "references",
-      `${result.rewritten.length} rewritten, ${result.unrewritten.length} kept as written`,
+      `${result.rewritten.length} ${dryRun ? "to rewrite" : "rewritten"}, ${result.unrewritten.length} kept as written`,
     ],
     ["README.md", readme],
-    [
-      "index.md",
-      migration.legacyIndex ? "generated; _index.md removed" : "generated",
-    ],
+    ["index.md", index],
   ];
   const width = Math.max(...rows.map(([label]) => label.length));
 
+  const head = dryRun
+    ? ui.info(
+        `Dry run: migrating ${name} to .tasks v${CONVENTION_VERSION} would move ${counts.join(", ")}; the tree was left untouched`,
+      )
+    : ui.success(
+        `Migrated ${name} to .tasks v${CONVENTION_VERSION}: ${counts.join(", ")}`,
+      );
   return [
-    ui.success(
-      `Migrated ${name} to .tasks v${CONVENTION_VERSION}: ${counts.join(", ")}`,
-    ),
+    head,
     ...rows.map(
       ([label, value]) => `  ${ui.dim(label.padEnd(width))}  ${value}`,
     ),
@@ -159,6 +180,10 @@ export function migrateCommand(): Command {
       "the v2 directory name of a v1 phase, needed when its name has a . or _; repeatable",
       collect,
     )
+    .option(
+      "--dry-run",
+      "check the tree and report what the migration would do, writing nothing: not the tree, not its lock",
+    )
     .option("--json", "emit machine-readable JSON")
     .action(
       async (
@@ -172,7 +197,9 @@ export function migrateCommand(): Command {
           phaseMap: parsePhaseMappings(options.mapPhase ?? []),
         };
 
+        const dryRun = options.dryRun === true;
         let migration: Migration;
+        let into: ReferencesInto;
         if (alias === undefined) {
           // The local tree is v1, which `openContext` refuses: discovery and
           // identity are done here, the identity before anything is written,
@@ -186,25 +213,40 @@ export function migrateCommand(): Command {
           migration = await migrateTree(project, {
             ...mappings,
             qualifier: null,
+            dryRun,
           });
+          if (dryRun) {
+            // Still a v1 tree, so no context opens on it: what other trees
+            // hold into it is checked on the real run, and the output says so.
+            into = { rewritten: [], unrewritten: [] };
+          } else {
+            // Opened now that the tree is v2: it records the session's
+            // heartbeat there too, and sees the migrated tree as v2 when it
+            // repairs the references other trees hold into it.
+            const context = await openContext(command);
+            into = await rewriteReferencesInto(context, migration);
+          }
         } else {
           const context = await openContext(command);
           const project = await listedV1Project(context, alias);
           migration = await migrateTree(project, {
             ...mappings,
             qualifier: alias,
+            dryRun,
           });
+          if (dryRun) {
+            into = await previewReferencesInto(context, migration);
+          } else {
+            // Opened afresh now that the listed tree is v2, for the same
+            // reasons as above.
+            const fresh = await openContext(command);
+            into = await rewriteReferencesInto(fresh, migration);
+          }
         }
-
-        // Opened afresh now that the tree is v2: it records the session's
-        // heartbeat there too, and sees the migrated tree as v2 when it
-        // repairs the references other trees hold into it.
-        const context = await openContext(command);
-        const into = await rewriteReferencesInto(context, migration);
-        const result = migrateJson(migration, into);
+        const result = migrateJson(migration, into, dryRun);
 
         if (options.json) emitJson(result);
-        else writeOut(renderMigration(result, migration));
+        else writeOut(renderMigration(result, migration, dryRun));
       },
     );
 }

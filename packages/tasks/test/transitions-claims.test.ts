@@ -269,7 +269,10 @@ describe("claims across sessions", () => {
     const out = plain(result.stdout);
     expect(out).toContain("✓ claim a: took over the claim (IN_PROGRESS)");
     expect(out).not.toContain("IN_PROGRESS → IN_PROGRESS");
-    expect(out).toContain("superseded tester s:s1 on a (orphaned, last seen");
+    expect(out).toMatch(
+      /superseded tester on a \(orphaned, last seen \S+ ago\)/,
+    );
+    expect(out).not.toContain("s:s1");
   });
 
   it("answers the superseded session's next transition with a conflict", async () => {
@@ -365,7 +368,7 @@ describe("claims across sessions", () => {
     expect((await lastEntry(sandbox, "a")).text).toBe(
       `cancel: IN_PROGRESS → CANCELLED\nsupersedes tester s:s1, last seen ${seen}\nstale`,
     );
-    expect(plain(result.stdout)).toContain("superseded tester s:s1 on a");
+    expect(plain(result.stdout)).toMatch(/superseded tester on a \(orphaned/);
   });
 
   it("does not need the heartbeat of a session that is not the claim's", async () => {
@@ -392,7 +395,9 @@ describe("force", () => {
     expect(errorOf(refused).details).toEqual({
       id: "a",
       kind: "start-gate",
-      blocked_by: [{ ref: "dep", reason: "not-done", status: "TODO" }],
+      blocked_by: [
+        { ref: "dep", task: "dep", reason: "not-done", status: "TODO" },
+      ],
     });
     expect((await sandbox.run("claim", "a", "--force")).code).toBe(0);
     expect((await lastEntry(sandbox, "a")).text).toBe(

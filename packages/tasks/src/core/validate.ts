@@ -88,6 +88,7 @@ const SEVERITY: Record<FindingKind, FindingSeverity> = {
   "archived-path-conflict": "error",
   "duplicate-id": "error",
   "log-conflict-markers": "error",
+  "undeclared-key": "error",
   "paused-without-state": "warning",
   "todo-with-state": "warning",
   "unsatisfiable-ref": "warning",
@@ -224,6 +225,10 @@ async function deriveForIndex(
  */
 function manifestFindings(tree: Tree): FindingJson[] {
   const out: FindingJson[] = [];
+  // The project's own keys, once declared: a key outside them is an error,
+  // a declared one is no finding; undeclared, every undefined key is a
+  // warning, since nothing tells a project's key from a misspelt field.
+  const declared = tree.config.customFields;
   for (const entry of [...tree.malformed, ...tree.archivedMalformed]) {
     out.push(malformedFinding(tree, entry));
   }
@@ -250,12 +255,20 @@ function manifestFindings(tree: Tree): FindingJson[] {
     }
 
     for (const [key] of task.extra) {
+      if (declared.includes(key)) continue;
+      const kept = `it is kept as it is on every write${V1_KEY_HINTS.get(key) ?? ""}`;
       out.push(
-        finding(
-          "unknown-key",
-          task.id,
-          `${where}frontmatter key ${JSON.stringify(key)} is not defined by .tasks v2; it is kept as it is on every write${V1_KEY_HINTS.get(key) ?? ""}`,
-        ),
+        declared.length === 0
+          ? finding(
+              "unknown-key",
+              task.id,
+              `${where}frontmatter key ${JSON.stringify(key)} is not defined by .tasks v2; ${kept}`,
+            )
+          : finding(
+              "undeclared-key",
+              task.id,
+              `${where}frontmatter key ${JSON.stringify(key)} is not among the custom_fields config.yml declares (${declared.join(", ")}); ${kept}`,
+            ),
       );
     }
   }

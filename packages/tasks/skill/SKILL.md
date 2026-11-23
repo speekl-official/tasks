@@ -16,14 +16,28 @@ allowed-tools: Bash(tasks:*) Bash(TASKS_ACTOR=agent tasks:*) Bash(npx @speekl/ta
 Tasks live in `.tasks/` (convention v2): every task is a directory whose
 `task.md` holds the definition. Its id is its path, `auth-rework/token-schema`; a
 task inside another task is a part of the parent's deliverable. The `tasks` CLI
-owns the frontmatter and enforces the rules below. The markdown body of
-`task.md`, `design.md` and `plan.md` are yours to edit; `state.md` is written
-through `tasks state`; `log.md` is appended by the CLI.
+writes the frontmatter in canonical form and enforces the rules below: the
+convention's fields change through it, a key of the project's own by hand only
+on the project's explicit instructions. The markdown body of `task.md`,
+`design.md` and `plan.md` are yours to edit; `state.md` is written through
+`tasks state`; `log.md` is appended by the CLI.
 
 ## Before anything else
 
+With the harness hooks your tasks are already in your context, headed `Your
+tasks`: the hook ran the entry's `mine` when the session started, and runs it
+again after a resume, a clear or a compaction. **Do not run it again** for the
+tree, actor and session that produced it; a tree a person points you at with
+`-C <dir>` gets its own `mine`. A row without the `last_entry` key (`null` is
+one) comes from a hook older than this skill: run the `mine` below once in its
+place (the hooks set your name and token, so without the prefix and
+`--session`), and tell the person that `tasks hooks install --force` brings the
+hook up to date, for the actor it has. Without the hooks — nothing headed `Your tasks` in your context
+— set your name and session token first (next section), then run it yourself,
+the prefix only when `TASKS_ACTOR` is not set already (`echo $TASKS_ACTOR`):
+
 ```sh
-tasks mine --json
+TASKS_ACTOR=agent tasks mine --json --fields id,title,yours,situation,liveness,effective_priority,last_entry --session <token>
 ```
 
 - Exit `3`, no `.tasks/` found: the project is not set up. **Ask before running
@@ -34,7 +48,7 @@ tasks mine --json
   `git config --global tasks.actor <name>`; with a roster on, a write under a
   name it lacks is refused.
 - Exit `2` with `details.version` `1`, a v1 tree: tell the person; the one-time
-  `tasks migrate` is theirs to run.
+  `tasks migrate` is theirs to run (`tasks migrate --dry-run` previews it).
 - If `tasks` is not on PATH, use `npx @speekl/tasks` in its place everywhere.
 - In a git worktree your commands reach the main checkout's tree by themselves;
   `-C <dir>` only when a person points you at a tree elsewhere.
@@ -68,40 +82,66 @@ again. Subagents use the same name and token.
 
 ## Entry
 
-1. **`tasks mine`**, first. In this order: a task claimed by this session —
+1. **Your tasks** (`mine`, above), first. In this order: a task claimed by this session —
    continue it; then, among the tasks claimed by you in older sessions that are
    now `orphaned` and the tasks assigned to you (your inbox), the one with the
    highest effective priority — at equal priority finish your orphan before
-   starting inbox work — unless a person's instruction, in the conversation or
-   under `## Notes`, names what comes first; only then new work. Take over an
+   starting inbox work — unless a person's instruction names what comes first:
+   in the conversation, under `## Notes`, or in a candidate's `last_entry` (an
+   `assign -m`, a `note`), so read the candidates' last entries before choosing,
+   and claim the task an instruction names by id (`--next` takes the first
+   ready task instead); only then new work. An instruction that reached you
+   only in a transition's message (`assign -m`, `handoff -m`) lives in the
+   log alone, where the claim, or any later entry, displaces it: copy what the
+   work needs under `## Notes` (`tasks note`) before the claim; a `note` is
+   there already. Take over an
    orphan with an ordinary `tasks claim <task>`, one at a time, and only what
    you will work on now: the others stay orphaned, which is no breakage. A task
    held by another **live** session is not yours. A claim of **unknown**
    liveness is reported to the person, never forced. Another actor's orphaned
-   claim is taken over only on the person's instruction. What was left for you
-   is in a task's files: `## Notes` of `task.md`, `design.md`, `state.md`.
+   claim is taken over only on the person's instruction. Each row's `yours`
+   names its case: `this-session`, `orphaned`, `elsewhere` (another live
+   session, or unknown liveness), `inbox`; `ready --json` carries it too. What
+   was left for you is in a task's files: `## Notes` of `task.md`, `design.md`,
+   `state.md`.
 2. **Claim before working, read before changing.** Your own orphan: `claim` it
    first (that restores your hold), then `resume`. New work: `tasks claim --next`
    (the first task of your ready set, in one step) and then `resume`, or
    `resume` the candidates and `tasks claim <task>` by id when choosing. A
    conflict (exit `4`) means another agent was first: take the next ready task.
-3. **`tasks resume <task>`**, then read, in order: `task.md`, `state.md`,
-   `design.md`, `plan.md`, then for each ancestor as far as needed its
-   `task.md`, `design.md` and `plan.md` — an epic's design and plan live on the
-   epic. **Never read `log.md` on entry**; its last entry, the last activity, is
-   already in the `resume` output. A person's text that reached you only there
-   goes under `## Notes` (`tasks note`).
-4. **Listed projects you cannot see** — `not shown` on stderr, `unavailable` in
-   the JSON: a v1 tree, a repository not checked out here — are a person's to
-   migrate or check out. Say so once in your report and go on.
+3. **`tasks resume <task>`** is the reading of `task.md` and `state.md`: it
+   prints the definition, the gates and ownership, the ancestors with their
+   workspace files, the children with their status and situation, the docs
+   locations, `state.md` in full and the last log entry (`--json`: the same as
+   `body`, `state` and the full objects). Do not read those two files again:
+   the project's own frontmatter keys, when it has any, are printed as a
+   `custom fields` block after the fields and come as `custom_fields` in the
+   JSON.
+   Then read `design.md` and `plan.md` where the workspace lists them, and for
+   each ancestor as far as needed its `task.md`, `design.md` and `plan.md` — an
+   epic's design and plan live on the epic. On entry read `resume` whole:
+   `--fields` trims the children to the same keys, and a projection made for
+   the task hides their names, holders and gates (`id`, `title`, `situation`,
+   `status`, `assignee`, `claimed_by`, `held_by`, `depends_on`, `blocked_by`,
+   `finishes_after`). **Never read `log.md` on entry**;
+   the last entry, the last activity, is in the `resume` output. A person's
+   text that reached you only there goes under `## Notes` (`tasks note`).
+4. **Listed projects you cannot see** — `not shown` in an overview's footer,
+   `unavailable` in the JSON: a v1 tree, a repository not checked out here — are
+   a person's to migrate or check out. Say so once in your report and go on.
 
 ## During work
 
-- **Never hand-edit frontmatter**; every field has a command. **Never `mv`** a
-  task directory; use `tasks move`.
+- **The convention's frontmatter fields change only through the CLI**; every
+  field has a command. A key of the project's own (`custom_fields`) is edited
+  by hand only on the project's explicit instructions. **Never `mv`** a task
+  directory; use `tasks move`.
 - Write `state.md` through **`tasks state <task> < file`** (or a heredoc), so
   the write is fenced like a transition. Recommended sections: **Done** (with
-  the commits that carry it), **Verified**, **Open**, **Next**.
+  the commits that carry it), **Verified**, **Open**, **Next**. Keep it a short
+  resume point — a screen, about twenty lines: results and the commits that
+  carry them, not the steps that produced them; the history is `log.md`. Each
+  write replaces it whole; never let it grow turn by turn.
 - A clarification of the statement changes `Description` / `Acceptance
 criteria` in place; an input received after the start goes to `## Notes`; a
   decision goes to `design.md`; a change of plan goes to `plan.md`.
@@ -122,7 +162,8 @@ criteria` in place; an input received after the start goes to `## Notes`; a
   session, with the instruction quoted in `-m`. Never to satisfy an assignee
   rule on your own.
 - **Freshness rule:** every turn in which the work progressed ends with
-  `state.md` updated. The status stays `IN_PROGRESS` between turns.
+  `state.md` updated — rewritten as the short resume point above, not extended
+  by the turn's steps. The status stays `IN_PROGRESS` between turns.
 
 ## Exit
 
@@ -196,40 +237,45 @@ whose body is empty is a reminder, not a task — write enough that a different
 agent arriving cold can do the work without asking. Prefer several small
 dependent tasks over one task with a long checklist.
 
-## Command table
+## Commands
 
 Global options: `-C <dir>` (the tree of another checkout), `--as <actor>`,
 `--session <token>`. Every command that prints takes `--json`. `<task>` is a
-full path, an unambiguous suffix, or `alias:path` in a listed project.
+full path, an unambiguous suffix, or `alias:path` in a listed project. What a
+command does and its main flags: the command table in
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; the complete option list, each
+with its syntax: `tasks <command> --help`.
 
-| Command                                                                         | Purpose                                                                                                                                                       |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tasks mine [--local]`                                                          | Your claims (this session's first), then your inbox.                                                                                                          |
-| `tasks actors`                                                                  | Who tasks may be assigned to, with their open tasks.                                                                                                          |
-| `tasks resume <task>`                                                           | Ancestors, children, `state.md`, last log entry, docs locations.                                                                                              |
-| `tasks show <task> [--archived]`                                                | Fields, derived conditions, references, body; `--archived` reads one from the archive.                                                                        |
-| `tasks ready [--scope <path>] [--all] [--local]`                                | What you may take now, best first; a scope keeps to this tree, `--local` does without one.                                                                    |
-| `tasks list [--<situation>…] [--active] [--all] [--top]` / `tasks tree [--top]` | Open tasks by situation; `--blocked`, `--waiting`, `--parked`, …; `--active`: work in progress beneath; `--top`: the top level alone, `--depth <n>` for more. |
-| `tasks claim <task>` / `tasks claim --next`                                     | Start working; takes over an orphaned claim.                                                                                                                  |
-| `tasks state <task> [--edit]`                                                   | Replace `state.md` from stdin.                                                                                                                                |
-| `tasks pause <task> -m <text>`                                                  | Stop; needs `state.md`.                                                                                                                                       |
-| `tasks handoff <task> <actor> -m <text>`                                        | Pause and assign to whoever must review or decide.                                                                                                            |
-| `tasks done <task> -m <text>`                                                   | Finish; refused while a child or `finishes_after` task is open.                                                                                               |
-| `tasks release <task>`                                                          | Give back a claim that produced nothing.                                                                                                                      |
-| `tasks cancel <task> -m <text>` / `tasks reopen <task> -m <text>`               | Cancel with the subtree; bring a closed task back.                                                                                                            |
-| `tasks schedule <task>` / `tasks defer <task>`                                  | Onto / off the plan, with the subtree.                                                                                                                        |
-| `tasks assign <task> <actor>` / `tasks unassign <task>`                         | Who the task waits on; an assigned task holds its subtree.                                                                                                    |
-| `tasks priority <task> <level>`                                                 | `urgent`, `high`, `normal`, `low`.                                                                                                                            |
-| `tasks new <path> <title…>`                                                     | Create a task.                                                                                                                                                |
-| `tasks dep add\|rm\|list` / `tasks after add\|rm\|list`                         | Edit and inspect the gates.                                                                                                                                   |
-| `tasks move <source> <destination>`                                             | Relocate a task or group, rewriting every reference.                                                                                                          |
-| `tasks log <task> ["<text>"]` / `tasks log --since 1d [--archived]`             | Narrative entry (a commit made, what happened); without text a task's history; recent history across trees.                                                   |
-| `tasks note <task> "<text>"`                                                    | An input for whoever works next, under `## Notes` of `task.md`; logged.                                                                                       |
-| `tasks archive`, `restore`, `purge`, `delete`                                   | Archive a resolved subtree (`--resolved-before 30d`: all older ones); undo; release a path; remove unworked.                                                  |
-| `tasks session-check` / `heartbeat` / `session-end`                             | Exit invariant; liveness (run by the harness).                                                                                                                |
-| `tasks validate [--fix]` / `tasks reindex`                                      | Check the tree; regenerate `index.md`.                                                                                                                        |
-| `tasks init [--actors [<names>]]` / `tasks skill install --force`               | Scaffold a tree and install this skill (ask first; `--actors` lists who tasks go to); refresh this skill.                                                     |
-| `tasks hooks install [--actor <name>]`                                          | Write the harness hooks into `.claude/settings.json` (ask first).                                                                                             |
+- **Read:** `mine [--local]`;
+  `ready [--scope <path>] [--all] [--local] [--priority <level>]`;
+  `list [--<situation>…] [--active] [--priority <level>] [--updated-before <when>] [--created-since <when>] [--sort created|updated] [--reverse] [--all] [--top] [--depth <n>]`
+  (the situations: `--blocked`, `--waiting`, `--parked`, …; `--priority high`
+  is urgent and high; `--updated-before 2w` is untouched for two weeks);
+  `tree [--sort created|updated] [--reverse] [--top] [--depth <n>]`;
+  `show <task> [--archived]`; `resume <task>`; `actors`;
+  `log <task> [--since <when>] [--actor <actor>]`;
+  `log --since <when> [--actor <actor>] [--scope <path>] [--archived]`;
+  `dep list <task>`; `after list <task>`; `validate [--fix]`.
+- **Work a task:** `claim <task>` / `claim --next`; `state <task> [--edit]`;
+  `log <task> "<text>"`; `note <task> "<text>"`; `pause <task> -m <text>`;
+  `handoff <task> <actor> -m <text>`; `done <task> -m <text>`; `release <task>`.
+- **Shape the tree:**
+  `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]`;
+  `move <source> <destination>` (rewrites the references in the trees it can
+  reach and write; `unrewritten` names the ones it saw and left; a listed
+  tree absent at the time was not seen, so check it when it returns);
+  `dep add|rm <task> <ref>…`;
+  `after add|rm <task> <ref>…`; `priority <task> urgent|high|normal|low`;
+  `assign <task> <actor>` / `unassign <task>` (an assigned task holds its
+  subtree); `schedule <task>` / `defer <task>` (onto / off the plan, with the
+  subtree); `cancel <task> -m <text>` (with the subtree) /
+  `reopen <task> -m <text>`.
+- **Housekeeping:** `archive <task>`, or for a batch
+  `archive --resolved-before [<when>]` / `archive --all-resolved`;
+  `restore <path>`, `purge <path>`, `delete <task>` (a never-worked task only);
+  `reindex`; `migrate [--dry-run]`; `init [--actors [<names>]]` and
+  `hooks install [--actor <name>]` (ask first); `skill install --force`.
+- **Run by the harness:** `heartbeat`, `session-check`, `session-end`.
 
 `--force` overrides authorization and, per command, the start gate, a live
 claim or a hold — never the finish gate or the `state.md` rules — and the log
@@ -247,15 +293,23 @@ Use `--json` whenever you parse; the human output is not stable.
   conflict. **Branch on the code and `details`, never on message text.**
 - **An empty result is success:** `tasks ready` with nothing to do exits `0`
   with `"count": 0`. Only `claim --next` turns it into exit `3`.
+- In a terminal an overview fits its width and cuts long titles with `…`;
+  piped output and `--json` are never cut. Read `--json` when the text matters.
 - Task objects carry the frontmatter (`status`, `priority`, `depends_on`,
   `finishes_after`, `assignee`, `claimed_by`, `claimed_at`, `claimed_session`,
   `created`, `updated`), `id`, `name`, `parent`, `project`, `title`, `path`, and
   the derived `situation`, `blocked_by`, `ready`, `effective_priority`,
   `held_by`, `started`, `children`, `active`, `waiting_for`, `closable`,
-  `liveness`, `last_seen`, `last_entry`. Overviews return
-  `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds `body`,
-  `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
+  `liveness`, `last_seen`, `yours`, `last_entry`; `custom_fields`, the
+  project's own frontmatter keys as read, only when the file has any. Overviews
+  return `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds
+  `body`, `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
   `child_tasks`, `state`, `docs`.
+- Ask for the keys you need: `--fields id,situation,yours,title,last_entry`
+  on any command that returns task objects (`mine`, `ready`, `list`, `tree`,
+  `show`, `resume`, `new`, `note`, `restore`, `claim` and the other
+  transitions, `dep`/`after add` and `rm`). The names are the task object's
+  keys; a name no document has is exit `2`.
 - `session-check` exits `4` with `{"ok": false, "violations": [...]}` on stdout
   when a task of this session has no `state.md`.
 
@@ -278,14 +332,20 @@ someone else was first, or a person decided — re-read with `tasks resume`.
 | `cascade-claim`                    | A live claim beneath that is not yours: wait, or ask the person.                 |
 | `resolved-ancestor`                | The parent is resolved: `tasks reopen <parent> -m` first, or model it elsewhere. |
 
-Never `--force` on your own initiative, never hand-edit frontmatter, never `mv`
-a task directory. A task shown `blocked by X (cancelled)` is stranded: a person
+Never `--force` on your own initiative, never change the convention's
+frontmatter fields except through the CLI (a project's own key only on its
+explicit instructions), never `mv` a task directory. A task shown
+`blocked by X (cancelled)` is stranded: a person
 decides whether to cancel it, drop the reference, or point it elsewhere.
 
 ## Deeper reference
 
-For the file layout, the `task.md` fields and their canonical form, the
-workspace files, `config.yml`, the reference grammar, gate reasons, situations,
-validation kinds and the error shape, read
-`${CLAUDE_SKILL_DIR}/reference/convention.md`. Load it only when you need to
-hand-author a file, change the configuration, or interpret a finding.
+The command table — every command, what it does and its main flags — is
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; `tasks <command> --help` gives
+the complete option list of one command, each with its syntax. For the file
+layout, the
+`task.md` fields and their canonical form, the workspace files, `config.yml`,
+the reference grammar, gate reasons, situations, validation kinds and the error
+shape, read `${CLAUDE_SKILL_DIR}/reference/convention.md`. Load either only
+when you need it: a flag you do not know, a file to hand-author, the
+configuration, a finding to interpret.

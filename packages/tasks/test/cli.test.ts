@@ -27,6 +27,7 @@ import type {
 import { SITUATIONS } from "../src/core/types.js";
 import { ExitCode } from "../src/errors.js";
 import type { TreeSpec } from "./fixtures.js";
+import { writeTree } from "./fixtures.js";
 import type { CliResult, Sandbox } from "./helpers.js";
 import { makeSandbox, treeSandbox } from "./helpers.js";
 
@@ -797,7 +798,7 @@ describe("show", () => {
       updated: "2026-01-01T00:00:00Z",
       path: path.join(sandbox.tasksDir, "a"),
       situation: "blocked",
-      blocked_by: [{ ref: "b", reason: "not-done", status: "TODO" }],
+      blocked_by: [{ ref: "b", task: "b", reason: "not-done", status: "TODO" }],
       ready: false,
       effective_priority: "high",
       held_by: null,
@@ -808,6 +809,7 @@ describe("show", () => {
       closable: false,
       liveness: null,
       last_seen: null,
+      yours: null,
       last_entry: {
         time: "2026-01-02T00:00:00Z",
         actor: "tester",
@@ -821,6 +823,17 @@ describe("show", () => {
     });
   });
 
+  it("prints an archived task's references as the command line takes them", async () => {
+    sandbox = await treeSandbox({
+      tasks: {},
+      archived: { old: { status: "CANCELLED", depends_on: ["../backend:x"] } },
+    });
+    await sandbox.project("backend", "../backend", { tasks: { x: {} } });
+    const out = plain((await sandbox.run("show", "old", "--archived")).stdout);
+    expect(out).toMatch(/depends on\s+backend:x/);
+    expect(out).not.toContain("../backend:x");
+  });
+
   it("prints the stored status beside the situation", async () => {
     sandbox = await treeSandbox({
       tasks: { a: { status: "PAUSED", state: true, depends_on: ["b"] }, b: {} },
@@ -829,6 +842,39 @@ describe("show", () => {
     expect(out).toMatch(/status\s+PAUSED/);
     expect(out).toMatch(/situation\s+blocked by b/);
     expect(out).toContain("# a");
+  });
+
+  it("prints references as the command line takes them and keeps the JSON as stored", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        a: { depends_on: ["../backend:x"], finishes_after: ["../bare:q"] },
+        b: {},
+      },
+    });
+    await sandbox.project("backend", "../backend", {
+      tasks: { x: { depends_on: ["../repo:b", "y"] }, y: {} },
+    });
+    // A sibling tree nothing lists: reached by its path, read-only, and named
+    // by that path.
+    await writeTree(path.join(sandbox.root, "bare", ".tasks"), {
+      tasks: { q: {} },
+    });
+
+    const shown = plain((await sandbox.run("show", "a")).stdout);
+    expect(shown).toMatch(/depends on\s+backend:x/);
+    expect(shown).toMatch(/finishes after\s+\.\.\/bare:q/);
+    expect(plain((await sandbox.run("resume", "a")).stdout)).toMatch(
+      /depends on\s+backend:x/,
+    );
+    expect(plain((await sandbox.run("dep", "list", "a")).stdout)).toContain(
+      "backend:x",
+    );
+    // A foreign task's references, from here: ours bare, its own by alias.
+    const foreign = plain((await sandbox.run("show", "backend:x")).stdout);
+    expect(foreign).toMatch(/depends on\s+b, backend:y/);
+    expect(
+      (await sandbox.run("show", "a", "--json")).json<ShowJson>().depends_on,
+    ).toEqual(["../backend:x"]);
   });
 
   it("resolves a unique suffix and names the candidates of an ambiguous one", async () => {
@@ -915,9 +961,7 @@ describe("show", () => {
     });
     const listed = await sandbox.run("list");
     expect(listed.code).toBe(ExitCode.Success);
-    expect(plain(listed.stdout)).toContain(
-      "old not shown: a .tasks v1 tree; upgrade it with `tasks migrate old`",
-    );
+    expect(plain(listed.stdout)).toContain("not shown: old (v1)");
   });
 
   it("refuses a malformed manifest as a conflict naming the file", async () => {
@@ -1006,6 +1050,7 @@ describe("resume", () => {
       (await sandbox.run("resume", "program/epic/task")).stdout,
     );
     const order = [
+      "Do it.",
       "Ancestors",
       "program/epic ",
       "Children",
@@ -1113,6 +1158,26 @@ describe("ready", () => {
     ]);
     expect(json.tasks.every((task) => task.ready)).toBe(true);
     expect(json.tasks[0]?.effective_priority).toBe("urgent");
+  });
+
+  it("keeps with --priority the ready tasks at that effective level or above", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        hot: { priority: "urgent" },
+        "hot/part": {},
+        imp: { priority: "high" },
+        plain: {},
+        stuck: { priority: "urgent", depends_on: ["plain"] },
+      },
+    });
+    expect(
+      ids(await sandbox.run("ready", "--priority", "high", "--json")),
+    ).toEqual(["hot/part", "imp"]);
+    const urgent = collection(
+      await sandbox.run("ready", "--priority", "urgent", "--json"),
+    );
+    expect(urgent.count).toBe(1);
+    expect(urgent.tasks[0]?.id).toBe("hot/part");
   });
 
   it("offers only free, unblocked tasks outside held and unscheduled subtrees", async () => {
@@ -1307,6 +1372,12 @@ describe("mine", () => {
       "inbox",
     ]);
     expect(json.tasks[0]).toMatchObject({ liveness: "live" });
+    expect(json.tasks.map((task) => task.yours)).toEqual([
+      "this-session",
+      "elsewhere",
+      "inbox",
+      "inbox",
+    ]);
     expect(json.tasks[3]?.last_entry).toEqual({
       time: "2026-01-02T00:00:00Z",
       actor: "alice",
@@ -1316,21 +1387,61 @@ describe("mine", () => {
     });
 
     // Without a session, both claims are equally someone else's run.
-    expect(ids(await sandbox.run("mine", "--json"))).toEqual([
+    const sessionless = collection(await sandbox.run("mine", "--json"));
+    expect(sessionless.tasks.map((task) => task.id)).toEqual([
       "other-session",
       "this-session",
       "waiting",
       "inbox",
     ]);
+    expect(sessionless.tasks.map((task) => task.yours)).toEqual([
+      "elsewhere",
+      "elsewhere",
+      "inbox",
+      "inbox",
+    ]);
   });
 
-  it("renders each task's last log entry", async () => {
+  it("keeps an open task whose stale claim names the actor, as elsewhere", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        stale: { status: "TODO", claimed_by: "tester" },
+        theirs: { status: "TODO", claimed_by: "alice" },
+      },
+    });
+    const json = collection(await sandbox.session("s1")("mine", "--json"));
+    expect(json.tasks.map((task) => [task.id, task.yours])).toEqual([
+      ["stale", "elsewhere"],
+    ]);
+    const shown = await sandbox.run("show", "stale", "--json");
+    expect(shown.json<ShowJson>().yours).toBe("elsewhere");
+  });
+
+  it("carries yours on every reporting command, so ready names the inbox", async () => {
+    sandbox = await treeSandbox(MINE_TREE);
+    const ready = collection(await sandbox.session("s1")("ready", "--json"));
+    expect(
+      Object.fromEntries(ready.tasks.map((task) => [task.id, task.yours])),
+    ).toEqual({ waiting: "inbox", inbox: "inbox", free: null });
+    const shown = await sandbox.session("s1")("show", "this-session", "--json");
+    expect(shown.json<ShowJson>().yours).toBe("this-session");
+    // A write answers with the task as the writer now sees it.
+    const claimed = await sandbox.session("s1")("claim", "free", "--json");
+    expect(claimed.code).toBe(ExitCode.Success);
+    expect(claimed.json<ShowJson>().yours).toBe("this-session");
+  });
+
+  it("renders each task's last log entry as its text, then its author and age", async () => {
     sandbox = await treeSandbox(MINE_TREE);
     const out = plain((await sandbox.session("s1")("mine")).stdout);
-    expect(out).toMatch(/this-session\s+working by tester\s+live/);
-    expect(out).toContain("2026-01-02T00:00:00Z alice");
-    expect(out).toContain("Please deploy after the review.");
-    expect(out).toContain("2026-01-03T00:00:00Z tester s:s1");
+    expect(out).toMatch(/this-session\s+working by tester\s+\S+\s+live/);
+    expect(out).toMatch(/^ {4}claim: TODO → IN_PROGRESS {2}\(tester, \S+\)$/m);
+    expect(out).toMatch(/^ {4}Started on the schema\.$/m);
+    expect(out).toMatch(/^ {4}assign tester {2}\(alice, \S+\)$/m);
+    expect(out).toMatch(/^ {4}Please deploy after the review\.$/m);
+    // The heading's timestamp and token are for the JSON and `log`.
+    expect(out).not.toContain("2026-01-0");
+    expect(out).not.toContain("s:s1");
     expect(out).toContain("4 tasks");
   });
 
@@ -1437,6 +1548,58 @@ describe("list", () => {
     ).toEqual(["c1", "cl/x", "d1"]);
   });
 
+  it("keeps with --priority the tasks at that effective level or above, narrowing the situation filters", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        hot: { priority: "urgent" },
+        "hot/part": {},
+        imp: { priority: "high" },
+        plain: {},
+        slow: { priority: "low" },
+        stuck: { priority: "high", depends_on: ["plain"] },
+      },
+    });
+    // The inherited level counts: hot/part is urgent through its parent.
+    expect(
+      ids(await sandbox.run("list", "--priority", "high", "--json")),
+    ).toEqual(["hot", "hot/part", "imp", "stuck"]);
+    expect(
+      ids(await sandbox.run("list", "--priority", "low", "--json")),
+    ).toEqual(["hot", "hot/part", "imp", "plain", "slow", "stuck"]);
+    // With situation filters the level is a second condition, not an OR term.
+    expect(
+      ids(
+        await sandbox.run("list", "--blocked", "--priority", "high", "--json"),
+      ),
+    ).toEqual(["stuck"]);
+    expect(
+      ids(
+        await sandbox.run(
+          "list",
+          "--blocked",
+          "--ready",
+          "--priority",
+          "urgent",
+          "--json",
+        ),
+      ),
+    ).toEqual(["hot/part"]);
+  });
+
+  it("refuses a --priority outside the four levels", async () => {
+    sandbox = await treeSandbox({ tasks: { t: {} } });
+    const result = await sandbox.run("list", "--priority", "medium", "--json");
+    expect(result.code).toBe(ExitCode.Usage);
+    expect(envelope(result).error).toMatchObject({
+      message:
+        'Invalid --priority "medium": expected one of urgent, high, normal, low.',
+      details: {
+        priority: "medium",
+        allowed: ["urgent", "high", "normal", "low"],
+      },
+    });
+  });
+
   it("applies the configured scope, which --all lifts", async () => {
     sandbox = await treeSandbox({ ...SITUATION_TREE, scope: "op" });
     const scoped = collection(await sandbox.run("list", "--json"));
@@ -1515,7 +1678,7 @@ describe("list", () => {
       collection(await sandbox.run("list", "--local", "--json")).unavailable,
     ).toEqual([]);
     const out = plain((await sandbox.run("list")).stdout);
-    expect(out).toContain("gone not shown: not checked out");
+    expect(out).toContain("1 task · not shown: gone (not checked out)");
     expect(plain((await sandbox.run("list", "--local")).stdout)).not.toContain(
       "not shown",
     );
@@ -1523,6 +1686,20 @@ describe("list", () => {
 });
 
 describe("depth", () => {
+  it("tells from the top what waits or is blocked beneath an epic", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: {},
+        "epic/leaf": { status: "PAUSED", assignee: "bob", state: true },
+        "epic/deep/blocked": { depends_on: ["elsewhere"] },
+        elsewhere: {},
+      },
+    });
+    const out = plain((await sandbox.run("tree", "--top")).stdout);
+    expect(out).toMatch(/epic\s+open 0\/2\s+\S+\s+1 waiting · 1 blocked/);
+    expect(out).not.toContain("epic/leaf");
+  });
+
   it("limits list to a depth, --top being --depth 1, counted from the scope", async () => {
     sandbox = await treeSandbox({
       tasks: {
@@ -1696,6 +1873,202 @@ describe("tree", () => {
       await sandbox.run("tree", "--resolved", "--local", "--json"),
     );
     expect(resolved.tasks.map((task) => task.id)).toContain("epic/b");
+  });
+
+  it("gathers siblings under the group or project they share; groups are no level and the JSON has no such line", async () => {
+    sandbox = await treeSandbox({
+      tasks: { "ops/a": {}, "ops/b": {}, "platform/ci": {}, solo: {} },
+    });
+    await sandbox.project("backend", "../backend", { tasks: { k: {}, m: {} } });
+    const lines = plain((await sandbox.run("tree")).stdout).split("\n");
+    expect(lines.slice(0, 9)).toEqual([
+      expect.stringMatching(/^TASK\s+SITUATION/),
+      "ops/",
+      expect.stringMatching(/^ {2}a\s+ready/),
+      expect.stringMatching(/^ {2}b\s+ready/),
+      expect.stringMatching(/^platform\/ci\s+ready/),
+      expect.stringMatching(/^solo\s+ready/),
+      "backend:",
+      expect.stringMatching(/^ {2}k\s+ready/),
+      expect.stringMatching(/^ {2}m\s+ready/),
+    ]);
+    expect(plain((await sandbox.run("tree", "--top")).stdout)).toContain(
+      "\nops/\n  a ",
+    );
+    expect(ids(await sandbox.run("tree", "--top", "--json"))).toEqual([
+      "ops/a",
+      "ops/b",
+      "platform/ci",
+      "solo",
+      "backend:k",
+      "backend:m",
+    ]);
+  });
+});
+
+describe("time in overviews", () => {
+  const DATED: TreeSpec = {
+    tasks: {
+      a: { created: "2026-01-01T00:00:00Z", updated: "2026-03-01T00:00:00Z" },
+      b: { created: "2026-02-01T00:00:00Z", updated: "2026-01-15T00:00:00Z" },
+      c: { created: "2026-01-20T00:00:00Z", updated: "2026-02-10T00:00:00Z" },
+    },
+  };
+
+  it("orders list by a time with --sort, newest first, oldest first with --reverse", async () => {
+    sandbox = await treeSandbox(DATED);
+    expect(ids(await sandbox.run("list", "--json"))).toEqual(["a", "b", "c"]);
+    expect(
+      ids(await sandbox.run("list", "--sort", "updated", "--json")),
+    ).toEqual(["a", "c", "b"]);
+    expect(
+      ids(
+        await sandbox.run("list", "--sort", "updated", "--reverse", "--json"),
+      ),
+    ).toEqual(["b", "c", "a"]);
+    expect(
+      ids(await sandbox.run("list", "--sort", "created", "--json")),
+    ).toEqual(["b", "c", "a"]);
+  });
+
+  it("refuses --sort outside created and updated, and --reverse on its own", async () => {
+    sandbox = await treeSandbox({ tasks: { t: {} } });
+    const bad = await sandbox.run("list", "--sort", "title", "--json");
+    expect(bad.code).toBe(ExitCode.Usage);
+    expect(envelope(bad).error).toMatchObject({
+      message: 'Invalid --sort "title": expected created or updated.',
+      details: { sort: "title", allowed: ["created", "updated"] },
+    });
+    const alone = await sandbox.run("tree", "--reverse", "--json");
+    expect(alone.code).toBe(ExitCode.Usage);
+    expect(envelope(alone).error.message).toContain("--reverse without --sort");
+  });
+
+  it("bounds list by time with --updated-before and --created-since, in the grammar of --since", async () => {
+    sandbox = await treeSandbox(DATED);
+    // Strictly before: b, updated at that midnight, is not.
+    expect(
+      ids(
+        await sandbox.run("list", "--updated-before", "2026-02-10", "--json"),
+      ),
+    ).toEqual(["b"]);
+    // At or after; the rows keep the tree order.
+    expect(
+      ids(await sandbox.run("list", "--created-since", "2026-01-20", "--json")),
+    ).toEqual(["b", "c"]);
+    expect(
+      ids(
+        await sandbox.run(
+          "list",
+          "--created-since",
+          "2026-01-20",
+          "--updated-before",
+          "2026-02-01",
+          "--json",
+        ),
+      ),
+    ).toEqual(["b"]);
+    // A duration counts back from now, so every task of 2026 is before it.
+    expect(
+      ids(await sandbox.run("list", "--updated-before", "1d", "--json")),
+    ).toEqual(["a", "b", "c"]);
+    const bad = await sandbox.run("list", "--created-since", "soon", "--json");
+    expect(bad.code).toBe(ExitCode.Usage);
+    expect(envelope(bad).error.details).toEqual({
+      option: "--created-since",
+      value: "soon",
+    });
+  });
+
+  it("orders siblings in tree with --sort and keeps the nesting", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        epic: { created: "2026-01-01T00:00:00Z" },
+        "epic/a": { created: "2026-01-02T00:00:00Z" },
+        "epic/b": { created: "2026-01-03T00:00:00Z" },
+        solo: { created: "2026-02-01T00:00:00Z" },
+      },
+    });
+    const lines = plain(
+      (await sandbox.run("tree", "--sort", "created")).stdout,
+    ).split("\n");
+    const at = (re: RegExp) => lines.findIndex((line) => re.test(line));
+    expect(at(/^solo\s/)).toBeLessThan(at(/^epic\s/));
+    expect(at(/^epic\s/)).toBeLessThan(at(/^ {2}b\s/));
+    expect(at(/^ {2}b\s/)).toBeLessThan(at(/^ {2}a\s/));
+    const reversed = plain(
+      (await sandbox.run("tree", "--sort", "created", "--reverse")).stdout,
+    ).split("\n");
+    expect(reversed.findIndex((line) => /^epic\s/.test(line))).toBeLessThan(
+      reversed.findIndex((line) => /^solo\s/.test(line)),
+    );
+    // The JSON is the same nesting flattened, in the same order.
+    expect(
+      ids(await sandbox.run("tree", "--sort", "created", "--json")),
+    ).toEqual(["solo", "epic", "epic/b", "epic/a"]);
+    expect(
+      ids(
+        await sandbox.run("tree", "--sort", "created", "--reverse", "--json"),
+      ),
+    ).toEqual(["epic", "epic/a", "epic/b", "solo"]);
+  });
+
+  it("shows UPDATED after the situation in every overview, CREATED beside it when created is the key or the bound", async () => {
+    sandbox = await treeSandbox({
+      tasks: {
+        t: { created: "2026-01-01T00:00:00Z", updated: "2026-01-02T00:00:00Z" },
+        w: { status: "IN_PROGRESS" },
+      },
+    });
+    for (const argv of [["list"], ["ready"], ["tree"], ["mine"]]) {
+      const out = plain((await sandbox.run(...argv)).stdout);
+      expect(out, argv.join(" ")).toMatch(/SITUATION\s+UPDATED\s+PRIORITY/);
+      expect(out, argv.join(" ")).not.toContain("CREATED");
+    }
+    const sorted = plain(
+      (await sandbox.run("list", "--sort", "created")).stdout,
+    );
+    expect(sorted).toMatch(/SITUATION\s+CREATED\s+UPDATED\s+PRIORITY/);
+    const bounded = plain(
+      (await sandbox.run("list", "--created-since", "2025-01-01")).stdout,
+    );
+    expect(bounded).toMatch(/CREATED\s+UPDATED/);
+    const tree = plain((await sandbox.run("tree", "--sort", "created")).stdout);
+    expect(tree).toMatch(/CREATED\s+UPDATED/);
+    // The cell is a compact age; the JSON keeps its timestamps and gains nothing.
+    const row = plain((await sandbox.run("list")).stdout)
+      .split("\n")
+      .find((line) => /^\s?t\s/.test(line));
+    expect(row).toMatch(/\s\d+(m|h|d|w|mo|y)\s/);
+    const json = collection(
+      await sandbox.run("list", "--sort", "updated", "--json"),
+    );
+    expect(Object.keys(json)).toEqual([
+      "scope",
+      "projects",
+      "count",
+      "tasks",
+      "malformed",
+      "unavailable",
+    ]);
+    expect(json.tasks[0]).toMatchObject({
+      created: "2026-01-01T00:00:00Z",
+      updated: "2026-01-02T00:00:00Z",
+    });
+  });
+});
+
+describe("overview width", () => {
+  it("cuts nothing when stdout is not a terminal", async () => {
+    const title = `A title long enough to wrap any terminal ${"x".repeat(160)}`;
+    sandbox = await treeSandbox({
+      tasks: { long: { title }, "long/part": { title } },
+    });
+    for (const argv of [["list"], ["ready"], ["tree"]]) {
+      const out = plain((await sandbox.run(...argv)).stdout);
+      expect(out, argv.join(" ")).toContain(title);
+      expect(out, argv.join(" ")).not.toContain("…");
+    }
   });
 });
 
@@ -2166,5 +2539,229 @@ describe("command groups", () => {
         details: { command: group, subcommands: expect.any(Array) },
       });
     }
+  });
+});
+
+describe("--fields", () => {
+  const FIELDS_TREE: TreeSpec = {
+    tasks: {
+      a: { status: "PAUSED", state: true, assignee: "tester" },
+      epic: {},
+      "epic/part": {},
+      free: {},
+    },
+  };
+
+  it("trims each row of a collection to the named keys, in that order", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const result = await sandbox.run(
+      "list",
+      "--json",
+      "--fields",
+      "situation,id",
+    );
+    expect(result.code).toBe(ExitCode.Success);
+    const json = result.json<CollectionJson<Record<string, unknown>>>();
+    expect(Object.keys(json)).toEqual([
+      "scope",
+      "projects",
+      "count",
+      "tasks",
+      "malformed",
+      "unavailable",
+    ]);
+    expect(json.count).toBe(4);
+    for (const row of json.tasks) {
+      expect(Object.keys(row)).toEqual(["situation", "id"]);
+    }
+    const none = collection(
+      await sandbox.run("list", "--done", "--json", "--fields", "id"),
+    );
+    expect(none).toMatchObject({ count: 0, tasks: [] });
+  });
+
+  it("trims a task object, the extras of show and resume included", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const shown = await sandbox.run(
+      "show",
+      "a",
+      "--json",
+      "--fields",
+      "id,body,yours",
+    );
+    expect(shown.json<Record<string, unknown>>()).toEqual({
+      id: "a",
+      body: expect.any(String),
+      yours: "inbox",
+    });
+    const resumed = await sandbox.run(
+      "resume",
+      "a",
+      "--json",
+      "--fields",
+      "state,id",
+    );
+    expect(Object.keys(resumed.json<Record<string, unknown>>())).toEqual([
+      "state",
+      "id",
+    ]);
+    // The task objects under child_tasks answer to the same list.
+    const parent = await sandbox.run(
+      "resume",
+      "epic",
+      "--json",
+      "--fields",
+      "id,child_tasks",
+    );
+    expect(parent.json<{ child_tasks: object[] }>().child_tasks).toEqual([
+      { id: "epic/part" },
+    ]);
+  });
+
+  it("trims what a write answers with, leaving out an extra this run has not got", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const claimed = await sandbox.session("s1")(
+      "claim",
+      "free",
+      "--json",
+      "--fields",
+      "id,status,yours,cascaded",
+    );
+    expect(claimed.code).toBe(ExitCode.Success);
+    expect(claimed.json<Record<string, unknown>>()).toEqual({
+      id: "free",
+      status: "IN_PROGRESS",
+      yours: "this-session",
+    });
+    const created = await sandbox.run(
+      "new",
+      "fresh",
+      "A fresh task",
+      "--json",
+      "--fields",
+      "id,situation",
+    );
+    expect(created.json<Record<string, unknown>>()).toEqual({
+      id: "fresh",
+      situation: "ready",
+    });
+  });
+
+  it("refuses a key no document has before anything is written, an empty list, and --fields without --json", async () => {
+    sandbox = await treeSandbox(FIELDS_TREE);
+    const unknown = await sandbox.session("s1")(
+      "claim",
+      "free",
+      "--json",
+      "--fields",
+      "id,nope",
+    );
+    expect(unknown.code).toBe(ExitCode.Usage);
+    expect(envelope(unknown).error.details).toMatchObject({ field: "nope" });
+    expect(
+      collection(await sandbox.run("list", "--working", "--json")).count,
+    ).toBe(0);
+    expect((await sandbox.run("ready", "--json", "--fields", " , ")).code).toBe(
+      ExitCode.Usage,
+    );
+    const human = await sandbox.run("ready", "--fields", "id");
+    expect(human.code).toBe(ExitCode.Usage);
+    expect(human.stderr).toContain("--json");
+    // A command whose document is no task object does not take the flag.
+    expect((await sandbox.run("actors", "--json", "--fields", "id")).code).toBe(
+      ExitCode.Usage,
+    );
+  });
+});
+
+describe("custom fields", () => {
+  const CUSTOM = {
+    review_ticket: "QA-417",
+    estimate_days: 3,
+    tags: ["api", "auth"],
+  };
+  const TREE: TreeSpec = {
+    tasks: { ticketed: { extra: CUSTOM }, plain: {} },
+  };
+
+  it("carries the project's own frontmatter keys as custom_fields, absent when there are none", async () => {
+    sandbox = await treeSandbox(TREE);
+    const shown = (
+      await sandbox.run("show", "ticketed", "--json")
+    ).json<ShowJson>();
+    expect(shown.custom_fields).toEqual(CUSTOM);
+    expect(Object.keys(shown.custom_fields ?? {})).toEqual([
+      "review_ticket",
+      "estimate_days",
+      "tags",
+    ]);
+    const keys = Object.keys(shown);
+    expect(keys.indexOf("custom_fields")).toBe(keys.indexOf("updated") + 1);
+    const bare = (
+      await sandbox.run("show", "plain", "--json")
+    ).json<ShowJson>();
+    expect("custom_fields" in bare).toBe(false);
+
+    // Rows of a collection, through --fields: the key only where the file has keys.
+    const listed = (
+      await sandbox.run("list", "--json", "--fields", "id,custom_fields")
+    ).json<CollectionJson<Record<string, unknown>>>();
+    expect(
+      [...listed.tasks].sort((a, b) =>
+        String(a.id).localeCompare(String(b.id)),
+      ),
+    ).toEqual([{ id: "plain" }, { id: "ticketed", custom_fields: CUSTOM }]);
+
+    // A transition keeps them in the file and returns them.
+    const assigned = (
+      await sandbox.run("assign", "ticketed", "alice", "--json")
+    ).json<ShowJson>();
+    expect(assigned.custom_fields).toEqual(CUSTOM);
+    expect(
+      (await sandbox.run("show", "ticketed", "--json")).json<ShowJson>()
+        .custom_fields,
+    ).toEqual(CUSTOM);
+  });
+
+  it("prints them with the fields in show and resume, as the file spells them", async () => {
+    sandbox = await treeSandbox(TREE);
+    const shown = plain((await sandbox.run("show", "ticketed")).stdout);
+    // A block of their own after the fields, so a key named like a field is
+    // never taken for one.
+    expect(shown).toMatch(
+      /\n {2}custom fields\n {4}review_ticket +QA-417\n {4}estimate_days +3\n {4}tags +\[api, auth\]\n/,
+    );
+    expect(shown.indexOf("custom fields")).toBeGreaterThan(
+      shown.indexOf("  path "),
+    );
+    const resumed = plain((await sandbox.run("resume", "ticketed")).stdout);
+    expect(resumed).toMatch(/\n {2}custom fields\n {4}review_ticket +QA-417\n/);
+    expect(resumed).toMatch(/ {4}tags +\[api, auth\]\n/);
+    expect(plain((await sandbox.run("show", "plain")).stdout)).not.toContain(
+      "review_ticket",
+    );
+  });
+
+  it("spells a number JSON cannot carry as YAML does", async () => {
+    sandbox = await treeSandbox({ tasks: { metered: {} } });
+    const file = ".tasks/metered/task.md";
+    await sandbox.write(
+      file,
+      (await sandbox.read(file)).replace(
+        "\n---\n\n",
+        "\nquota: .inf\nmeasurement: .nan\nsamples: [null, -.inf]\n---\n\n",
+      ),
+    );
+    const shown = (
+      await sandbox.run("show", "metered", "--json")
+    ).json<ShowJson>();
+    expect(shown.custom_fields).toEqual({
+      quota: ".inf",
+      measurement: ".nan",
+      samples: [null, "-.inf"],
+    });
+    const text = plain((await sandbox.run("show", "metered")).stdout);
+    expect(text).toMatch(/quota +\.inf\n/);
+    expect(text).toMatch(/samples +\[null, -\.inf\]\n/);
   });
 });

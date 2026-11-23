@@ -150,11 +150,14 @@ first row that holds.
 | `open N/M`      | a parent with open children: `N` of `M` resolved           |
 | `ready`         | free and unblocked                                         |
 
-Overviews — `ready`, `mine`, `list`, `tree` — show the situation, then the effective
+Overviews — `ready`, `mine`, `list`, `tree` — show the situation, then the time since the
+task was last written as a compact age (`3h`, `2d`, `5w`), then the effective
 priority in a column of its own (blank for `normal`), then any other condition that holds
 as a secondary label: `started`, `blocked by A (cancelled)`, `active` for a parent with a
-task in progress beneath it, the claim's liveness, the assignee. They never show the
-stored status; `show`,
+task in progress beneath it, `2 waiting` and `1 blocked` for what a parent's descendants
+wait on, the claim's liveness (`live`, `orphaned 3d`), the assignee. In a terminal an
+overview fits the window, cutting the title first with an ellipsis; piped output is never cut.
+They never show the stored status; `show`,
 `resume`, the JSON `status` field and the file do. So an epic whose child is being
 worked reads `open 2/5 · active`, not `TODO`, and a task paused for review reads
 `waiting for alice`, not `PAUSED`.
@@ -162,8 +165,8 @@ worked reads `open 2/5 · active`, not `TODO`, and a task paused for review read
 A task is **ready** for you when it is `TODO` or `PAUSED`, everything it depends on is
 `DONE`, it is assigned to nobody or to you, it has no open child, and no ancestor is
 claimed or assigned. `tasks ready` orders them by effective priority, then `PAUSED`
-before `TODO` — finishing beats starting — then oldest first. An empty answer is a
-successful query, not an error.
+before `TODO` — finishing beats starting — then oldest first; `--priority high` keeps the
+urgent and high ones. An empty answer is a successful query, not an error.
 
 ## Priority
 

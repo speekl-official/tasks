@@ -2,6 +2,7 @@ import { ancestorPaths, compareIds, isWithin, qualifyId } from "./ids.js";
 import type { Task } from "./task.js";
 import { toTaskJson } from "./task.js";
 import type { Tree } from "./tree.js";
+import { compactAge } from "./time.js";
 import { ancestorIdsOf } from "./tree.js";
 import type {
   BlockedByJson,
@@ -9,13 +10,16 @@ import type {
   ClaimLiveness,
   Derived,
   FinishGate,
+  Frontmatter,
   LastEntryJson,
+  Liveness,
   Priority,
   ResolvedRef,
   Situation,
   StartGate,
   Status,
   TaskWithDerivedJson,
+  Yours,
 } from "./types.js";
 import { PRIORITY_RANK, higherPriority, isOpen, isResolved } from "./types.js";
 
@@ -48,11 +52,23 @@ export interface TreeSnapshot {
   tasks: SnapshotTask[];
 }
 
+/** Open descendants a depth-limited overview would hide, by situation. */
+export interface BelowCounts {
+  waiting: number;
+  blocked: number;
+}
+
 export interface DerivedTask {
   snapshot: SnapshotTask;
   derived: Derived;
   /** toTaskJson(task, project) merged with derived. */
   json: TaskWithDerivedJson;
+  /**
+   * How many open descendants are `waiting` and how many `blocked`, for the
+   * `N waiting` and `N blocked` labels of a parent; zeros for a leaf. Not
+   * part of the JSON, whose rows carry each task's own situation.
+   */
+  below: BelowCounts;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -231,6 +247,7 @@ function blockedByOf(start: StartGate): BlockedByJson[] {
     .filter((ref) => !ref.satisfied)
     .map((ref) => ({
       ref: ref.ref,
+      task: ref.task,
       // An unsatisfied reference always has a reason; `missing` is the
       // spec's recommendation for one that cannot be read at all.
       reason: ref.reason ?? "missing",
@@ -243,6 +260,7 @@ function deriveTask(
   tree: Tree,
   structure: Structure,
   actor: string | null,
+  session: string | null,
 ): Derived {
   const { task } = entry;
   const fm = task.frontmatter;
@@ -316,28 +334,68 @@ function deriveTask(
     liveness: claim?.liveness ?? null,
     last_seen:
       claim !== null && fm.claimed_session !== null ? claim.last_seen : null,
+    yours: yoursOf(fm, claim?.liveness ?? null, actor, session),
     last_entry: entry.lastEntry,
   };
 }
 
 /**
- * Derive every task of one tree for the calling actor. A null actor (as for
- * `index.md`) requires no assignee: only unassigned tasks can be ready. The
- * map is keyed by the task's id within its tree, unqualified.
+ * How the task is the viewer's. A claim is this session's when the tokens
+ * match, a claim without a token counting as this session's for a viewer
+ * without one, as `session-check` counts them; the viewer's other claims
+ * are `orphaned` or held `elsewhere` (another live session, or a liveness
+ * nobody here can judge); an open task assigned to the viewer and not
+ * claimed by them is `inbox`. Null otherwise, for a resolved task, and for
+ * the actor-independent view. A claim recorded on an open task that is not
+ * `IN_PROGRESS` is a manifest validation reports; it stays the viewer's, as
+ * `elsewhere`, so `mine` keeps showing it and nothing invites resuming it.
+ */
+function yoursOf(
+  fm: Frontmatter,
+  liveness: Liveness | null,
+  actor: string | null,
+  session: string | null,
+): Yours | null {
+  if (actor === null) return null;
+  if (fm.claimed_by === actor && isOpen(fm.status)) {
+    if (fm.status !== "IN_PROGRESS") return "elsewhere";
+    if (fm.claimed_session === session) return "this-session";
+    return liveness === "orphaned" ? "orphaned" : "elsewhere";
+  }
+  return isOpen(fm.status) && fm.assignee === actor ? "inbox" : null;
+}
+
+/**
+ * Derive every task of one tree for the calling actor and session. A null
+ * actor (as for `index.md`) requires no assignee: only unassigned tasks can
+ * be ready. The map is keyed by the task's id within its tree, unqualified.
  */
 export function deriveTree(
   snapshot: TreeSnapshot,
   actor: string | null,
+  session: string | null = null,
 ): Map<string, DerivedTask> {
   const structure = buildStructure(snapshot);
   const out = new Map<string, DerivedTask>();
   for (const entry of snapshot.tasks) {
-    const derived = deriveTask(entry, snapshot.tree, structure, actor);
+    const derived = deriveTask(entry, snapshot.tree, structure, actor, session);
     out.set(entry.task.id, {
       snapshot: entry,
       derived,
       json: { ...toTaskJson(entry.task, entry.project), ...derived },
+      below: { waiting: 0, blocked: 0 },
     });
+  }
+  // A second pass, once every situation is known: each waiting or blocked
+  // task counts on every task above it, so an epic shown alone still tells
+  // that a leaf beneath it waits on a person or on a dependency.
+  for (const d of out.values()) {
+    const { situation } = d.derived;
+    if (situation !== "waiting" && situation !== "blocked") continue;
+    for (const above of ancestorPaths(d.snapshot.task.id)) {
+      const parent = out.get(above);
+      if (parent !== undefined) parent.below[situation] += 1;
+    }
   }
   return out;
 }
@@ -442,6 +500,55 @@ export function hasOpenStatus(d: DerivedTask): boolean {
   return isOpen(d.snapshot.task.frontmatter.status);
 }
 
+/** The two timestamps an overview can order or filter by. */
+export type TimeKey = "created" | "updated";
+
+export const TIME_KEYS: readonly TimeKey[] = ["created", "updated"];
+
+export function isTimeKey(value: unknown): value is TimeKey {
+  return value === "created" || value === "updated";
+}
+
+/**
+ * The order of `--sort <key>`: the newest first (the latest `created`, or the
+ * most recently `updated`), `reverse` the oldest first; ties fall back to the
+ * tree order, local tree first. Canonical timestamps compare as text.
+ */
+export function timeComparator(
+  key: TimeKey,
+  reverse: boolean,
+  aliasOrder: string[] = [],
+): (a: DerivedTask, b: DerivedTask) => number {
+  return (a, b) => {
+    const left = a.snapshot.task.frontmatter[key];
+    const right = b.snapshot.task.frontmatter[key];
+    const byTime = reverse
+      ? compareText(left, right)
+      : compareText(right, left);
+    return (
+      byTime ||
+      compareProjects(a.snapshot.project, b.snapshot.project, aliasOrder) ||
+      compareIds(a.snapshot.task.id, b.snapshot.task.id)
+    );
+  };
+}
+
+/** The filter of `--updated-before <when>`: last written before `bound`. */
+export function updatedBefore(bound: string): (d: DerivedTask) => boolean {
+  return (d) => d.snapshot.task.frontmatter.updated < bound;
+}
+
+/** The filter of `--created-since <when>`: created at `bound` or after. */
+export function createdSince(bound: string): (d: DerivedTask) => boolean {
+  return (d) => d.snapshot.task.frontmatter.created >= bound;
+}
+
+/** The filter of `--priority <level>`: effective priority at `level` or above. */
+export function priorityAtLeast(level: Priority): (d: DerivedTask) => boolean {
+  return (d) =>
+    PRIORITY_RANK[d.derived.effective_priority] <= PRIORITY_RANK[level];
+}
+
 /* ------------------------------------------------------------------------ */
 /* Words                                                                    */
 /* ------------------------------------------------------------------------ */
@@ -452,18 +559,19 @@ export function progressText(children: ChildrenProgress): string {
 }
 
 /**
- * A reference as an overview shows it, qualified like the ids around it: a
- * target in a project carries that project; one in the task's own tree
- * carries the task's alias when that tree is foreign.
+ * A reference as a person reads it: the form the command line takes. A
+ * resolved reference is named by its target from the caller's point of view,
+ * whatever tree stores it — the alias of a listed project, the bare id of a
+ * task in the local tree, the stored path of a tree that is not listed. One
+ * that did not resolve is shown as stored, qualified with the task's own
+ * alias when the task is foreign and the reference local.
  */
 export function referenceText(
   ref: ResolvedRef | null,
   raw: string,
   taskProject: string | null,
 ): string {
-  if (ref !== null && ref.project !== null) {
-    return qualifyId(ref.project, ref.id);
-  }
+  if (ref !== null) return qualifyId(ref.project, ref.id);
   return taskProject !== null && !raw.includes(":")
     ? qualifyId(taskProject, raw)
     : raw;
@@ -522,16 +630,17 @@ export function priorityLabel(d: DerivedTask): string | null {
  * liveness; a claim without a session carries none. Unknown with a session
  * means a heartbeat that never reached this machine, which is worth seeing.
  */
-function livenessLabel(d: DerivedTask): string | null {
+function livenessLabel(d: DerivedTask, now: Date): string | null {
   const fm = d.snapshot.task.frontmatter;
   if (fm.status !== "IN_PROGRESS" || fm.claimed_session === null) return null;
   switch (d.derived.liveness) {
     case "live":
       return "live";
     case "orphaned":
+      // How long ago the session was last seen; `show` has the timestamp.
       return d.derived.last_seen === null
         ? "orphaned"
-        : `orphaned since ${d.derived.last_seen}`;
+        : `orphaned ${compactAge(d.derived.last_seen, now)}`;
     default:
       return "liveness unknown";
   }
@@ -557,14 +666,15 @@ const IMPLIES_STARTED: ReadonlySet<Situation> = new Set([
 
 /**
  * The secondary labels, in a fixed order: started, blocked by (when not the
- * situation), active, liveness, the assignee, held by, closable. The
- * priority is not one: overviews give it a column (`priorityLabel`).
+ * situation), active, the waiting and blocked counts beneath, liveness, the
+ * assignee, held by, closable. The priority is not one: overviews give it a
+ * column (`priorityLabel`).
  * `started` marks the task's own resume point, where the word does not
  * already imply one: below a parent, progress and `active` say more. A
  * resolved task carries only `active`, which there flags a broken invariant;
  * everything else concerns work still to schedule.
  */
-export function labels(d: DerivedTask): string[] {
+export function labels(d: DerivedTask, now: Date = new Date()): string[] {
   const { derived } = d;
   const task = d.snapshot.task;
   if (isResolved(task.frontmatter.status)) {
@@ -579,7 +689,9 @@ export function labels(d: DerivedTask): string[] {
     out.push(blockedText(d));
   }
   if (derived.active) out.push("active");
-  const liveness = livenessLabel(d);
+  if (d.below.waiting > 0) out.push(`${d.below.waiting} waiting`);
+  if (d.below.blocked > 0) out.push(`${d.below.blocked} blocked`);
+  const liveness = livenessLabel(d, now);
   if (liveness !== null) out.push(liveness);
   const assignee = assigneeLabel(d);
   if (assignee !== null) out.push(assignee);

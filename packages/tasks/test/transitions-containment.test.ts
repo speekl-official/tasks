@@ -101,7 +101,9 @@ describe("defer cascade", () => {
     expect(await logTexts(sandbox, "epic/a")).toEqual([
       `defer with epic: IN_PROGRESS → BACKLOG\nsupersedes alice s:s1, last seen ${seen}\nparked`,
     ]);
-    expect(plain(result.stdout)).toContain("superseded alice s:s1 on epic/a");
+    expect(plain(result.stdout)).toMatch(
+      /superseded alice on epic\/a \(orphaned/,
+    );
   });
 
   it("refuses to reach a live claim, naming it; --force overrides", async () => {
@@ -358,12 +360,12 @@ describe("dependencies after a cancel", () => {
     );
     expect(cancelled.json<TransitionJson>().dependents).toEqual(["b"]);
     expect((await derivedOf(sandbox, "b")).derived.blocked_by).toEqual([
-      { ref: "a", reason: "cancelled", status: "CANCELLED" },
+      { ref: "a", task: "a", reason: "cancelled", status: "CANCELLED" },
     ]);
 
     expect((await sandbox.run("reopen", "a", "-m", "back")).code).toBe(0);
     expect((await derivedOf(sandbox, "b")).derived.blocked_by).toEqual([
-      { ref: "a", reason: "not-done", status: "TODO" },
+      { ref: "a", task: "a", reason: "not-done", status: "TODO" },
     ]);
 
     expect((await sandbox.run("done", "a", "-m", "built")).code).toBe(0);
@@ -408,7 +410,9 @@ describe("finish gate", () => {
       id: "epic",
       kind: "finish-gate",
       open_children: [],
-      finishes_after: [{ ref: "other", reason: "not-done", status: "TODO" }],
+      finishes_after: [
+        { ref: "other", task: "other", reason: "not-done", status: "TODO" },
+      ],
     });
     expect((await sandbox.run("cancel", "other", "-m", "x")).code).toBe(0);
     expect((await sandbox.run("done", "epic", "-m", "joined")).code).toBe(0);

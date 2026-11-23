@@ -47,6 +47,7 @@ function snapshotOf(tree: Tree, start: Record<string, string[]> = {}) {
           satisfied: !(task.id in start),
           refs: (start[task.id] ?? []).map((ref) => ({
             ref,
+            task: ref,
             project: null,
             id: ref,
             satisfied: false,

@@ -640,6 +640,28 @@ describe("warnings", () => {
     expect(result.findings[1]!.message).toContain("v1");
   });
 
+  it("checks the keys against custom_fields once config.yml declares them", async () => {
+    sandbox = await treeSandbox({
+      custom_fields: ["review_ticket", "estimate_days"],
+      tasks: {
+        declared: { extra: { review_ticket: "QA-417", estimate_days: 3 } },
+        stray: { extra: { reviewer: "someone", phase: "build" } },
+        plain: {},
+      },
+    });
+
+    const { code, result } = await validate();
+    expect(code).toBe(4);
+    expect(summary(result)).toEqual([
+      error("undeclared-key", "stray"),
+      error("undeclared-key", "stray"),
+    ]);
+    expect(result.findings[0]!.message).toContain(
+      '"reviewer" is not among the custom_fields config.yml declares (review_ticket, estimate_days)',
+    );
+    expect(result.findings[1]!.message).toContain("v1");
+  });
+
   it("warns about resolved subtrees older than archive_resolved_after_days", async () => {
     sandbox = await treeSandbox({
       tasks: {

@@ -104,11 +104,12 @@ When an implementation writes a manifest, the frontmatter MUST be emitted in can
 1. The ten fields above, in that order, followed by any keys present on read but not defined
    here, in the order read (an implementation MAY place a key YAML reads as an integer first,
    quoted) and with their values re-emitted unchanged. An implementation MUST NOT
-   interpret such keys and MUST NOT add any of its own.
+   interpret such keys and MUST NOT add any of its own. They are the project's own, and a task
+   object carries them as `custom_fields` ([Task object](/docs/spec/cli#task-object)).
 2. Lists as flow sequences: `[a, b]`, or `[]` when empty.
 3. Timestamps always double-quoted; `null` for absent nullable values.
 4. Other scalars unquoted when they are unambiguous plain YAML, quoted otherwise.
-5. Comments are not preserved; the frontmatter block is machine-owned.
+5. Comments are not preserved; the block is rewritten whole on every write.
 
 The file is then `---`, newline, the frontmatter, newline, `---`, blank line, the body, one
 trailing newline. Repeated writes of unchanged state MUST produce identical bytes.
@@ -131,11 +132,12 @@ An implementation offering validation MUST detect at least:
 | A live task's path is also an archived task's path | error |
 | The same id is present twice (interrupted cross-filesystem move) | error |
 | `log.md` contains version-control conflict markers | error |
+| A frontmatter key outside `custom_fields`, when the configuration lists any ([Configuration](/docs/spec/configuration)) | error |
 | `PAUSED` without `state.md` | warning |
 | `TODO` with `state.md` | warning |
 | A gate reference can never be satisfied (missing, archived, cancelled, unresolvable, not checked out, unsupported version) | warning |
 | An `IN_PROGRESS` claim that is orphaned, or whose non-null session has no heartbeat file | warning |
-| A frontmatter key this specification does not define | warning |
+| A frontmatter key this specification does not define, when `custom_fields` lists none | warning |
 | A configured project is not checked out, leads to no tree, or is a v1 or unsupported-version tree | warning |
 | Two configured aliases lead to the same tree | warning |
 | A configured documentation location does not exist on this machine | warning |
