@@ -88,8 +88,9 @@ again. Subagents use the same name and token.
    in the conversation, under `## Notes`, or in a candidate's `last_entry` (an
    `assign -m`, a `note`), so read the candidates' last entries before choosing,
    and claim the task an instruction names by id (`--next` takes the first
-   ready task instead); only then new work. An `assign -m` message lives only
-   in the log, where the claim, or any later entry, displaces it: copy what the
+   ready task instead); only then new work. An instruction that reached you
+   only in a transition's message (`assign -m`, `handoff -m`) lives in the
+   log alone, where the claim, or any later entry, displaces it: copy what the
    work needs under `## Notes` (`tasks note`) before the claim; a `note` is
    there already. Take over an
    orphan with an ordinary `tasks claim <task>`, one at a time, and only what
