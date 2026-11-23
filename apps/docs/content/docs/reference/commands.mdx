@@ -673,9 +673,11 @@ then in every other tree the command can write — the local tree and the trees 
 one tree at a time under each tree's lock, keeping each reference's project path and
 replacing its id. References found in trees it can read but not write are reported as
 not rewritten; they resolve as `missing` until someone edits them. A listed tree that
-cannot be written does not fail the move: its references are reported too. Run `move`
-from the tree that lists the others — the tracker, in a multi-repository layout — and it
-reaches every reference the tooling can see.
+cannot be written does not fail the move: its references are reported too. A listed tree
+that is not checked out here is not searched at all, so a reference it holds is neither
+rewritten nor reported; when it returns, `validate` there names it dangling and re-adding
+the dependency repairs it. Run `move` from the tree that lists the others — the tracker, in
+a multi-repository layout — and it reaches every reference the tooling can see.
 
 **Under a `BACKLOG` parent**, the moved subtree is deferred, as `defer` would do it:
 `state.md` and assignees are kept, claims are cleared.

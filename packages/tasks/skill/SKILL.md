@@ -239,8 +239,8 @@ Global options: `-C <dir>` (the tree of another checkout), `--as <actor>`,
 `--session <token>`. Every command that prints takes `--json`. `<task>` is a
 full path, an unambiguous suffix, or `alias:path` in a listed project. What a
 command does and its main flags: the command table in
-`${CLAUDE_SKILL_DIR}/reference/commands.md`; every option with its values:
-`tasks <command> --help`.
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; the complete option list, each
+with its syntax: `tasks <command> --help`.
 
 - **Read:** `mine [--local]`;
   `ready [--scope <path>] [--all] [--local] [--priority <level>]`;
@@ -257,8 +257,9 @@ command does and its main flags: the command table in
   `handoff <task> <actor> -m <text>`; `done <task> -m <text>`; `release <task>`.
 - **Shape the tree:**
   `new <path> <title…> [--backlog] [--assign <actor>] [--priority <level>]`;
-  `move <source> <destination>` (rewrites the references here and in listed
-  trees; the rest come back as `unrewritten`);
+  `move <source> <destination>` (rewrites the references in the trees it can
+  reach and write; `unrewritten` names the ones it saw and left; a listed
+  tree absent at the time was not seen, so check it when it returns);
   `dep add|rm <task> <ref>…`;
   `after add|rm <task> <ref>…`; `priority <task> urgent|high|normal|low`;
   `assign <task> <actor>` / `unassign <task>` (an assigned task holds its
@@ -334,8 +335,9 @@ decides whether to cancel it, drop the reference, or point it elsewhere.
 ## Deeper reference
 
 The command table — every command, what it does and its main flags — is
-`${CLAUDE_SKILL_DIR}/reference/commands.md`; `tasks <command> --help` lists
-every option of one command with its values. For the file layout, the
+`${CLAUDE_SKILL_DIR}/reference/commands.md`; `tasks <command> --help` gives
+the complete option list of one command, each with its syntax. For the file
+layout, the
 `task.md` fields and their canonical form, the workspace files, `config.yml`,
 the reference grammar, gate reasons, situations, validation kinds and the error
 shape, read `${CLAUDE_SKILL_DIR}/reference/convention.md`. Load either only
