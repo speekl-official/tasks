@@ -17,6 +17,7 @@ import {
   DEFAULT_HOOKS_ACTOR,
   SETTINGS_RELATIVE_PATH,
   installHooks,
+  installedHooksActor,
 } from "../core/hooks.js";
 import { assertActor } from "../core/sessions.js";
 import { TaskError } from "../errors.js";
@@ -38,7 +39,7 @@ export interface HooksInstallJson {
 }
 
 interface InstallOptions {
-  actor: string;
+  actor?: string;
   force?: boolean;
   json?: boolean;
 }
@@ -72,8 +73,7 @@ export function hooksCommand(): Command {
     )
     .option(
       "--actor <name>",
-      "the actor the hooks act as, set as TASKS_ACTOR in each command",
-      DEFAULT_HOOKS_ACTOR,
+      `the actor the hooks act as, set as TASKS_ACTOR in each command (default: the actor of the tasks hooks already in the file, else ${DEFAULT_HOOKS_ACTOR})`,
     )
     .option(
       "--force",
@@ -81,13 +81,21 @@ export function hooksCommand(): Command {
     )
     .option("--json", "emit machine-readable JSON")
     .action(async (options: InstallOptions, command: Command) => {
-      const actor = assertActor(options.actor, "--actor");
+      if (options.actor !== undefined) assertActor(options.actor, "--actor");
       const global = globalOptions(command);
       // The settings belong to the repository the tree is in: they sit at
       // the root of the discovered tree, wherever below it this runs.
       const project = await requireProject(
         startDirectory(global),
         discoveryOptions(global),
+      );
+      // A refresh acts as the actor the hooks already have: an upgrade must
+      // not change whose tasks a session sees.
+      const actor = assertActor(
+        options.actor ??
+          (await installedHooksActor(project.root)) ??
+          DEFAULT_HOOKS_ACTOR,
+        "--actor",
       );
 
       // The hooks will write under this name: a v2 tree with a roster must

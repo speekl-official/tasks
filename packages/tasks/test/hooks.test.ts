@@ -274,7 +274,8 @@ describe("hooks install", () => {
     const file = path.join(sandbox.dir, SETTINGS);
     const first = command("say first");
     const last = command("say last");
-    // A local install and another actor: still the Stop event's tasks hook.
+    // A local install and another actor: still the Stop event's tasks hook,
+    // and the actor the other hooks are then written for.
     const edited = command(
       "TASKS_ACTOR=bot ./node_modules/.bin/tasks session-check --json; exit 0",
     );
@@ -286,7 +287,7 @@ describe("hooks install", () => {
     const partial = await install(sandbox);
     expect(partial.code).toBe(ExitCode.Success);
     expect(plain(partial.stdout)).toBe(
-      "✓ Installed the SessionStart, PostToolUse and SessionEnd hooks in .claude/settings.json for actor agent; kept the existing Stop hook (--force replaces it)\n",
+      "✓ Installed the SessionStart, PostToolUse and SessionEnd hooks in .claude/settings.json for actor bot; kept the existing Stop hook (--force replaces it)\n",
     );
     expect((await settings(sandbox)).hooks.Stop).toEqual([first, edited, last]);
     const unforced = await sandbox.read(SETTINGS);
@@ -296,21 +297,21 @@ describe("hooks install", () => {
     expect(forced.json<HooksInstallJson>()).toEqual({
       installed: true,
       file,
-      actor: "agent",
+      actor: "bot",
       written: ["Stop"],
       kept: ["SessionStart", "PostToolUse", "SessionEnd"],
     });
     // In the place of the entry it replaces, between the same neighbours.
     expect((await settings(sandbox)).hooks.Stop).toEqual([
       first,
-      ...(await documented("Stop")),
+      ...(await documented("Stop", "bot")),
       last,
     ]);
 
     await sandbox.write(SETTINGS, unforced);
     const human = await install(sandbox, "--force");
     expect(plain(human.stdout)).toBe(
-      "✓ Installed the Stop hook in .claude/settings.json for actor agent; the SessionStart, PostToolUse and SessionEnd hooks were up to date\n",
+      "✓ Installed the Stop hook in .claude/settings.json for actor bot; the SessionStart, PostToolUse and SessionEnd hooks were up to date\n",
     );
   });
 
@@ -402,6 +403,50 @@ describe("hooks install", () => {
       kept: [],
     });
     expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+  });
+
+  it("refreshes the hooks for the actor they have, unless --actor names another", async () => {
+    sandbox = await treeSandbox({});
+    await install(sandbox, "--actor", "claude");
+
+    // Up to date already: nothing is written, and nothing changes hands.
+    const current = await install(sandbox, "--force", "--json");
+    expect(current.json<HooksInstallJson>()).toMatchObject({
+      installed: false,
+      actor: "claude",
+      kept: EVENTS,
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+
+    // An older hook of that actor is replaced by the current one, for the
+    // same actor.
+    const file = await settings(sandbox);
+    const start = file.hooks.SessionStart?.[0]?.hooks[0];
+    if (start === undefined) throw new Error("no SessionStart hook");
+    start.command = "TASKS_ACTOR=claude tasks mine --json";
+    await sandbox.write(SETTINGS, `${JSON.stringify(file, null, 2)}\n`);
+    const refreshed = await install(sandbox, "--force", "--json");
+    expect(refreshed.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "claude",
+      written: ["SessionStart"],
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+
+    // Only --actor renames them.
+    const renamed = await install(
+      sandbox,
+      "--force",
+      "--actor",
+      "agent",
+      "--json",
+    );
+    expect(renamed.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "agent",
+      written: EVENTS,
+    });
+    expect(await settings(sandbox)).toEqual(await guideBlock("agent"));
   });
 
   it("refuses an --actor that is not an actor, and writes nothing", async () => {

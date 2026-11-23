@@ -9,7 +9,10 @@ import { AGENT_ACTOR } from "./types.js";
 /** Claude Code's shared project settings, where its hooks are configured. */
 export const SETTINGS_RELATIVE_PATH = path.join(".claude", "settings.json");
 
-/** The actor the hooks act as unless `--actor` names another. */
+/**
+ * The actor the hooks act as on a first install, unless `--actor` names
+ * another; a refresh keeps the actor of the hooks it finds.
+ */
 export const DEFAULT_HOOKS_ACTOR = AGENT_ACTOR;
 
 /** The events the hooks attach to, in the order the block lists them. */
@@ -234,6 +237,37 @@ export interface HooksInstallResult {
   /** The events whose tasks hook was already there and was left as it was. */
   kept: HookEvent[];
   skippedReason?: "exists";
+}
+
+/**
+ * The actor the tasks hooks already in the settings act as — the
+ * `TASKS_ACTOR=` of the first such hook, events in block order — or `null`
+ * when there is none, or none names one. What `hooks install` acts as when
+ * `--actor` is not given, so a refresh after an upgrade (`--force`) does not
+ * turn hooks installed for one actor into hooks for the default.
+ */
+export async function installedHooksActor(
+  projectRoot: string,
+): Promise<string | null> {
+  const settings = await readSettings(
+    path.join(projectRoot, SETTINGS_RELATIVE_PATH),
+  );
+  const hooks = settings?.hooks;
+  if (!isRecord(hooks)) return null;
+  for (const event of HOOK_EVENTS) {
+    const entries = hooks[event];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      for (const hook of hooksOf(entry)) {
+        if (!isTasksHook(event, hook) || !isRecord(hook)) continue;
+        const named = /TASKS_ACTOR=([A-Za-z0-9][A-Za-z0-9._@+-]*)/.exec(
+          String(hook.command),
+        );
+        if (named?.[1] !== undefined) return named[1];
+      }
+    }
+  }
+  return null;
 }
 
 /**

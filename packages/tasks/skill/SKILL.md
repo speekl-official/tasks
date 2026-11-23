@@ -30,7 +30,7 @@ tree, actor and session that produced it; a tree a person points you at with
 one) comes from a hook older than this skill: run the `mine` below once in its
 place (the hooks set your name and token, so without the prefix and
 `--session`), and tell the person that `tasks hooks install --force` brings the
-hook up to date. Without the hooks — nothing headed `Your tasks` in your context
+hook up to date, for the actor it has. Without the hooks — nothing headed `Your tasks` in your context
 — set your name and session token first (next section), then run it yourself,
 the prefix only when `TASKS_ACTOR` is not set already (`echo $TASKS_ACTOR`):
 

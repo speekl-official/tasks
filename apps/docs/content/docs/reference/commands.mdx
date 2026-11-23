@@ -137,7 +137,7 @@ tasks hooks install [--actor <name>] [--force] [--json]
 
 | Option           | Effect                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------- |
-| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. Default: `agent`. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
+| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. Default: the actor of the tasks hooks already in the file, else `agent`. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
 | `--force`        | Replace the tasks hooks already in the file with the documented ones.                    |
 
 The file and `.claude/` are created when absent, and what is written is the guide's
@@ -146,7 +146,8 @@ file holds — other settings, other events, other hooks of the same events — 
 is. An event that already has a tasks hook, one whose command runs that event's
 subcommand (also through a path such as `./node_modules/.bin/tasks`), keeps it as it is
 unless `--force`, so local edits survive; with nothing to add or replace, the file is not
-touched and the command says so. Use `--force` after upgrading the CLI. The hooks need
+touched and the command says so. Use `--force` after upgrading the CLI: the hooks are
+refreshed for the actor they were installed for. The hooks need
 `tasks` and [`jq`](https://jqlang.org) on `PATH`. Commit `.claude/settings.json` so every
 session in the repository runs them.
 
