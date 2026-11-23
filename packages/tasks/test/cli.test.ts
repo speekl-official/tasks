@@ -2673,3 +2673,70 @@ describe("--fields", () => {
     );
   });
 });
+
+describe("custom fields", () => {
+  const CUSTOM = {
+    review_ticket: "QA-417",
+    estimate_days: 3,
+    tags: ["api", "auth"],
+  };
+  const TREE: TreeSpec = {
+    tasks: { ticketed: { extra: CUSTOM }, plain: {} },
+  };
+
+  it("carries the project's own frontmatter keys as custom_fields, absent when there are none", async () => {
+    sandbox = await treeSandbox(TREE);
+    const shown = (
+      await sandbox.run("show", "ticketed", "--json")
+    ).json<ShowJson>();
+    expect(shown.custom_fields).toEqual(CUSTOM);
+    expect(Object.keys(shown.custom_fields ?? {})).toEqual([
+      "review_ticket",
+      "estimate_days",
+      "tags",
+    ]);
+    const keys = Object.keys(shown);
+    expect(keys.indexOf("custom_fields")).toBe(keys.indexOf("updated") + 1);
+    const bare = (
+      await sandbox.run("show", "plain", "--json")
+    ).json<ShowJson>();
+    expect("custom_fields" in bare).toBe(false);
+
+    // Rows of a collection, through --fields: the key only where the file has keys.
+    const listed = (
+      await sandbox.run("list", "--json", "--fields", "id,custom_fields")
+    ).json<CollectionJson<Record<string, unknown>>>();
+    expect(
+      [...listed.tasks].sort((a, b) =>
+        String(a.id).localeCompare(String(b.id)),
+      ),
+    ).toEqual([{ id: "plain" }, { id: "ticketed", custom_fields: CUSTOM }]);
+
+    // A transition keeps them in the file and returns them.
+    const assigned = (
+      await sandbox.run("assign", "ticketed", "alice", "--json")
+    ).json<ShowJson>();
+    expect(assigned.custom_fields).toEqual(CUSTOM);
+    expect(
+      (await sandbox.run("show", "ticketed", "--json")).json<ShowJson>()
+        .custom_fields,
+    ).toEqual(CUSTOM);
+  });
+
+  it("prints them with the fields in show and resume, as the file spells them", async () => {
+    sandbox = await treeSandbox(TREE);
+    const shown = plain((await sandbox.run("show", "ticketed")).stdout);
+    expect(shown).toMatch(/review_ticket +QA-417\n/);
+    expect(shown).toMatch(/estimate_days +3\n/);
+    expect(shown).toMatch(/tags +\[api, auth\]\n/);
+    expect(shown.indexOf("review_ticket")).toBeGreaterThan(
+      shown.indexOf("updated"),
+    );
+    const resumed = plain((await sandbox.run("resume", "ticketed")).stdout);
+    expect(resumed).toMatch(/review_ticket +QA-417\n/);
+    expect(resumed).toMatch(/tags +\[api, auth\]\n/);
+    expect(plain((await sandbox.run("show", "plain")).stdout)).not.toContain(
+      "review_ticket",
+    );
+  });
+});

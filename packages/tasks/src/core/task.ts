@@ -156,6 +156,19 @@ export function toTaskJson(
     claimed_session: fm.claimed_session,
     created: fm.created,
     updated: fm.updated,
+    ...customFields(task.extra),
     path: task.dir,
   };
+}
+
+/**
+ * The project's own frontmatter keys as a task object carries them: an
+ * object in read order, or nothing when the manifest has none, so the key is
+ * absent rather than empty.
+ */
+function customFields(extra: ExtraKeys): Pick<TaskJson, "custom_fields"> {
+  const present = extra.filter(([, value]) => value !== undefined);
+  return present.length === 0
+    ? {}
+    : { custom_fields: Object.fromEntries(present) };
 }

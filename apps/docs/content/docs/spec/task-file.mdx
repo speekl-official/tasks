@@ -104,7 +104,8 @@ When an implementation writes a manifest, the frontmatter MUST be emitted in can
 1. The ten fields above, in that order, followed by any keys present on read but not defined
    here, in the order read (an implementation MAY place a key YAML reads as an integer first,
    quoted) and with their values re-emitted unchanged. An implementation MUST NOT
-   interpret such keys and MUST NOT add any of its own.
+   interpret such keys and MUST NOT add any of its own. They are the project's own, and a task
+   object carries them as `custom_fields` ([Task object](/docs/spec/cli#task-object)).
 2. Lists as flow sequences: `[a, b]`, or `[]` when empty.
 3. Timestamps always double-quoted; `null` for absent nullable values.
 4. Other scalars unquoted when they are unambiguous plain YAML, quoted otherwise.

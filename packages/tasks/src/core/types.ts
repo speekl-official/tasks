@@ -385,13 +385,22 @@ export interface TaskJson extends Frontmatter {
   /** The alias of the task's tree, or `null` for the local tree. */
   project: string | null;
   title: string;
+  /**
+   * The manifest's keys the convention does not define — the project's own —
+   * as read, in read order. Absent when there are none, so a tree without
+   * keys of its own keeps the shape it had.
+   */
+  custom_fields?: Record<string, unknown>;
   /** Absolute path of the task directory. */
   path: string;
 }
 
 export type TaskWithDerivedJson = TaskJson & Derived;
 
-/** The keys of a task object, in the order `toTaskJson` writes them. */
+/**
+ * The keys of a task object, in the order `toTaskJson` writes them;
+ * `custom_fields` only when the manifest has keys of its own.
+ */
 export const TASK_JSON_KEYS: readonly (keyof TaskJson)[] = [
   "id",
   "name",
@@ -399,6 +408,7 @@ export const TASK_JSON_KEYS: readonly (keyof TaskJson)[] = [
   "project",
   "title",
   ...FRONTMATTER_KEYS,
+  "custom_fields",
   "path",
 ];
 

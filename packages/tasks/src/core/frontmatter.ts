@@ -357,6 +357,23 @@ function quotedTimestamp(value: string | null): string {
 }
 
 /**
+ * A project's own value as a line of human output: the YAML the file holds
+ * it as, collections in flow style, so what a person reads under `show` or
+ * `resume` is what `task.md` says.
+ */
+export function customFieldText(value: unknown): string {
+  return yaml
+    .dump(value, {
+      schema: yaml.DEFAULT_SCHEMA,
+      flowLevel: 0,
+      lineWidth: -1,
+      noRefs: true,
+      quotingType: '"',
+    })
+    .replace(/\n$/, "");
+}
+
+/**
  * Re-emit an unknown key's value unchanged. Collections nested in it stay on
  * one line in flow style, like the defined lists; the default schema quotes
  * any string another YAML reader could take for something else.

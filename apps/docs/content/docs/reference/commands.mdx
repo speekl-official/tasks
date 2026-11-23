@@ -166,7 +166,8 @@ None of these write anything except the session heartbeat when a session is know
 tasks show <task> [--archived] [--json]
 ```
 
-The task: its fields, its derived conditions (situation, blocked by, held by, liveness, …;
+The task: its fields, the project's own frontmatter keys when it has any (`custom_fields`
+in the JSON), its derived conditions (situation, blocked by, held by, liveness, …;
 the JSON carries every one, `ready` and `last_entry` included), the workspace files present, the live tasks that
 reference it through `depends_on` or `finishes_after` — here and in listed projects —
 and its body. References print as the command line takes them: `alias:path` for a task in
@@ -193,11 +194,10 @@ and workspace files; the children with their situations; the workspace file list
 `config.yml` lists [`docs`](/docs/reference/configuration#docs), where the project's
 documentation lives, each location with whether it exists here; `state.md` in full; and the
 last log entry. A malformed ancestor or child is left out of these lists (the task's
-`children` count still includes it). Both forms carry the body and `state.md`, so an agent
-reads `task.md` and `state.md` through this command — a project's own frontmatter keys,
-which the task object does not carry, stay in the file — and opens `design.md`, `plan.md`
-and the ancestors' files afterwards: it is the second command of the
-[agent protocol](/docs/guides/agent-protocol), after `mine`.
+`children` count still includes it). Both forms carry the body, `state.md` and the project's
+own frontmatter keys (`custom_fields`), so an agent reads `task.md` and `state.md` through
+this command and opens `design.md`, `plan.md` and the ancestors' files afterwards: it is
+the second command of the [agent protocol](/docs/guides/agent-protocol), after `mine`.
 
 ### `tasks ready`
 

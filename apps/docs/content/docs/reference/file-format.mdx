@@ -110,8 +110,11 @@ produce identical bytes and a diff shows only a change of meaning:
 finishes_after: ["../acme-api:auth-rework/wire-refresh"]
 ```
 
-Comments in the frontmatter are not kept. A key the convention does not define survives
-every write and is reported by `validate` as a warning (`unknown-key`).
+Comments in the frontmatter are not kept. A key the convention does not define is the
+project's own: it survives every write, is reported by `validate` as a warning
+(`unknown-key`), and comes with the task object as
+[`custom_fields`](/docs/reference/json-contract#the-task-object), which `show` and `resume`
+print with the fields.
 
 ### The body
 

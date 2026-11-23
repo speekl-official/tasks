@@ -83,8 +83,10 @@ updated: "2026-09-21T16:40:12Z"
 - The claim fields are set and cleared together: non-null exactly while
   `IN_PROGRESS` (`claimed_session` may stay `null`), `null` otherwise.
 - Actors and session tokens match `^[A-Za-z0-9][A-Za-z0-9._@+-]*$`.
-- **Canonical form:** the ten fields in this order, then unknown keys in the
-  order read, values unchanged; lists as flow sequences (`[a, b]`, `[]`);
+- **Canonical form:** the ten fields in this order, then the project's own
+  keys (unknown to the convention; a task object carries them as
+  `custom_fields`) in the order read, values unchanged; lists as flow
+  sequences (`[a, b]`, `[]`);
   timestamps double-quoted ISO 8601 UTC with `Z`; other scalars quoted only when
   plain YAML would be ambiguous (an external reference, with its colon, is
   quoted). Comments are not kept. Repeated writes produce identical bytes.

@@ -11,7 +11,7 @@ import {
   referenceText,
   situationText,
 } from "./core/derive.js";
-import { normalizeBody } from "./core/frontmatter.js";
+import { customFieldText, normalizeBody } from "./core/frontmatter.js";
 import { ancestorPaths, compareIds, qualifyId } from "./core/ids.js";
 import type { UnavailableTree } from "./core/projects.js";
 import { compactAge } from "./core/time.js";
@@ -704,6 +704,15 @@ function fieldLines(fields: ReadonlyArray<readonly [string, string | null]>) {
   );
 }
 
+/** The project's own keys as field lines, after the convention's. */
+function customFieldLines(
+  fields: Record<string, unknown> | undefined,
+): ReadonlyArray<readonly [string, string]> {
+  return Object.entries(fields ?? {}).map(
+    ([key, value]) => [key, customFieldText(value)] as const,
+  );
+}
+
 function listOrNull(values: readonly string[]): string | null {
   return values.length === 0 ? null : values.join(", ");
 }
@@ -796,6 +805,7 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
       ["workspace", listOrNull(extras.workspace)],
       ["created", json.created],
       ["updated", json.updated],
+      ...customFieldLines(json.custom_fields),
       ["path", json.path],
       [
         "archived",
@@ -858,6 +868,7 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
           referenceList(d, json.finishes_after, d.snapshot.finish.refs),
         ],
         ["referenced by", listOrNull(extras.referenced_by)],
+        ...customFieldLines(json.custom_fields),
         ["path", json.path],
       ]),
       ...blockedSection(d),

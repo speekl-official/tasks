@@ -114,9 +114,10 @@ they change only in a major version.
 - **An empty result is success:** `tasks ready` with nothing available exits `0`
   with `"count": 0`.
 - **Task objects** carry the frontmatter fields, `id`, `name`, `parent`,
-  `project`, `title` and `path`, plus the derived conditions — `situation`,
-  `blocked_by`, `ready`, `held_by`, `liveness`, `yours`, `last_entry`, … — on every
-  reporting command. Overviews return
+  `project`, `title` and `path`, the project's own frontmatter keys as
+  `custom_fields` when the file has any, plus the derived conditions —
+  `situation`, `blocked_by`, `ready`, `held_by`, `liveness`, `yours`,
+  `last_entry`, … — on every reporting command. Overviews return
   `{scope, projects, count, tasks, malformed, unavailable}`.
 - **Trim with `--fields`:** `tasks mine --json --fields id,situation,yours,title`
   keeps those keys of each task object, in that order, on every command that

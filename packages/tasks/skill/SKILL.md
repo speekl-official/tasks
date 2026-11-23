@@ -110,9 +110,9 @@ again. Subagents use the same name and token.
    prints the definition, the gates and ownership, the ancestors with their
    workspace files, the children with their status and situation, the docs
    locations, `state.md` in full and the last log entry (`--json`: the same as
-   `body`, `state` and the full objects). Do not read those two files again;
-   only a frontmatter key of the project's own, which the task object does not
-   carry, is read from `task.md` when the project's instructions name one.
+   `body`, `state` and the full objects). Do not read those two files again:
+   the project's own frontmatter keys, when it has any, are printed with the
+   fields and come as `custom_fields` in the JSON.
    Then read `design.md` and `plan.md` where the workspace lists them, and for
    each ancestor as far as needed its `task.md`, `design.md` and `plan.md` — an
    epic's design and plan live on the epic. On entry read `resume` whole:
@@ -128,8 +128,9 @@ again. Subagents use the same name and token.
 
 ## During work
 
-- **Never hand-edit frontmatter**; every field has a command. **Never `mv`** a
-  task directory; use `tasks move`.
+- **Never hand-edit frontmatter**; every field has a command — a key of the
+  project's own (`custom_fields`) is the exception, edited by hand only on the
+  project's instructions. **Never `mv`** a task directory; use `tasks move`.
 - Write `state.md` through **`tasks state <task> < file`** (or a heredoc), so
   the write is fenced like a transition. Recommended sections: **Done** (with
   the commits that carry it), **Verified**, **Open**, **Next**. Keep it a short
@@ -293,9 +294,10 @@ Use `--json` whenever you parse; the human output is not stable.
   `created`, `updated`), `id`, `name`, `parent`, `project`, `title`, `path`, and
   the derived `situation`, `blocked_by`, `ready`, `effective_priority`,
   `held_by`, `started`, `children`, `active`, `waiting_for`, `closable`,
-  `liveness`, `last_seen`, `yours`, `last_entry`. Overviews return
-  `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds `body`,
-  `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
+  `liveness`, `last_seen`, `yours`, `last_entry`; `custom_fields`, the
+  project's own frontmatter keys as read, only when the file has any. Overviews
+  return `{scope, projects, count, tasks, malformed, unavailable}`. `show` adds
+  `body`, `workspace`, `referenced_by`; `resume` adds those and `ancestors`,
   `child_tasks`, `state`, `docs`.
 - Ask for the keys you need: `--fields id,situation,yours,title,last_entry`
   on any command that returns task objects (`mine`, `ready`, `list`, `tree`,
