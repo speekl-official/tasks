@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { TaskError } from "../errors.js";
 import { errnoCode, writeFileAtomic } from "./fs-utils.js";
-import { AGENT_ACTOR } from "./types.js";
+import { ACTOR_PATTERN, AGENT_ACTOR } from "./types.js";
 
 /** Claude Code's shared project settings, where its hooks are configured. */
 export const SETTINGS_RELATIVE_PATH = path.join(".claude", "settings.json");
@@ -244,10 +244,25 @@ export interface InstalledHooks {
   /** A tasks hook of some event is in the file. */
   installed: boolean;
   /**
-   * The `TASKS_ACTOR=` of the first tasks hook that names one, events in
-   * block order, quoted or not; `null` when none does.
+   * The `TASKS_ACTOR=` of the first tasks hook that names one as a complete
+   * literal, quoted or not, events in block order; `null` when none does (a
+   * computed name, `review${ROLE}`, is no literal).
    */
   actor: string | null;
+  /** The events without a tasks hook, which an install would add. */
+  missing: HookEvent[];
+}
+
+/** Every `TASKS_ACTOR=` assignment of a command: quoted, or up to a break. */
+const ACTOR_ASSIGNMENT = /TASKS_ACTOR=(?:"([^"]*)"|'([^']*)'|([^\s;]*))/g;
+
+/** The actor a command names as a complete literal, or `null`. */
+function literalActor(command: string): string | null {
+  for (const match of command.matchAll(ACTOR_ASSIGNMENT)) {
+    const literal = match[1] ?? match[2] ?? match[3] ?? "";
+    if (ACTOR_PATTERN.test(literal)) return literal;
+  }
+  return null;
 }
 
 /**
@@ -264,26 +279,26 @@ export async function installedHooksActor(
     path.join(projectRoot, SETTINGS_RELATIVE_PATH),
   );
   const hooks = settings?.hooks;
-  let installed = false;
+  const missing: HookEvent[] = [];
+  let actor: string | null = null;
   if (isRecord(hooks)) {
     for (const event of HOOK_EVENTS) {
       const entries = hooks[event];
-      if (!Array.isArray(entries)) continue;
-      for (const entry of entries) {
-        for (const hook of hooksOf(entry)) {
-          if (!isTasksHook(event, hook) || !isRecord(hook)) continue;
-          installed = true;
-          // The guide's spelling, or the same name quoted by hand.
-          const named =
-            /TASKS_ACTOR=(["']?)([A-Za-z0-9][A-Za-z0-9._@+-]*)\1(?![A-Za-z0-9._@+-])/.exec(
-              String(hook.command),
-            );
-          if (named?.[2] !== undefined) return { installed, actor: named[2] };
-        }
+      const own = Array.isArray(entries)
+        ? entries.flatMap((entry) =>
+            hooksOf(entry).filter((hook) => isTasksHook(event, hook)),
+          )
+        : [];
+      if (own.length === 0) missing.push(event);
+      for (const hook of own) {
+        if (actor !== null || !isRecord(hook)) continue;
+        actor = literalActor(String(hook.command));
       }
     }
+  } else {
+    missing.push(...HOOK_EVENTS);
   }
-  return { installed, actor: null };
+  return { installed: missing.length < HOOK_EVENTS.length, actor, missing };
 }
 
 /**

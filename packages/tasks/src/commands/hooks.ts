@@ -73,7 +73,7 @@ export function hooksCommand(): Command {
     )
     .option(
       "--actor <name>",
-      `the actor the hooks act as, set as TASKS_ACTOR in each command (default: the actor of the tasks hooks already in the file, else ${DEFAULT_HOOKS_ACTOR})`,
+      `the actor the hooks act as, set as TASKS_ACTOR in each command; a fresh install defaults to ${DEFAULT_HOOKS_ACTOR}, hooks already in the file keep their actor when it is a complete literal, else --actor is required before adding or replacing hooks`,
     )
     .option(
       "--force",
@@ -89,18 +89,20 @@ export function hooksCommand(): Command {
         startDirectory(global),
         discoveryOptions(global),
       );
-      // A refresh acts as the actor the hooks already have: an upgrade must
-      // not change whose tasks a session sees. A refresh of hooks that name
-      // no actor leaves the choice to --actor rather than to the default.
+      // A write beside hooks already in the file acts as their actor: an
+      // upgrade must not change whose tasks a session sees. Hooks whose actor
+      // cannot be read as a complete literal leave the choice to --actor
+      // before anything is added or replaced; with nothing to write, nothing
+      // is asked.
       const installed = await installedHooksActor(project.root);
       if (
-        options.force === true &&
         options.actor === undefined &&
         installed.installed &&
-        installed.actor === null
+        installed.actor === null &&
+        (options.force === true || installed.missing.length > 0)
       ) {
         throw TaskError.usage(
-          `Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.`,
+          `Could not determine the actor of the installed tasks hooks. Run tasks hooks install${options.force === true ? " --force" : ""} --actor <name> to choose the actor.`,
           { file: path.join(project.root, SETTINGS_RELATIVE_PATH) },
         );
       }

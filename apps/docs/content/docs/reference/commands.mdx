@@ -137,7 +137,7 @@ tasks hooks install [--actor <name>] [--force] [--json]
 
 | Option           | Effect                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------- |
-| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. Default: the actor of the tasks hooks already in the file (quoted or not), else `agent`; hooks that name no actor need `--actor` to be refreshed. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
+| `--actor <name>` | The actor the hooks act as, set as `TASKS_ACTOR` in all four commands. A fresh install defaults to `agent`; hooks already in the file keep their actor when it is a complete literal, quoted or not, else `--actor` is required before adding or replacing hooks. Must be listed when the tree lists [actors](/docs/reference/configuration#actors). |
 | `--force`        | Replace the tasks hooks already in the file with the documented ones.                    |
 
 The file and `.claude/` are created when absent, and what is written is the guide's
@@ -154,9 +154,9 @@ session in the repository runs them.
 **Fails** with exit `2`, changing nothing, when the file is not a JSON object or its
 `hooks` is not an object of event lists, when the tree's `config.yml` cannot be read, or
 when it lists [actors](/docs/reference/configuration#actors) without the hooks' name
-(pass `--actor` with a listed one, or add `agent` to the roster), when `--force` would
-replace tasks hooks that name no actor and `--actor` is not given, and with exit `3` when
-no tree is found.
+(pass `--actor` with a listed one, or add `agent` to the roster), when hooks would be
+added or replaced beside tasks hooks whose actor cannot be read as a complete literal and
+`--actor` is not given, and with exit `3` when no tree is found.
 
 ## Reading
 

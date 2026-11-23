@@ -333,7 +333,8 @@ describe("hooks install", () => {
       JSON.stringify({ hooks: { PostToolUse: [foreign, shared, duplicate] } }),
     );
 
-    const kept = await install(sandbox, "--json");
+    // The hand-written hook names no actor, so adding the rest needs one.
+    const kept = await install(sandbox, "--actor", "agent", "--json");
     expect(kept.json<HooksInstallJson>()).toMatchObject({
       written: ["SessionStart", "Stop", "SessionEnd"],
       kept: ["PostToolUse"],
@@ -470,7 +471,27 @@ describe("hooks install", () => {
       expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
     }
 
-    // Hooks that name no actor: a refresh would choose one for them.
+    // A computed name is no literal: the prefix before `$` is not the actor.
+    await sandbox.write(
+      SETTINGS,
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            command(
+              "TASKS_ACTOR=review${ROLE_SUFFIX} tasks mine --json; exit 0",
+            ),
+          ],
+        },
+      }),
+    );
+    const computed = await install(sandbox, "--force", "--json");
+    expect(computed.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(computed.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.",
+    );
+
+    // Hooks that name no actor: a refresh would choose one for them, and so
+    // would a plain install that adds the missing events beside them.
     const bare = {
       hooks: { Stop: [command("tasks session-check --json; exit 0")] },
     };
@@ -481,6 +502,33 @@ describe("hooks install", () => {
       "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.",
     );
     expect(JSON.parse(await sandbox.read(SETTINGS))).toEqual(bare);
+    const plain = await install(sandbox, "--json");
+    expect(plain.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(plain.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --actor <name> to choose the actor.",
+    );
+    expect(JSON.parse(await sandbox.read(SETTINGS))).toEqual(bare);
+    // With every event's hook in place and no --force, nothing is written
+    // and nothing is asked.
+    const complete = {
+      hooks: Object.fromEntries(
+        EVENTS.map((event) => [
+          event,
+          [
+            command(
+              `tasks ${event === "SessionStart" ? "mine" : event === "PostToolUse" ? "heartbeat" : event === "Stop" ? "session-check" : "session-end"} --json; exit 0`,
+            ),
+          ],
+        ]),
+      ),
+    };
+    await sandbox.write(SETTINGS, JSON.stringify(complete));
+    const untouched = await install(sandbox, "--json");
+    expect(untouched.json<HooksInstallJson>()).toMatchObject({
+      installed: false,
+      skipped: "exists",
+    });
+    await sandbox.write(SETTINGS, JSON.stringify(bare));
     const chosen = await install(
       sandbox,
       "--force",
