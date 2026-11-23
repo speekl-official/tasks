@@ -81,7 +81,9 @@ tree the command runs in lists under `projects:`, one tree at a time under that 
 References in a tree it can read but not write — one reached by a bare relative path, or any tree
 when the current tree lists nothing — MUST be listed in the result; they resolve as `missing`
 until repaired, which blocks (fail safe). A directory moved by hand has the same effect on every
-reference and is repaired by re-adding the dependency; validation reports the dangling references.
+reference; validation reports the dangling references, and the repair is a reference to the new
+id added and the stale one removed (`dep add`, then `dep rm`; `after add`, then `after rm`, for a
+finish gate), since the stale reference blocks until it goes.
 
 <Callout type="info" title="Non-normative">
   The rewrite is not a transaction: a crash between trees leaves the remaining

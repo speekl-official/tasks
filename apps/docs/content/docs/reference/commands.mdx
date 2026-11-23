@@ -676,8 +676,10 @@ replacing its id. References found in trees it can read but not write are report
 not rewritten; they resolve as `missing` until someone edits them. A listed tree that
 cannot be written does not fail the move: its references are reported too. A listed tree
 that is not checked out here is not searched at all, so a reference it holds is neither
-rewritten nor reported; when it returns, `validate` there names it dangling and re-adding
-the dependency repairs it. Run `move` from the tree that lists the others — the tracker, in
+rewritten nor reported; when it returns, run `tasks validate` there: it names the reference
+dangling, and the repair is `tasks dep add` of the new target followed by `tasks dep rm` of
+the stale reference (`after add`, then `after rm`, for a finish gate), since adding alone
+leaves the stale reference blocking. Run `move` from the tree that lists the others — the tracker, in
 a multi-repository layout — and it reaches every reference the tooling can see.
 
 **Under a `BACKLOG` parent**, the moved subtree is deferred, as `defer` would do it:
