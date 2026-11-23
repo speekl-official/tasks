@@ -125,8 +125,8 @@ and ownership, the ancestors outermost first with the workspace files each one h
 children with their status and situation, the documentation locations, `state.md` in full
 and the last log entry; under `--json` the same, as `body`, `state` and the full objects.
 Do not read those two files again: the project's own frontmatter keys, when it has any,
-are printed with the fields and come as `custom_fields` in the JSON. Then read, in this
-order, `design.md` and `plan.md` where the workspace lists them —
+are printed as a `custom fields` block after the fields and come as `custom_fields` in the
+JSON. Then read, in this order, `design.md` and `plan.md` where the workspace lists them —
 then, for each ancestor as far as needed, its `task.md`, `design.md` and `plan.md`. An
 epic's design and plan live on the epic. On entry read `resume` whole: `--fields` trims
 the children to the same keys, and a projection made for the task hides their names,

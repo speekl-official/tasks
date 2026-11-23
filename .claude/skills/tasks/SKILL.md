@@ -112,8 +112,9 @@ again. Subagents use the same name and token.
    workspace files, the children with their status and situation, the docs
    locations, `state.md` in full and the last log entry (`--json`: the same as
    `body`, `state` and the full objects). Do not read those two files again:
-   the project's own frontmatter keys, when it has any, are printed with the
-   fields and come as `custom_fields` in the JSON.
+   the project's own frontmatter keys, when it has any, are printed as a
+   `custom fields` block after the fields and come as `custom_fields` in the
+   JSON.
    Then read `design.md` and `plan.md` where the workspace lists them, and for
    each ancestor as far as needed its `task.md`, `design.md` and `plan.md` — an
    epic's design and plan live on the epic. On entry read `resume` whole:

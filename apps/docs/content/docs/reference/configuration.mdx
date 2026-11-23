@@ -240,7 +240,7 @@ convention defines ([file format](/docs/reference/file-format#taskmd)). A name i
 digits, `_` and `-`, starting with a letter or `_`, and not one of the defined fields. The
 CLI never reads or writes these keys: it preserves them on every write and carries them in
 the task object as [`custom_fields`](/docs/reference/json-contract#the-task-object), which
-`show` and `resume` print with the fields. The key changes what `tasks validate` says:
+`show` and `resume` print as a `custom fields` block after the fields. The key changes what `tasks validate` says:
 
 - Without it, every key the convention does not define is a warning (`unknown-key`), since
   the CLI cannot tell a project's key from a misspelt field.

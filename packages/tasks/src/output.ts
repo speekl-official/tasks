@@ -704,13 +704,20 @@ function fieldLines(fields: ReadonlyArray<readonly [string, string | null]>) {
   );
 }
 
-/** The project's own keys as field lines, after the convention's. */
+/**
+ * The project's own keys as a block of their own after the fields, headed
+ * `custom fields` and indented beneath it, so a key named like a field or a
+ * condition (`situation`, `path`) is never taken for one.
+ */
 function customFieldLines(
   fields: Record<string, unknown> | undefined,
-): ReadonlyArray<readonly [string, string]> {
-  return Object.entries(fields ?? {}).map(
-    ([key, value]) => [key, customFieldText(value)] as const,
+): string[] {
+  const entries = Object.entries(fields ?? {});
+  if (entries.length === 0) return [];
+  const rows = fieldLines(
+    entries.map(([key, value]) => [key, customFieldText(value)] as const),
   );
+  return [`  ${pc.dim("custom fields")}`, ...rows.map((row) => `  ${row}`)];
 }
 
 function listOrNull(values: readonly string[]): string | null {
@@ -805,7 +812,6 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
       ["workspace", listOrNull(extras.workspace)],
       ["created", json.created],
       ["updated", json.updated],
-      ...customFieldLines(json.custom_fields),
       ["path", json.path],
       [
         "archived",
@@ -814,6 +820,7 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
           : null,
       ],
     ]),
+    ...customFieldLines(json.custom_fields),
     ...blockedSection(d),
   ];
   // The body as the file holds it: a first line that is indented, a code
@@ -868,9 +875,9 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
           referenceList(d, json.finishes_after, d.snapshot.finish.refs),
         ],
         ["referenced by", listOrNull(extras.referenced_by)],
-        ...customFieldLines(json.custom_fields),
         ["path", json.path],
       ]),
+      ...customFieldLines(json.custom_fields),
       ...blockedSection(d),
     ].join("\n"),
   ];

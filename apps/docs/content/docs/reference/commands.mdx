@@ -168,8 +168,8 @@ None of these write anything except the session heartbeat when a session is know
 tasks show <task> [--archived] [--json]
 ```
 
-The task: its fields, the project's own frontmatter keys when it has any (`custom_fields`
-in the JSON), its derived conditions (situation, blocked by, held by, liveness, …;
+The task: its fields, the project's own frontmatter keys when it has any, as a
+`custom fields` block after the fields (`custom_fields` in the JSON), its derived conditions (situation, blocked by, held by, liveness, …;
 the JSON carries every one, `ready` and `last_entry` included), the workspace files present, the live tasks that
 reference it through `depends_on` or `finishes_after` — here and in listed projects —
 and its body. References print as the command line takes them: `alias:path` for a task in

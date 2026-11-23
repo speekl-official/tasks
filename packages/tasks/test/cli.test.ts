@@ -2726,15 +2726,17 @@ describe("custom fields", () => {
   it("prints them with the fields in show and resume, as the file spells them", async () => {
     sandbox = await treeSandbox(TREE);
     const shown = plain((await sandbox.run("show", "ticketed")).stdout);
-    expect(shown).toMatch(/review_ticket +QA-417\n/);
-    expect(shown).toMatch(/estimate_days +3\n/);
-    expect(shown).toMatch(/tags +\[api, auth\]\n/);
-    expect(shown.indexOf("review_ticket")).toBeGreaterThan(
-      shown.indexOf("updated"),
+    // A block of their own after the fields, so a key named like a field is
+    // never taken for one.
+    expect(shown).toMatch(
+      /\n {2}custom fields\n {4}review_ticket +QA-417\n {4}estimate_days +3\n {4}tags +\[api, auth\]\n/,
+    );
+    expect(shown.indexOf("custom fields")).toBeGreaterThan(
+      shown.indexOf("  path "),
     );
     const resumed = plain((await sandbox.run("resume", "ticketed")).stdout);
-    expect(resumed).toMatch(/review_ticket +QA-417\n/);
-    expect(resumed).toMatch(/tags +\[api, auth\]\n/);
+    expect(resumed).toMatch(/\n {2}custom fields\n {4}review_ticket +QA-417\n/);
+    expect(resumed).toMatch(/ {4}tags +\[api, auth\]\n/);
     expect(plain((await sandbox.run("show", "plain")).stdout)).not.toContain(
       "review_ticket",
     );
