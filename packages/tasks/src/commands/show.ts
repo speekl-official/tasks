@@ -116,7 +116,9 @@ export function showCommand(): Command {
           emitTaskJson(context, result);
           return;
         }
-        writeOut(renderShow(shown, { ...extras, archived }));
+        writeOut(
+          renderShow(shown, { ...extras, archived, custom_fields: task.extra }),
+        );
       },
     );
 }

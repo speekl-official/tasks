@@ -170,5 +170,27 @@ function customFields(extra: ExtraKeys): Pick<TaskJson, "custom_fields"> {
   const present = extra.filter(([, value]) => value !== undefined);
   return present.length === 0
     ? {}
-    : { custom_fields: Object.fromEntries(present) };
+    : {
+        custom_fields: Object.fromEntries(
+          present.map(([key, value]) => [key, jsonValue(value)]),
+        ),
+      };
+}
+
+/**
+ * A value as read, in a form JSON carries: a number YAML reads as infinite
+ * or not a number, which JSON has no spelling for, becomes the YAML spelling
+ * (`.inf`, `-.inf`, `.nan`), in lists and mappings too.
+ */
+function jsonValue(value: unknown): unknown {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    return Number.isNaN(value) ? ".nan" : value > 0 ? ".inf" : "-.inf";
+  }
+  if (Array.isArray(value)) return value.map(jsonValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, inner]) => [key, jsonValue(inner)]),
+    );
+  }
+  return value;
 }

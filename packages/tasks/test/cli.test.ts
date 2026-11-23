@@ -2741,4 +2741,27 @@ describe("custom fields", () => {
       "review_ticket",
     );
   });
+
+  it("spells a number JSON cannot carry as YAML does", async () => {
+    sandbox = await treeSandbox({ tasks: { metered: {} } });
+    const file = ".tasks/metered/task.md";
+    await sandbox.write(
+      file,
+      (await sandbox.read(file)).replace(
+        "\n---\n\n",
+        "\nquota: .inf\nmeasurement: .nan\nsamples: [null, -.inf]\n---\n\n",
+      ),
+    );
+    const shown = (
+      await sandbox.run("show", "metered", "--json")
+    ).json<ShowJson>();
+    expect(shown.custom_fields).toEqual({
+      quota: ".inf",
+      measurement: ".nan",
+      samples: [null, "-.inf"],
+    });
+    const text = plain((await sandbox.run("show", "metered")).stdout);
+    expect(text).toMatch(/quota +\.inf\n/);
+    expect(text).toMatch(/samples +\[null, -\.inf\]\n/);
+  });
 });

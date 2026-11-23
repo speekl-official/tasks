@@ -194,7 +194,7 @@ frontmatter fields, the task's identity, and the absolute path of its directory.
 | `project`         | The alias of the task's tree, `null` for the local tree.                          |
 | `title`           | The first `# ` heading of the body, else the name.                                |
 | `status` … `updated` | The ten [frontmatter fields](/docs/reference/file-format#taskmd), as stored.   |
-| `custom_fields`   | The keys the convention does not define — the project's own — as read, in read order; present only when the file has any. |
+| `custom_fields`   | The keys the convention does not define — the project's own — as read, in read order; present only when the file has any. A number YAML reads as infinite or not a number comes as the string `.inf`, `-.inf` or `.nan`. |
 | `path`            | The absolute path of the task **directory**.                                      |
 
 ### Derived conditions

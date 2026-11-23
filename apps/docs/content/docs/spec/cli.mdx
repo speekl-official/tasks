@@ -109,7 +109,8 @@ qualified as `alias:path`.
 When the manifest carries keys this specification does not define ([Serialization](/docs/spec/task-file#serialization)),
 the object MUST carry `custom_fields` after `updated`: those keys in read order, each with its
 value as read. When it carries none, the key MUST be absent, so a tree without keys of its own
-keeps the shape above. An implementation MUST NOT interpret them there any more than in the file.
+keeps the shape above. An implementation MUST NOT interpret them there any more than in the file. A number YAML reads as infinite or not a number, which JSON cannot carry, comes as the string
+`.inf`, `-.inf` or `.nan`, inside lists and mappings too; YAML `null` stays `null`.
 
 Commands that report state (`show`, `resume`, `ready`, `list`, `tree`, `mine`) MUST add the
 derived conditions: `situation` (the word of the [Situation](/docs/spec/lifecycle#situation) table), `blocked_by` (a

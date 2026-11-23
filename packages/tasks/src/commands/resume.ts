@@ -90,6 +90,7 @@ export function resumeCommand(): Command {
       writeOut(
         renderResume(shown, {
           body: task.body,
+          custom_fields: task.extra,
           ancestors,
           children,
           workspace,

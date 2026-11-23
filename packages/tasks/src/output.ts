@@ -20,6 +20,7 @@ import type {
   BlockedByJson,
   CollectionJson,
   DocsLocationJson,
+  ExtraKeys,
   FindingJson,
   LastEntryJson,
   LogEntryJson,
@@ -709,10 +710,8 @@ function fieldLines(fields: ReadonlyArray<readonly [string, string | null]>) {
  * `custom fields` and indented beneath it, so a key named like a field or a
  * condition (`situation`, `path`) is never taken for one.
  */
-function customFieldLines(
-  fields: Record<string, unknown> | undefined,
-): string[] {
-  const entries = Object.entries(fields ?? {});
+function customFieldLines(fields: ExtraKeys | undefined): string[] {
+  const entries = (fields ?? []).filter(([, value]) => value !== undefined);
   if (entries.length === 0) return [];
   const rows = fieldLines(
     entries.map(([key, value]) => [key, customFieldText(value)] as const),
@@ -784,6 +783,11 @@ function blockedSection(d: DerivedTask): string[] {
 }
 
 export interface ShowExtras {
+  /**
+   * The project's own keys as read, printed as the file spells them; the
+   * JSON form spells a non-finite number as a string.
+   */
+  custom_fields?: ExtraKeys;
   body: string;
   workspace: string[];
   referenced_by: string[];
@@ -820,7 +824,7 @@ export function renderShow(d: DerivedTask, extras: ShowExtras): string {
           : null,
       ],
     ]),
-    ...customFieldLines(json.custom_fields),
+    ...customFieldLines(extras.custom_fields),
     ...blockedSection(d),
   ];
   // The body as the file holds it: a first line that is indented, a code
@@ -838,6 +842,8 @@ export interface ResumeAncestor {
 }
 
 export interface ResumeExtras {
+  /** The project's own keys as read, printed as the file spells them. */
+  custom_fields?: ExtraKeys;
   /** The task's markdown body: its definition. */
   body: string;
   ancestors: ResumeAncestor[];
@@ -877,7 +883,7 @@ export function renderResume(d: DerivedTask, extras: ResumeExtras): string {
         ["referenced by", listOrNull(extras.referenced_by)],
         ["path", json.path],
       ]),
-      ...customFieldLines(json.custom_fields),
+      ...customFieldLines(extras.custom_fields),
       ...blockedSection(d),
     ].join("\n"),
   ];
