@@ -18,6 +18,7 @@ actors:                          # who tasks may be assigned to
 docs:                            # where the project's documentation lives
   engineering: docs/engineering
   api: ../api-docs
+custom_fields: [review_ticket]   # the project's own frontmatter keys, checked once listed
 projects:                        # aliases for sibling trees
   backend: ../backend
   cli: ../arkveil-cli
@@ -31,6 +32,7 @@ projects:                        # aliases for sibling trees
 | `archive_resolved_after_days` | integer ≥ 1 | none | Resolved subtrees whose root's `updated` is older than this, and that `archive --resolved-before` would take (no open task references them from outside), are reported by validation as not yet archived; `archive --resolved-before` without a value uses it. |
 | `actors` | map actor → one-line description or `null`, or `{ type, description }` | `{}` | The roster: who tasks may be assigned to, each with a line on who they are and a `type`, `person` or `agent`; a bare entry is a person, the name `agent` an agent. See [Actors](/docs/spec/sessions#actors). |
 | `docs` | map name → relative path | `{}` | Where the project's documentation lives, by name: the locations an agent brings up to date before `done`. See [Documentation](#documentation). |
+| `custom_fields` | list of key names | `[]` | The frontmatter keys of the project's own that manifests may carry beside the defined ten ([Task file](/docs/spec/task-file#serialization)); a name is letters, digits, `_` and `-`, starting with a letter or `_`, and not a defined field. Once any is listed, validation reports a key outside the list as an error and a listed one not at all; empty or absent, an undefined key is a warning. |
 | `projects` | map alias → relative path | `{}` | See [Projects](/docs/spec/projects). |
 
 Unknown top-level keys MUST be rejected as a usage error. Invalid YAML, or a document that is not

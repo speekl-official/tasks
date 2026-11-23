@@ -212,6 +212,7 @@ actors: # who tasks may be assigned to, each with a line on who they are
 docs: # where the project's documentation lives; brought up to date before done
   engineering: docs/engineering
   api: ../api-docs
+custom_fields: [review_ticket] # the project's own frontmatter keys; once listed, a key outside the list is an error
 projects: # sibling trees by alias, relative to the project root
   backend: ../backend
 ```
@@ -221,6 +222,11 @@ projects: # sibling trees by alias, relative to the project root
 `transitions` are gone. A tree without `version: 2` is a v1 tree, refused by
 every command that opens it; `tasks migrate` upgrades it (`--dry-run` previews), and `skill install` and
 `hooks install` only write beside it.
+
+`custom_fields` lists the project's own frontmatter keys: once any is listed,
+`validate` reports a key outside the list as an error (`undeclared-key`) and a
+listed one not at all; without the list every undefined key is a warning
+(`unknown-key`).
 
 Once `actors` lists anyone, `assign`, `handoff`, `new --assign` and `--as` (on a
 command that opens the tree) refuse other names (exit `2`; `details.actors` lists
@@ -282,7 +288,7 @@ ancestor and a reference that would close a cycle.
 Errors (exit `4`): `malformed`, `unknown-status`, `unknown-priority`,
 `claim-fields`, `malformed-ref`, `cycle`, `ancestor-dependency`,
 `resolved-with-open-descendant`, `backlog-invariant`, `archived-path-conflict`,
-`duplicate-id`, `log-conflict-markers`.
+`duplicate-id`, `log-conflict-markers`, `undeclared-key`.
 
 Warnings (exit `0`): `paused-without-state`, `todo-with-state`,
 `unsatisfiable-ref`, `claim-liveness`, `unknown-key`, `unknown-actor`,

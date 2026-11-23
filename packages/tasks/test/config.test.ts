@@ -61,6 +61,7 @@ describe("parsing a v2 config.yml", () => {
       archiveResolvedAfterDays: null,
       actors: {},
       docs: {},
+      customFields: [],
       projects: {},
     });
   });
@@ -164,12 +165,14 @@ scope: auth-rework/tokens
 session_timeout_minutes: 45
 docs:
   engineering: docs/engineering
+custom_fields: [review_ticket, estimate_days]
 projects:
   backend: ../backend
   cli: ../arkveil-cli
 `);
     expect(config.scope).toBe("auth-rework/tokens");
     expect(config.sessionTimeoutMinutes).toBe(45);
+    expect(config.customFields).toEqual(["review_ticket", "estimate_days"]);
     expect(Object.entries(config.docs)).toEqual([
       ["engineering", "docs/engineering"],
     ]);
@@ -231,6 +234,27 @@ docs:
     expect(err.message).toContain('unknown key "statuses"');
     expect(err.message).toContain(FILE);
     expect(err.details).toEqual({ file: FILE, key: "statuses" });
+  });
+
+  it("reads custom_fields as the project's own keys, and refuses what is not one", () => {
+    expect(
+      v2("version: 2\ncustom_fields: [review_ticket, estimate-days]\n")
+        .customFields,
+    ).toEqual(["review_ticket", "estimate-days"]);
+    expect(v2("version: 2\ncustom_fields:\n").customFields).toEqual([]);
+    for (const [source, words] of [
+      ["version: 2\ncustom_fields: review_ticket\n", "must be a list"],
+      ["version: 2\ncustom_fields: [007]\n", "is not a key name"],
+      [
+        "version: 2\ncustom_fields: [status]\n",
+        "a field the convention defines",
+      ],
+      ["version: 2\ncustom_fields: [a, a]\n", "twice"],
+    ] as const) {
+      const err = usage(() => parseConfigText(source, FILE));
+      expect(err.message).toContain(words);
+      expect(err.details).toMatchObject({ file: FILE, key: "custom_fields" });
+    }
   });
 
   it("points a v1 key at its v2 replacement", () => {
@@ -453,7 +477,7 @@ projects:
 `);
   });
 
-  it("writes the actors, then the docs, then the projects, a bare name without a value", () => {
+  it("writes the actors, the docs, the custom fields, then the projects, a bare name without a value", () => {
     const config = defaultConfig();
     config.actors.alice = {
       type: "person",
@@ -472,6 +496,7 @@ projects:
     config.actors.bot = { type: "agent", description: null };
     config.docs.engineering = "docs/engineering";
     config.docs.api = "../api docs";
+    config.customFields.push("review_ticket", "estimate-days");
     config.projects.backend = "../backend";
     expect(renderConfig(config)).toBe(`version: 2
 actors:
@@ -486,6 +511,7 @@ actors:
 docs:
   engineering: docs/engineering
   api: "../api docs"
+custom_fields: [review_ticket, estimate-days]
 projects:
   backend: ../backend
 `);

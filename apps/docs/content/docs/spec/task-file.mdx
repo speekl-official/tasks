@@ -132,11 +132,12 @@ An implementation offering validation MUST detect at least:
 | A live task's path is also an archived task's path | error |
 | The same id is present twice (interrupted cross-filesystem move) | error |
 | `log.md` contains version-control conflict markers | error |
+| A frontmatter key outside `custom_fields`, when the configuration lists any ([Configuration](/docs/spec/configuration)) | error |
 | `PAUSED` without `state.md` | warning |
 | `TODO` with `state.md` | warning |
 | A gate reference can never be satisfied (missing, archived, cancelled, unresolvable, not checked out, unsupported version) | warning |
 | An `IN_PROGRESS` claim that is orphaned, or whose non-null session has no heartbeat file | warning |
-| A frontmatter key this specification does not define | warning |
+| A frontmatter key this specification does not define, when `custom_fields` lists none | warning |
 | A configured project is not checked out, leads to no tree, or is a v1 or unsupported-version tree | warning |
 | Two configured aliases lead to the same tree | warning |
 | A configured documentation location does not exist on this machine | warning |

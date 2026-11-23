@@ -112,9 +112,11 @@ finishes_after: ["../acme-api:auth-rework/wire-refresh"]
 
 Comments in the frontmatter are not kept. A key the convention does not define is the
 project's own: it survives every write, is reported by `validate` as a warning
-(`unknown-key`), and comes with the task object as
-[`custom_fields`](/docs/reference/json-contract#the-task-object), which `show` and `resume`
-print with the fields.
+(`unknown-key`) unless `config.yml` lists it under
+[`custom_fields`](/docs/reference/configuration#custom_fields) — then a key outside the
+list is an error (`undeclared-key`) and a listed one is not reported — and comes with the
+task object as [`custom_fields`](/docs/reference/json-contract#the-task-object), which
+`show` and `resume` print with the fields.
 
 ### The body
 

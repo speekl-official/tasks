@@ -514,6 +514,7 @@ export const FINDING_KINDS = [
   "archived-path-conflict",
   "duplicate-id",
   "log-conflict-markers",
+  "undeclared-key",
   "paused-without-state",
   "todo-with-state",
   "unsatisfiable-ref",

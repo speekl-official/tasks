@@ -16,6 +16,7 @@ import {
   CONFIG_FILENAME,
   CONVENTION_VERSION,
   DEFAULT_SESSION_TIMEOUT_MINUTES,
+  FRONTMATTER_KEYS,
   SEGMENT_PATTERN,
 } from "./types.js";
 
@@ -37,6 +38,14 @@ export interface Config {
    * which an agent brings up to date before `done`. Has no prototype.
    */
   docs: Record<string, string>;
+  /**
+   * The frontmatter keys of the project's own that its manifests may carry
+   * beside the ten the convention defines, in configured order. Empty when
+   * none is declared: an undefined key is then a validation warning; once any
+   * is declared, a key outside the list is an error and a listed one is not
+   * reported.
+   */
+  customFields: string[];
   /** Alias → path relative to the project root. Has no prototype. */
   projects: Record<string, string>;
 }
@@ -63,8 +72,12 @@ export const CONFIG_KEYS = [
   "archive_resolved_after_days",
   "actors",
   "docs",
+  "custom_fields",
   "projects",
 ] as const;
+
+/** A project's own frontmatter key: a plain YAML key, as `task.md` holds it. */
+const CUSTOM_FIELD_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 const V1_KEY_HINTS: Record<string, string> = {
   active_phase: "; v2 calls it `scope`",
@@ -81,6 +94,7 @@ export function defaultConfig(): Config {
     archiveResolvedAfterDays: null,
     actors: Object.create(null) as Record<string, ActorEntry>,
     docs: Object.create(null) as Record<string, string>,
+    customFields: [],
     projects: Object.create(null) as Record<string, string>,
   };
 }
@@ -352,6 +366,41 @@ function parseV2(
     }
   }
 
+  const customFields = doc.custom_fields;
+  if (customFields !== undefined && customFields !== null) {
+    if (!Array.isArray(customFields)) {
+      throw invalid(
+        file,
+        `custom_fields must be a list of the project's own frontmatter key names ([review_ticket, estimate_days]), got ${describe(customFields)}.`,
+        "custom_fields",
+      );
+    }
+    for (const name of customFields) {
+      if (typeof name !== "string" || !CUSTOM_FIELD_PATTERN.test(name)) {
+        throw invalid(
+          file,
+          `custom_fields entry ${describe(name)} is not a key name: letters, digits, _ and -, starting with a letter or _.`,
+          "custom_fields",
+        );
+      }
+      if ((FRONTMATTER_KEYS as readonly string[]).includes(name)) {
+        throw invalid(
+          file,
+          `custom_fields names "${name}", a field the convention defines; list only the project's own keys.`,
+          "custom_fields",
+        );
+      }
+      if (config.customFields.includes(name)) {
+        throw invalid(
+          file,
+          `custom_fields lists "${name}" twice.`,
+          "custom_fields",
+        );
+      }
+      config.customFields.push(name);
+    }
+  }
+
   const projects = doc.projects;
   if (projects !== undefined && projects !== null) {
     if (!isMapping(projects)) {
@@ -549,6 +598,11 @@ export function renderConfig(config: Config): string {
     for (const [name, target] of docs) {
       lines.push(`  ${yamlScalar(name)}: ${yamlScalar(target)}`);
     }
+  }
+  if (config.customFields.length > 0) {
+    lines.push(
+      `custom_fields: [${config.customFields.map(yamlScalar).join(", ")}]`,
+    );
   }
   const aliases = Object.entries(config.projects);
   if (aliases.length > 0) {

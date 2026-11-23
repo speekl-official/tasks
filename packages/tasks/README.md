@@ -147,6 +147,7 @@ actors: # who tasks may be assigned to; once any is listed, other names are refu
 docs: # where the project's documentation lives; an agent brings it up to date before done
   engineering: docs/engineering
   api: ../api-docs
+custom_fields: [review_ticket] # the project's own frontmatter keys; once listed, a key outside the list is an error
 projects: # sibling trees, by alias
   backend: ../backend
 ```

@@ -39,6 +39,10 @@ describe("configTemplate", () => {
     expect({ ...detected.config.docs }).toEqual({
       engineering: "docs/engineering",
     });
+    expect(detected.config.customFields).toEqual([
+      "review_ticket",
+      "estimate_days",
+    ]);
     expect({ ...detected.config.projects }).toEqual({ backend: "../backend" });
   });
 
