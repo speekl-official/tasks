@@ -69,8 +69,9 @@ updated: "2026-09-21T16:40:12Z"
 ## Notes
 ```
 
-The frontmatter is **machine-owned**: every field has a command, and the CLI rewrites
-the block in canonical form. The markdown body is **yours** — edit it freely.
+The CLI writes the frontmatter in canonical form: the convention's fields change through
+it (every field has a command), and a key of the project's own is edited by hand only on
+the project's explicit instructions. The markdown body is **yours** — edit it freely.
 
 | Field             | Type                                 | Default  | Meaning                                                                                       |
 | ----------------- | ------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
@@ -140,7 +141,7 @@ whitespace when it writes the file.
 
 | File        | Concern                                         | Mode                                                        |
 | ----------- | ----------------------------------------------- | ----------------------------------------------------------- |
-| `task.md`   | Definition and acceptance; later inputs in Notes | Body edited in place; frontmatter machine-owned             |
+| `task.md`   | Definition and acceptance; later inputs in Notes | Body edited in place; the convention's fields through the CLI |
 | `state.md`  | Where the work is now: done, verified, open, next | Replaced in full through `tasks state` — never appended     |
 | `design.md` | Decisions and why; rejected alternatives        | Edited in place                                             |
 | `plan.md`   | How: steps, files, verification                 | Edited in place; may be superseded                          |

@@ -16,9 +16,11 @@ allowed-tools: Bash(tasks:*) Bash(TASKS_ACTOR=agent tasks:*) Bash(npx @speekl/ta
 Tasks live in `.tasks/` (convention v2): every task is a directory whose
 `task.md` holds the definition. Its id is its path, `auth-rework/token-schema`; a
 task inside another task is a part of the parent's deliverable. The `tasks` CLI
-owns the frontmatter and enforces the rules below. The markdown body of
-`task.md`, `design.md` and `plan.md` are yours to edit; `state.md` is written
-through `tasks state`; `log.md` is appended by the CLI.
+writes the frontmatter in canonical form and enforces the rules below: the
+convention's fields change through it, a key of the project's own by hand only
+on the project's explicit instructions. The markdown body of `task.md`,
+`design.md` and `plan.md` are yours to edit; `state.md` is written through
+`tasks state`; `log.md` is appended by the CLI.
 
 ## Before anything else
 

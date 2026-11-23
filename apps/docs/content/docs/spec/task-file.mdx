@@ -109,7 +109,7 @@ When an implementation writes a manifest, the frontmatter MUST be emitted in can
 2. Lists as flow sequences: `[a, b]`, or `[]` when empty.
 3. Timestamps always double-quoted; `null` for absent nullable values.
 4. Other scalars unquoted when they are unambiguous plain YAML, quoted otherwise.
-5. Comments are not preserved; the frontmatter block is machine-owned.
+5. Comments are not preserved; the block is rewritten whole on every write.
 
 The file is then `---`, newline, the frontmatter, newline, `---`, blank line, the body, one
 trailing newline. Repeated writes of unchanged state MUST produce identical bytes.

@@ -163,13 +163,13 @@ is effective priority, then `PAUSED` before `TODO`, then `created`.
 
 ## Workspace files
 
-| File        | Concern                                          | Mode                                     |
-| ----------- | ------------------------------------------------ | ---------------------------------------- |
-| `task.md`   | definition and acceptance; later inputs in Notes | body in place; frontmatter machine-owned |
-| `state.md`  | where the work is: done, verified, open, next    | replaced in full through `tasks state`   |
-| `design.md` | decisions and why; rejected alternatives         | edited in place                          |
-| `plan.md`   | steps, files, verification                       | edited in place                          |
-| `log.md`    | what happened, who, when                         | append-only, by the CLI                  |
+| File        | Concern                                          | Mode                                                                                                |
+| ----------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `task.md`   | definition and acceptance; later inputs in Notes | body in place; the convention's fields through the CLI, a project's key by hand on its instructions |
+| `state.md`  | where the work is: done, verified, open, next    | replaced in full through `tasks state`                                                              |
+| `design.md` | decisions and why; rejected alternatives         | edited in place                                                                                     |
+| `plan.md`   | steps, files, verification                       | edited in place                                                                                     |
+| `log.md`    | what happened, who, when                         | append-only, by the CLI                                                                             |
 
 `log.md` entries are a heading and free text:
 
