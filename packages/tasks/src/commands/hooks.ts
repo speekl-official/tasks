@@ -90,11 +90,22 @@ export function hooksCommand(): Command {
         discoveryOptions(global),
       );
       // A refresh acts as the actor the hooks already have: an upgrade must
-      // not change whose tasks a session sees.
+      // not change whose tasks a session sees. A refresh of hooks that name
+      // no actor leaves the choice to --actor rather than to the default.
+      const installed = await installedHooksActor(project.root);
+      if (
+        options.force === true &&
+        options.actor === undefined &&
+        installed.installed &&
+        installed.actor === null
+      ) {
+        throw TaskError.usage(
+          `Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.`,
+          { file: path.join(project.root, SETTINGS_RELATIVE_PATH) },
+        );
+      }
       const actor = assertActor(
-        options.actor ??
-          (await installedHooksActor(project.root)) ??
-          DEFAULT_HOOKS_ACTOR,
+        options.actor ?? installed.actor ?? DEFAULT_HOOKS_ACTOR,
         "--actor",
       );
 

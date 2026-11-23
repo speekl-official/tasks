@@ -239,35 +239,51 @@ export interface HooksInstallResult {
   skippedReason?: "exists";
 }
 
+/** The tasks hooks a settings file already holds, and the actor they name. */
+export interface InstalledHooks {
+  /** A tasks hook of some event is in the file. */
+  installed: boolean;
+  /**
+   * The `TASKS_ACTOR=` of the first tasks hook that names one, events in
+   * block order, quoted or not; `null` when none does.
+   */
+  actor: string | null;
+}
+
 /**
- * The actor the tasks hooks already in the settings act as — the
- * `TASKS_ACTOR=` of the first such hook, events in block order — or `null`
- * when there is none, or none names one. What `hooks install` acts as when
- * `--actor` is not given, so a refresh after an upgrade (`--force`) does not
- * turn hooks installed for one actor into hooks for the default.
+ * What `hooks install` acts as when `--actor` is not given: the actor the
+ * hooks already in the file act as, so a refresh after an upgrade
+ * (`--force`) does not turn hooks installed for one actor into hooks for the
+ * default. A refresh of hooks that name no actor leaves the choice to
+ * `--actor`.
  */
 export async function installedHooksActor(
   projectRoot: string,
-): Promise<string | null> {
+): Promise<InstalledHooks> {
   const settings = await readSettings(
     path.join(projectRoot, SETTINGS_RELATIVE_PATH),
   );
   const hooks = settings?.hooks;
-  if (!isRecord(hooks)) return null;
-  for (const event of HOOK_EVENTS) {
-    const entries = hooks[event];
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      for (const hook of hooksOf(entry)) {
-        if (!isTasksHook(event, hook) || !isRecord(hook)) continue;
-        const named = /TASKS_ACTOR=([A-Za-z0-9][A-Za-z0-9._@+-]*)/.exec(
-          String(hook.command),
-        );
-        if (named?.[1] !== undefined) return named[1];
+  let installed = false;
+  if (isRecord(hooks)) {
+    for (const event of HOOK_EVENTS) {
+      const entries = hooks[event];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        for (const hook of hooksOf(entry)) {
+          if (!isTasksHook(event, hook) || !isRecord(hook)) continue;
+          installed = true;
+          // The guide's spelling, or the same name quoted by hand.
+          const named =
+            /TASKS_ACTOR=(["']?)([A-Za-z0-9][A-Za-z0-9._@+-]*)\1(?![A-Za-z0-9._@+-])/.exec(
+              String(hook.command),
+            );
+          if (named?.[2] !== undefined) return { installed, actor: named[2] };
+        }
       }
     }
   }
-  return null;
+  return { installed, actor: null };
 }
 
 /**

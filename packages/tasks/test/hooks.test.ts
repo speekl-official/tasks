@@ -449,6 +449,51 @@ describe("hooks install", () => {
     expect(await settings(sandbox)).toEqual(await guideBlock("agent"));
   });
 
+  it("reads a quoted actor from the hooks, and asks for --actor when they name none", async () => {
+    sandbox = await treeSandbox({});
+    for (const quoted of ['"claude"', "'claude'"]) {
+      await sandbox.write(
+        SETTINGS,
+        JSON.stringify({
+          hooks: {
+            SessionStart: [
+              command(`TASKS_ACTOR=${quoted} tasks mine --json; exit 0`),
+            ],
+          },
+        }),
+      );
+      const refreshed = await install(sandbox, "--force", "--json");
+      expect(refreshed.json<HooksInstallJson>()).toMatchObject({
+        installed: true,
+        actor: "claude",
+      });
+      expect(await settings(sandbox)).toEqual(await guideBlock("claude"));
+    }
+
+    // Hooks that name no actor: a refresh would choose one for them.
+    const bare = {
+      hooks: { Stop: [command("tasks session-check --json; exit 0")] },
+    };
+    await sandbox.write(SETTINGS, JSON.stringify(bare));
+    const refused = await install(sandbox, "--force", "--json");
+    expect(refused.code).toBe(ExitCode.Usage);
+    expect((JSON.parse(refused.stderr) as ErrorJson).error.message).toBe(
+      "Could not determine the actor of the installed tasks hooks. Run tasks hooks install --force --actor <name> to choose the actor.",
+    );
+    expect(JSON.parse(await sandbox.read(SETTINGS))).toEqual(bare);
+    const chosen = await install(
+      sandbox,
+      "--force",
+      "--actor",
+      "bot",
+      "--json",
+    );
+    expect(chosen.json<HooksInstallJson>()).toMatchObject({
+      installed: true,
+      actor: "bot",
+    });
+  });
+
   it("refuses an --actor that is not an actor, and writes nothing", async () => {
     sandbox = await treeSandbox({});
     const result = await install(sandbox, "--actor", "two words", "--json");
